@@ -66,35 +66,35 @@ export default function TargetDetail() {
   return (
     <div className="flex flex-col gap-12 w-full max-w-7xl mx-auto pb-32 pt-6 px-4">
       {/* Top Navigation & Status */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div className="flex items-center gap-6">
-          <Link href="/targets" className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 transition-all backdrop-blur-xl group">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-8 sm:gap-6">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
+          <Link href="/targets" className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 transition-all backdrop-blur-xl group shrink-0">
             <ArrowLeft size={20} className="group-hover:-translate-x-1 transition-transform" />
           </Link>
-          <div>
-            <div className="flex items-center gap-4 mb-2">
-              <h1 className="text-5xl font-black tracking-tighter text-white">{targetData.name}</h1>
-              <div className="px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-[10px] text-indigo-400 font-black uppercase tracking-[0.2em]">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-4 mb-3">
+              <h1 className="text-3xl md:text-5xl font-black tracking-tighter text-white truncate max-w-full">{targetData.name}</h1>
+              <div className="px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-[10px] text-indigo-400 font-black uppercase tracking-[0.2em] whitespace-nowrap">
                 {targetData.sector} Hub
               </div>
             </div>
-            <div className="flex items-center gap-4">
-               <div className="flex items-center gap-2.5 px-3 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase tracking-widest">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+               <div className="flex items-center gap-2.5 px-3 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase tracking-widest w-fit">
                   <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live Analysis
                </div>
-               <p className="text-gray-500 text-xs font-black uppercase tracking-[0.2em]">
-                  Vault Access: <span className="text-gray-300">Classified</span> • Protocol: <span className="text-gray-300">Aethelgard-7</span>
+               <p className="text-gray-500 text-[10px] sm:text-xs font-black uppercase tracking-[0.2em] break-all">
+                  Vault: <span className="text-gray-300">Classified</span> • Protocol: <span className="text-gray-300">Aethelgard-7</span>
                </p>
             </div>
           </div>
         </div>
         
-        <div className="flex gap-4">
-          <button className="w-12 h-12 rounded-2xl bg-white/[0.03] border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 transition-all flex items-center justify-center">
+        <div className="flex gap-4 w-full lg:w-auto">
+          <button className="flex-1 lg:flex-none w-12 h-12 rounded-2xl bg-white/[0.03] border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 transition-all flex items-center justify-center">
             <Share2 size={20} />
           </button>
-          <button className="flex items-center gap-3 px-8 py-3 rounded-2xl bg-indigo-600 text-white font-black text-xs uppercase tracking-widest shadow-2xl shadow-indigo-600/40 hover:bg-indigo-500 transition-all active:scale-95">
-            <TrendingUp size={18} /> Forced Signal Fetch
+          <button className="flex-[4] lg:flex-none flex items-center justify-center gap-3 px-8 py-3 rounded-2xl bg-indigo-600 text-white font-black text-xs uppercase tracking-widest shadow-2xl shadow-indigo-600/40 hover:bg-indigo-500 transition-all active:scale-95">
+            <TrendingUp size={18} /> Signal Fetch
           </button>
         </div>
       </div>
@@ -102,10 +102,10 @@ export default function TargetDetail() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
         
         {/* Left Column - Core Metrics */}
-        <div className="lg:col-span-4 flex flex-col gap-8">
+        <div className="lg:col-span-4 flex flex-col gap-8 order-2 lg:order-1">
           
           {/* Main Priority Card */}
-          <div className="p-10 rounded-[3rem] bg-black/40 border border-indigo-500/20 relative overflow-hidden group shadow-2xl backdrop-blur-3xl">
+          <div className="p-6 md:p-10 rounded-[2.5rem] md:rounded-[3rem] bg-black/40 border border-indigo-500/20 relative overflow-hidden group shadow-2xl backdrop-blur-3xl">
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-600/10 via-transparent to-transparent opacity-50" />
             
             <div className="relative z-10">
@@ -194,50 +194,50 @@ export default function TargetDetail() {
         </div>
 
         {/* Center/Right Column - Intelligence & Narrative */}
-        <div className="lg:col-span-8 flex flex-col gap-10">
+        <div className="lg:col-span-8 flex flex-col gap-10 order-1 lg:order-2">
           
           {/* Intelligence Deep Dive */}
-          <div className="p-12 rounded-[3.5rem] bg-black/40 border border-white/10 backdrop-blur-3xl shadow-2xl relative overflow-hidden">
+          <div className="p-6 md:p-12 rounded-[2.5rem] md:rounded-[3.5rem] bg-black/40 border border-white/10 backdrop-blur-3xl shadow-2xl relative overflow-hidden">
             <div className="absolute top-0 right-0 p-12 opacity-[0.02]">
                <Fingerprint size={200} />
             </div>
             
-            <div className="flex items-center justify-between mb-12 relative z-10">
-              <h3 className="text-2xl font-black text-white flex items-center gap-4 tracking-tighter">
-                <div className="w-1.5 h-8 bg-indigo-600 rounded-full shadow-[0_0_15px_rgba(79,70,229,0.5)]" />
-                Strategic Origination Thesis
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-8 md:mb-12 relative z-10 gap-4">
+              <h3 className="text-xl md:text-2xl font-black text-white flex items-center gap-4 tracking-tighter text-left">
+                <div className="w-1.5 h-8 bg-indigo-600 rounded-full shadow-[0_0_15px_rgba(79,70,229,0.5)] shrink-0" />
+                Strategic Thesis
               </h3>
-              <div className="flex items-center gap-3 px-4 py-2 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[11px] font-black uppercase tracking-widest">
-                <Radio size={14} className="animate-pulse" /> Real-time Synthesis
+              <div className="flex items-center gap-3 px-4 py-2 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[11px] font-black uppercase tracking-widest w-fit">
+                <Radio size={14} className="animate-pulse" /> Live Synthesis
               </div>
             </div>
             
             <div className="relative z-10">
-              <p className="text-gray-300 leading-relaxed text-xl mb-12 font-medium tracking-tight">
-                {targetData.name} presents a <span className="text-white font-black underline decoration-indigo-500 decoration-2 underline-offset-8">high-probability intercept opportunity</span> within the {targetData.sector} cluster. Our neural engine has identified a rare convergence of <span className="text-indigo-400 font-black">executive churn</span> and <span className="text-indigo-400 font-black">pre-transactional structuring</span>. 
+              <p className="text-gray-300 leading-relaxed text-lg md:text-xl mb-12 font-medium tracking-tight text-left">
+                {targetData.name} presents a <span className="text-white font-black underline decoration-indigo-500 decoration-2 underline-offset-8">high-probability intercept opportunity</span>. Neural engine identified convergence of <span className="text-indigo-400 font-black">executive churn</span> and <span className="text-indigo-400 font-black">pre-transactional structuring</span>. 
               </p>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 my-12">
-                <div className="p-8 rounded-[2.5rem] bg-indigo-500/5 border border-indigo-500/20 group hover:bg-indigo-500/10 transition-all">
-                  <h4 className="text-white font-black text-xs uppercase tracking-[0.2em] mb-6 flex items-center gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 my-8 md:my-12">
+                <div className="p-6 md:p-8 rounded-[2rem] md:rounded-[2.5rem] bg-indigo-500/5 border border-indigo-500/20 group hover:bg-indigo-500/10 transition-all">
+                  <h4 className="text-white font-black text-[10px] uppercase tracking-[0.2em] mb-4 md:mb-6 flex items-center gap-3 text-left">
                     <Zap size={16} className="text-amber-500" /> Catalytic Anomalies
                   </h4>
-                  <ul className="text-sm text-gray-400 space-y-5">
+                  <ul className="text-xs md:text-sm text-gray-400 space-y-4 md:space-y-5 text-left">
                     <li className="flex gap-4 group/li">
                       <div className="w-1.5 h-1.5 rounded-full bg-indigo-600 mt-2 shrink-0 group-hover/li:scale-150 transition-transform" />
                       <span className="leading-relaxed">CFO transition detected; historical profile aligns with private equity exit strategies.</span>
                     </li>
                     <li className="flex gap-4 group/li">
                       <div className="w-1.5 h-1.5 rounded-full bg-indigo-600 mt-2 shrink-0 group-hover/li:scale-150 transition-transform" />
-                      <span className="leading-relaxed">Unusual dormant entity activation in high-tax jurisdictions suggests tax-efficient structuring for M&A.</span>
+                      <span className="leading-relaxed">Unusual dormant entity activation suggests tax-efficient structuring for M&A.</span>
                     </li>
                   </ul>
                 </div>
-                <div className="p-8 rounded-[2.5rem] bg-rose-500/5 border border-rose-500/20 group hover:bg-rose-500/10 transition-all">
-                  <h4 className="text-white font-black text-xs uppercase tracking-[0.2em] mb-6 flex items-center gap-3">
+                <div className="p-6 md:p-8 rounded-[2rem] md:rounded-[2.5rem] bg-rose-500/5 border border-rose-500/20 group hover:bg-rose-500/10 transition-all">
+                  <h4 className="text-white font-black text-[10px] uppercase tracking-[0.2em] mb-4 md:mb-6 flex items-center gap-3 text-left">
                     <Crosshair size={16} className="text-rose-500" /> Investment Precision
                   </h4>
-                  <ul className="text-sm text-gray-400 space-y-5">
+                  <ul className="text-xs md:text-sm text-gray-400 space-y-4 md:space-y-5 text-left">
                     <li className="flex gap-4 group/li">
                       <div className="w-1.5 h-1.5 rounded-full bg-rose-600 mt-2 shrink-0 group-hover/li:scale-150 transition-transform" />
                       <span className="leading-relaxed">Core component fit for "Project Nexus" rollup strategy within the EU healthcare cluster.</span>
@@ -253,13 +253,13 @@ export default function TargetDetail() {
           </div>
 
           {/* Sub-surface Signal Feed */}
-          <div className="p-12 rounded-[3.5rem] bg-black/40 border border-white/10 backdrop-blur-3xl shadow-2xl">
-            <div className="flex justify-between items-center mb-12">
-              <h3 className="text-2xl font-black text-white flex items-center gap-4 tracking-tighter">
-                <Clock className="text-gray-500" size={28} /> Signal Chronology
+          <div className="p-6 md:p-12 rounded-[2.5rem] md:rounded-[3.5rem] bg-black/40 border border-white/10 backdrop-blur-3xl shadow-2xl">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 md:mb-12 gap-4">
+              <h3 className="text-xl md:text-2xl font-black text-white flex items-center gap-4 tracking-tighter text-left">
+                <Clock className="text-gray-500" size={24} /> Signal Chronology
               </h3>
-              <button className="text-[10px] font-black text-indigo-400 uppercase tracking-widest hover:text-indigo-300 bg-indigo-500/5 px-4 py-2 rounded-xl border border-indigo-500/10">
-                Full Data Export
+              <button className="w-full sm:w-auto text-[10px] font-black text-indigo-400 uppercase tracking-widest hover:text-indigo-300 bg-indigo-500/5 px-4 py-2 rounded-xl border border-indigo-500/10">
+                Full Export
               </button>
             </div>
             
@@ -294,20 +294,20 @@ export default function TargetDetail() {
           </div>
 
           {/* Critical Actions */}
-          <div className="flex flex-col md:flex-row justify-between items-center p-12 rounded-[3.5rem] bg-indigo-600 shadow-[0_40px_80px_rgba(79,70,229,0.3)] border border-indigo-400 relative overflow-hidden group">
+          <div className="flex flex-col lg:flex-row justify-between items-center p-8 md:p-12 rounded-[2.5rem] md:rounded-[3.5rem] bg-indigo-600 shadow-[0_40px_80px_rgba(79,70,229,0.3)] border border-indigo-400 relative overflow-hidden group">
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-500 to-transparent pointer-events-none" />
             
-            <div className="relative z-10 mb-8 md:mb-0 text-center md:text-left">
-               <h4 className="text-2xl font-black text-white tracking-tighter mb-2">Initiate Engagement Protocol?</h4>
-               <p className="text-indigo-100 font-medium opacity-80 max-w-sm">Secure ownership of this target or generate a comprehensive PDF dossier for the investment committee.</p>
+            <div className="relative z-10 mb-8 lg:mb-0 text-center lg:text-left">
+               <h4 className="text-xl md:text-2xl font-black text-white tracking-tighter mb-2">Protocol Initiation</h4>
+               <p className="text-indigo-100 font-medium opacity-80 max-w-sm text-sm md:text-base">Secure ownership or generate a PDF dossier for the investment committee.</p>
             </div>
             
-            <div className="flex flex-wrap justify-center gap-6 relative z-10">
-               <button className="px-10 py-4 rounded-[2rem] bg-white/10 border border-white/20 text-white font-black text-xs uppercase tracking-widest hover:bg-white/20 transition-all backdrop-blur-xl active:scale-95">
-                  Assign Sector Lead
+            <div className="flex flex-col sm:flex-row justify-center gap-4 sm:gap-6 relative z-10 w-full lg:w-auto">
+               <button className="flex-1 sm:flex-none px-10 py-4 rounded-[2rem] bg-white/10 border border-white/20 text-white font-black text-xs uppercase tracking-widest hover:bg-white/20 transition-all backdrop-blur-xl active:scale-95">
+                  Sector Lead
                </button>
-                <Link href={`/targets/${id}/report`} className="px-12 py-4 rounded-[2rem] bg-white text-black font-black text-xs uppercase tracking-widest hover:bg-indigo-50 transition-all flex items-center gap-3 shadow-2xl active:scale-95 group/btn">
-                  Generate Intercept PDF <ArrowRight size={18} className="group-hover/btn:translate-x-1 transition-transform" />
+                <Link href={`/targets/${id}/report`} className="flex-1 sm:flex-none px-12 py-4 rounded-[2rem] bg-white text-black font-black text-xs uppercase tracking-widest hover:bg-indigo-50 transition-all flex items-center justify-center gap-3 shadow-2xl active:scale-95 group/btn">
+                  PDF Dossier <ArrowRight size={18} className="group-hover/btn:translate-x-1 transition-transform" />
                 </Link>
             </div>
           </div>

@@ -3,9 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LayoutDashboard, Target, Network, Layers, Activity, Search, Sparkles, Zap, ShieldCheck, Settings, LogOut, ChevronRight, Fingerprint } from "lucide-react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 
-export default function Sidebar() {
+export default function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean, setIsOpen: (o: boolean) => void }) {
   const pathname = usePathname();
   
   const navItems = [
@@ -17,21 +17,44 @@ export default function Sidebar() {
   ];
 
   return (
-    <aside className="w-72 h-screen bg-black/40 backdrop-blur-3xl border-r border-white/5 flex flex-col p-6 fixed left-0 top-0 z-[100] transition-all duration-500 hover:border-white/10">
-      {/* Branding */}
-      <div className="flex items-center gap-4 px-2 py-6 mb-8 group cursor-pointer">
-        <div className="w-12 h-12 rounded-[1.2rem] bg-indigo-600 flex items-center justify-center shadow-[0_0_30px_rgba(79,70,229,0.4)] border border-white/10 group-hover:scale-110 transition-transform duration-500 relative overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent" />
-          <Zap size={24} className="text-white relative z-10" />
-        </div>
-        <div>
-          <span className="text-white font-black text-lg tracking-tighter uppercase block leading-none">Aethelgard</span>
-          <div className="flex items-center gap-1.5 mt-1">
-             <div className="w-1 h-1 rounded-full bg-indigo-500" />
-             <span className="text-[9px] font-black text-indigo-400 uppercase tracking-[0.2em] leading-none">Transactional Engine</span>
+    <>
+      {/* Mobile Backdrop */}
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setIsOpen(false)}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[90] lg:hidden"
+          />
+        )}
+      </AnimatePresence>
+
+      <aside className={`
+        fixed left-0 top-0 h-screen bg-black/40 backdrop-blur-3xl border-r border-white/5 flex flex-col p-6 z-[100] transition-all duration-500 
+        ${isOpen ? "translate-x-0 w-72" : "-translate-x-full lg:translate-x-0 w-72"}
+        lg:hover:border-white/10
+      `}>
+        {/* Branding */}
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center gap-4 px-2 py-4 group cursor-pointer">
+            <div className="w-10 h-10 rounded-[1.2rem] bg-indigo-600 flex items-center justify-center shadow-[0_0_30px_rgba(79,70,229,0.4)] border border-white/10 group-hover:scale-110 transition-transform duration-500 relative overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent" />
+              <Zap size={20} className="text-white relative z-10" />
+            </div>
+            <div>
+              <span className="text-white font-black text-base tracking-tighter uppercase block leading-none">Aethelgard</span>
+              <div className="flex items-center gap-1.5 mt-1">
+                 <div className="w-1 h-1 rounded-full bg-indigo-500" />
+                 <span className="text-[8px] font-black text-indigo-400 uppercase tracking-[0.2em] leading-none">Transactional Engine</span>
+              </div>
+            </div>
           </div>
+          <button onClick={() => setIsOpen(false)} className="lg:hidden text-gray-400 hover:text-white">
+             <ChevronRight className="rotate-180" size={24} />
+          </button>
         </div>
-      </div>
 
       {/* Global Search Trigger */}
       <div className="relative mb-10 group cursor-pointer" onClick={() => {
@@ -136,6 +159,7 @@ export default function Sidebar() {
         </div>
       </div>
     </aside>
+    </>
   );
 }
 

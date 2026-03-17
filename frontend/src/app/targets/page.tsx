@@ -88,7 +88,7 @@ export default function TargetsPage() {
               initial={{ x: "100%" }}
               animate={{ x: 0 }}
               exit={{ x: "100%" }}
-              className="fixed top-0 right-0 bottom-0 w-96 bg-[#0a0a0a] border-l border-white/10 z-[101] p-10 shadow-[0_0_100px_rgba(0,0,0,0.8)] flex flex-col"
+              className="fixed top-0 right-0 bottom-0 w-full sm:w-96 bg-[#0a0a0a] border-l border-white/10 z-[101] p-6 sm:p-10 shadow-[0_0_100px_rgba(0,0,0,0.8)] flex flex-col"
             >
               <div className="flex items-center justify-between mb-10">
                 <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Engine Filters</h2>
@@ -158,21 +158,21 @@ export default function TargetsPage() {
       </AnimatePresence>
 
       {/* Header */}
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 shrink-0">
+      <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 shrink-0">
         <div>
-          <h1 className="text-5xl font-black tracking-tighter text-white mb-3 flex items-center gap-5">
+          <h1 className="text-3xl md:text-5xl font-black tracking-tighter text-white mb-3 flex flex-wrap items-center gap-4 sm:gap-5">
             Intelligence Vault
             <div className="px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-[10px] text-indigo-400 font-black uppercase tracking-[0.2em]">
                {filteredAndSortedTargets.length} Entities Proxied
             </div>
           </h1>
-          <p className="text-gray-400 text-lg font-medium max-w-2xl leading-relaxed">
+          <p className="text-gray-400 text-base md:text-lg font-medium max-w-2xl leading-relaxed">
             Universal directory of analyzed entities. Calibrated by <span className="text-white">Aethelgard High-Fidelity Scoring</span>.
           </p>
         </div>
         
-        <div className="flex gap-4">
-          <div className="relative group">
+        <div className="flex flex-col sm:flex-row gap-4 w-full lg:w-auto">
+          <div className="relative group w-full lg:w-80">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-indigo-400 transition-colors">
                <Search size={20} />
             </span>
@@ -180,29 +180,31 @@ export default function TargetsPage() {
                type="text" 
                value={search}
                onChange={(e) => setSearch(e.target.value)}
-               placeholder="Intercept company, sector or thesis..." 
-               className="w-96 bg-white/[0.03] border border-white/10 rounded-[2rem] py-4 pl-14 pr-6 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-indigo-500/50 focus:bg-white/[0.05] transition-all backdrop-blur-md"
+               placeholder="Intercept company..." 
+               className="w-full bg-white/[0.03] border border-white/10 rounded-[2rem] py-4 pl-14 pr-6 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-indigo-500/50 focus:bg-white/[0.05] transition-all backdrop-blur-md"
             />
           </div>
-          <button 
-            onClick={() => setShowFilters(true)}
-            className={`px-6 py-4 rounded-[2rem] transition-all flex items-center gap-3 font-black text-[11px] uppercase tracking-widest
-              ${selectedSectors.length > 0 || minScore > 40 ? "bg-indigo-600 border border-indigo-500 text-white shadow-2xl shadow-indigo-600/30" : "bg-white/[0.03] border border-white/10 text-white hover:bg-white/10"}
-            `}
-          >
-            <SlidersHorizontal size={18} /> Scoping {(selectedSectors.length > 0) && `(${selectedSectors.length})`}
-          </button>
-          <button className="px-6 py-4 rounded-[2rem] bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-600 hover:text-white transition-all flex items-center gap-3 font-black text-[11px] uppercase tracking-widest active:scale-95 shadow-2xl">
-            <Download size={18} /> Export Intelligence
-          </button>
+          <div className="flex gap-4 w-full sm:w-auto">
+            <button 
+              onClick={() => setShowFilters(true)}
+              className={`flex-1 sm:flex-none px-6 py-4 rounded-[2rem] transition-all flex items-center justify-center gap-3 font-black text-[11px] uppercase tracking-widest
+                ${selectedSectors.length > 0 || minScore > 40 ? "bg-indigo-600 border border-indigo-500 text-white shadow-2xl shadow-indigo-600/30" : "bg-white/[0.03] border border-white/10 text-white hover:bg-white/10"}
+              `}
+            >
+              <SlidersHorizontal size={18} /> Scoping {(selectedSectors.length > 0) && `(${selectedSectors.length})`}
+            </button>
+            <button className="flex-1 sm:flex-none px-6 py-4 rounded-[2rem] bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-600 hover:text-white transition-all flex items-center justify-center gap-3 font-black text-[11px] uppercase tracking-widest active:scale-95 shadow-2xl">
+              <Download size={18} /> <span className="sm:hidden lg:inline">Export</span>
+            </button>
+          </div>
         </div>
       </header>
 
       {/* Table Area */}
       <div className="flex-1 bg-black/40 border border-white/10 rounded-[3rem] overflow-hidden flex flex-col shadow-2xl backdrop-blur-3xl relative">
         
-        {/* Table Header */}
-        <div className="grid grid-cols-12 gap-6 px-10 py-6 border-b border-white/10 bg-white/[0.02] text-[11px] font-black text-gray-500 uppercase tracking-[0.2em]">
+        {/* Table Header - Desktop Only */}
+        <div className="hidden lg:grid grid-cols-12 gap-6 px-10 py-6 border-b border-white/10 bg-white/[0.02] text-[11px] font-black text-gray-500 uppercase tracking-[0.2em]">
           <div 
             className="col-span-4 flex items-center gap-3 cursor-pointer hover:text-white transition-colors"
             onClick={() => handleSort("name")}
@@ -252,32 +254,40 @@ export default function TargetsPage() {
                     transition={{ duration: 0.3, delay: idx * 0.05 }}
                     key={target.id}
                     onClick={() => router.push(`/targets/${target.id}`)}
-                    className="grid grid-cols-12 gap-6 px-10 py-7 items-center hover:bg-white/[0.04] transition-all cursor-pointer group active:scale-[0.998] relative"
+                    className="flex flex-col lg:grid lg:grid-cols-12 gap-4 lg:gap-6 px-6 lg:px-10 py-6 lg:py-7 items-start lg:items-center hover:bg-white/[0.04] transition-all cursor-pointer group active:scale-[0.998] relative overflow-hidden"
                   >
-                    <div className="col-span-4 flex items-center gap-5">
-                      <div className="w-14 h-14 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-gray-500 group-hover:text-indigo-400 group-hover:bg-indigo-500/10 group-hover:border-indigo-500/30 transition-all shadow-xl">
+                    <div className="w-full lg:col-span-4 flex items-center gap-4 lg:gap-5">
+                      <div className="w-12 h-12 lg:w-14 lg:h-14 rounded-xl lg:rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-gray-500 group-hover:text-indigo-400 group-hover:bg-indigo-500/10 group-hover:border-indigo-500/30 transition-all shadow-xl shrink-0">
                          <Building size={24} />
                       </div>
-                      <div>
-                        <div className="font-black text-white text-lg group-hover:text-indigo-400 transition-colors tracking-tighter leading-none mb-2">{target.name}</div>
-                        <div className="text-[10px] font-black text-gray-700 uppercase tracking-[0.2em]">{target.id}</div>
+                      <div className="min-w-0">
+                        <div className="font-black text-white text-base lg:text-lg group-hover:text-indigo-400 transition-colors tracking-tighter leading-tight mb-1 truncate">{target.name}</div>
+                        <div className="text-[9px] font-black text-gray-700 uppercase tracking-[0.2em]">{target.id}</div>
                       </div>
                     </div>
-                    <div className="col-span-2">
-                      <span className="px-3 py-1.5 rounded-xl text-[10px] font-black tracking-widest uppercase bg-indigo-500/5 text-indigo-400/80 border border-indigo-500/10 group-hover:border-indigo-500/30 transition-all">
+
+                    <div className="w-full lg:col-span-2 flex items-center justify-between lg:block">
+                      <span className="lg:hidden text-[9px] font-black text-gray-600 uppercase tracking-widest">Sector</span>
+                      <span className="px-3 py-1 lg:py-1.5 rounded-xl text-[10px] font-black tracking-widest uppercase bg-indigo-500/5 text-indigo-400/80 border border-indigo-500/10 group-hover:border-indigo-500/30 transition-all">
                         {target.sector}
                       </span>
                     </div>
-                    <div className="col-span-3">
-                      <div className="text-base text-gray-200 font-bold tracking-tight mb-1">{target.dealType}</div>
-                      <div className="text-[10px] font-black text-gray-600 uppercase tracking-[0.2em]">{target.timeframe} Range</div>
+
+                    <div className="w-full lg:col-span-3 flex items-center justify-between lg:block">
+                      <div className="lg:hidden text-[9px] font-black text-gray-600 uppercase tracking-widest">Thesis</div>
+                      <div className="text-right lg:text-left">
+                        <div className="text-sm lg:text-base text-gray-200 font-bold tracking-tight mb-0.5">{target.dealType}</div>
+                        <div className="text-[9px] lg:text-[10px] font-black text-gray-600 uppercase tracking-[0.2em]">{target.timeframe} Range</div>
+                      </div>
                     </div>
-                    <div className="col-span-2 flex justify-end">
-                      <div className="flex flex-col items-end">
-                        <span className="text-4xl font-black bg-clip-text text-transparent bg-gradient-to-b from-white to-gray-800 leading-none tracking-tighter">
+
+                    <div className="w-full lg:col-span-2 flex items-center justify-between lg:justify-end lg:text-right">
+                      <span className="lg:hidden text-[9px] font-black text-gray-600 uppercase tracking-widest">Confidence</span>
+                      <div className="flex items-center gap-4 lg:flex-col lg:items-end lg:gap-0">
+                        <span className="text-2xl lg:text-4xl font-black bg-clip-text text-transparent bg-gradient-to-b from-white to-gray-800 leading-none tracking-tighter">
                           {target.priorityScore}
                         </span>
-                        <div className="w-20 h-1.5 bg-white/5 rounded-full mt-3 overflow-hidden p-[1px]">
+                        <div className="hidden lg:block w-20 h-1.5 bg-white/5 rounded-full mt-3 overflow-hidden p-[1px]">
                            <motion.div 
                              initial={{ width: 0 }}
                              animate={{ width: `${target.priorityScore}%` }}
@@ -286,9 +296,10 @@ export default function TargetsPage() {
                         </div>
                       </div>
                     </div>
-                    <div className="col-span-1 flex justify-end">
-                      <div className="w-10 h-10 rounded-2xl bg-white/5 flex items-center justify-center text-gray-600 group-hover:text-white group-hover:bg-indigo-600 transition-all border border-white/5 group-hover:border-indigo-400 shadow-2xl active:scale-90">
-                        <ChevronRight size={22} />
+
+                    <div className="absolute right-6 top-1/2 -translate-y-1/2 lg:relative lg:right-0 lg:top-0 lg:translate-y-0 lg:col-span-1 flex justify-end">
+                      <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-xl lg:rounded-2xl bg-white/5 flex items-center justify-center text-gray-600 group-hover:text-white group-hover:bg-indigo-600 transition-all border border-white/5 group-hover:border-indigo-400 shadow-2xl active:scale-90">
+                        <ChevronRight size={20} />
                       </div>
                     </div>
                   </motion.div>

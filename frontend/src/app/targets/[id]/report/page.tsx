@@ -58,21 +58,21 @@ export default function ReportPage() {
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-4xl bg-white text-black p-12 md:p-20 rounded-[3rem] shadow-[0_0_100px_rgba(255,255,255,0.05)] print:shadow-none print:rounded-none flex flex-col gap-12"
+        className="w-full max-w-4xl bg-white text-black p-6 sm:p-12 md:p-20 rounded-[2rem] sm:rounded-[3rem] shadow-[0_0_100px_rgba(255,255,255,0.05)] print:shadow-none print:rounded-none flex flex-col gap-8 sm:gap-12"
       >
         {/* Document Header */}
-        <div className="flex justify-between items-start border-b-4 border-black pb-12">
+        <div className="flex flex-col sm:flex-row justify-between items-start border-b-4 border-black pb-8 sm:pb-12 gap-6">
           <div>
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 bg-black flex items-center justify-center rounded-xl">
                  <Zap size={20} className="text-white" />
               </div>
-              <span className="font-black text-2xl tracking-tighter uppercase">Aethelgard</span>
+              <span className="font-black text-xl sm:text-2xl tracking-tighter uppercase">Aethelgard</span>
             </div>
-            <h1 className="text-5xl font-black tracking-tighter mb-2">TARGET DOSSIER</h1>
-            <p className="text-gray-500 font-bold uppercase tracking-[0.2em] text-xs">Internal Strategic Intelligence • {new Date().toLocaleDateString()}</p>
+            <h1 className="text-3xl sm:text-5xl font-black tracking-tighter mb-2">TARGET DOSSIER</h1>
+            <p className="text-gray-500 font-bold uppercase tracking-[0.2em] text-[10px] sm:text-xs">Internal Strategic Intelligence • {new Date().toLocaleDateString()}</p>
           </div>
-          <div className="text-right">
+          <div className="text-left sm:text-right">
              <div className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1">Status</div>
              <div className="px-4 py-1.5 bg-black text-white rounded-lg font-black text-[10px] uppercase tracking-widest">Highly Confidential</div>
           </div>
@@ -122,17 +122,17 @@ export default function ReportPage() {
         </section>
 
         {/* Intelligence Synthesis */}
-        <section className="bg-gray-50 p-12 rounded-[3.5rem] border border-gray-100">
+        <section className="bg-gray-50 p-6 sm:p-12 rounded-[2.5rem] sm:rounded-[3.5rem] border border-gray-100">
            <h2 className="text-[10px] font-black uppercase tracking-[0.3em] text-gray-400 mb-8 flex items-center gap-3">
               <Activity size={16} className="text-black" /> 02. Neural Synthesis
            </h2>
            <div className="space-y-8">
-              <div className="p-8 bg-white rounded-[2rem] border border-gray-200 relative overflow-hidden">
+              <div className="p-6 sm:p-8 bg-white rounded-[1.5rem] sm:rounded-[2rem] border border-gray-200 relative overflow-hidden">
                  <div className="absolute top-0 right-0 p-8 opacity-[0.03]">
                     <Target size={120} />
                  </div>
-                 <h3 className="text-lg font-black mb-4 relative z-10">Strategic Thesis</h3>
-                 <p className="text-gray-600 leading-relaxed font-medium relative z-10">
+                 <h3 className="text-lg font-black mb-4 relative z-10 text-left">Strategic Thesis</h3>
+                 <p className="text-gray-600 leading-relaxed font-medium relative z-10 text-sm sm:text-base text-left">
                     The entity's current capital structure and recent executive activity indicate a pre-transactional phase. Our proprietary "Aethelgard-7" protocol identifies a high convergence of liquidity pressure and succession needs.
                  </p>
               </div>
@@ -164,19 +164,19 @@ export default function ReportPage() {
 
         {/* Network & Access */}
         <section>
-           <h2 className="text-[10px] font-black uppercase tracking-[0.3em] text-gray-400 mb-8">03. Network Intelligence</h2>
+           <h2 className="text-[10px] font-black uppercase tracking-[0.3em] text-gray-400 mb-8 text-left">03. Network Intelligence</h2>
            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="p-6 border border-gray-200 rounded-3xl">
+              <div className="p-6 border border-gray-200 rounded-3xl text-left">
                  <Users size={20} className="mb-4 opacity-50" />
                  <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Entry Path</div>
                  <div className="text-xs font-bold leading-relaxed">{target.accessibility}</div>
               </div>
-              <div className="p-6 border border-gray-200 rounded-3xl">
+              <div className="p-6 border border-gray-200 rounded-3xl text-left">
                  <Briefcase size={20} className="mb-4 opacity-50" />
                  <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Entity Cluster</div>
                  <div className="text-xs font-bold">{target.sector} Deep-Tech</div>
               </div>
-              <div className="p-6 border border-gray-200 rounded-3xl">
+              <div className="p-6 border border-gray-200 rounded-3xl text-left">
                  <MapPin size={20} className="mb-4 opacity-50" />
                  <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Dominant Region</div>
                  <div className="text-xs font-bold uppercase tracking-widest">European Union</div>
@@ -185,9 +185,9 @@ export default function ReportPage() {
         </section>
 
         {/* Footer */}
-        <div className="mt-12 pt-12 border-t border-gray-200 flex justify-between items-center text-[8px] font-black text-gray-400 uppercase tracking-[0.4em]">
+        <div className="mt-8 sm:mt-12 pt-8 sm:pt-12 border-t border-gray-200 flex flex-col sm:flex-row justify-between items-center text-[7px] sm:text-[8px] font-black text-gray-400 uppercase tracking-[0.2em] sm:tracking-[0.4em] gap-4 text-center sm:text-left">
            <span>AETHELGARD-DOSSIER-V1</span>
-           <span>SECURE TRANSMISSION PROTOCOL: ENABLED</span>
+           <span className="hidden sm:inline">SECURE TRANSMISSION PROTOCOL: ENABLED</span>
            <span>ID: {target.id.toUpperCase()}-{Math.random().toString(36).substring(7).toUpperCase()}</span>
         </div>
       </motion.div>

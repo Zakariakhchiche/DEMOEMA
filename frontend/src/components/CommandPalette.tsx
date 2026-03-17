@@ -81,23 +81,29 @@ export function CommandPalette() {
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="fixed left-1/2 top-[15%] -translate-x-1/2 w-full max-w-2xl bg-[#0a0a0a] border border-white/10 rounded-2xl shadow-[0_0_80px_rgba(0,0,0,0.8)] z-[101] overflow-hidden"
+            className="fixed left-0 sm:left-1/2 top-0 sm:top-[12%] sm:-translate-x-1/2 w-full max-w-2xl h-full sm:h-auto bg-[#0a0a0a] border-b sm:border border-white/10 sm:rounded-2xl shadow-[0_0_80px_rgba(0,0,0,0.8)] z-[101] overflow-hidden flex flex-col"
           >
-            <div className="flex items-center gap-4 p-5 border-b border-white/10">
-              <Search className="text-indigo-500" size={24} />
+            <div className="flex items-center gap-4 p-4 sm:p-5 border-b border-white/10 shrink-0">
+              <Search className="text-indigo-500 shrink-0" size={20} />
               <input
                 autoFocus
-                placeholder="Search entities, signals, patterns..."
-                className="flex-1 bg-transparent border-none outline-none text-white text-xl placeholder-gray-600 font-medium"
+                placeholder="Search engine..."
+                className="flex-1 bg-transparent border-none outline-none text-white text-lg sm:text-xl placeholder-gray-600 font-medium"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-[10px] text-gray-500 font-black tracking-widest uppercase">
-                ESC Close
+              <button 
+                onClick={() => setIsOpen(false)}
+                className="sm:hidden p-2 text-gray-400 hover:text-white"
+              >
+                <X size={20} />
+              </button>
+              <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-[10px] text-gray-500 font-black tracking-widest uppercase">
+                ESC
               </div>
             </div>
 
-            <div className="max-h-[450px] overflow-y-auto p-4 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
               
               {/* Pages Section */}
               {filteredPages.length > 0 && (

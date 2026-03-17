@@ -50,18 +50,18 @@ export default function Home() {
           </p>
         </div>
         
-        <div className="flex gap-4">
-          <button className="px-6 py-3 rounded-2xl bg-white/[0.03] border border-white/10 text-[11px] font-black uppercase tracking-widest text-white hover:bg-white/10 transition-all flex items-center gap-3 backdrop-blur-md">
-            <Activity size={16} className="text-indigo-500" /> System Diagnostics
+        <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
+          <button className="px-6 py-3 rounded-2xl bg-white/[0.03] border border-white/10 text-[11px] font-black uppercase tracking-widest text-white hover:bg-white/10 transition-all flex items-center justify-center gap-3 backdrop-blur-md">
+            <Activity size={16} className="text-indigo-500" /> <span className="hidden sm:inline">System Diagnostics</span>
           </button>
-          <button className="px-6 py-3 rounded-2xl bg-indigo-600 text-white shadow-[0_20px_40px_rgba(79,70,229,0.3)] hover:bg-indigo-500 transition-all flex items-center gap-3 font-black text-[11px] uppercase tracking-widest active:scale-95">
+          <button className="px-6 py-3 rounded-2xl bg-indigo-600 text-white shadow-[0_20px_40px_rgba(79,70,229,0.3)] hover:bg-indigo-500 transition-all flex items-center justify-center gap-3 font-black text-[11px] uppercase tracking-widest active:scale-95">
             <Sparkles size={16} /> Force Recalibration
           </button>
         </div>
       </header>
 
       {/* KPI Section */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         {loading
           ? Array.from({ length: 4 }).map((_, i) => <SkeletonKPI key={i} />)
           : [
@@ -102,12 +102,12 @@ export default function Home() {
         
         {/* Targets Feed */}
         <div className="lg:col-span-8 flex flex-col gap-6">
-          <div className="flex justify-between items-center mb-2">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
             <h2 className="text-xs font-black text-white uppercase tracking-[0.3em] flex items-center gap-4">
-              <div className="w-1.5 h-6 bg-indigo-600 rounded-full shadow-[0_0_15px_rgba(79,70,229,0.5)]" /> 
+              <div className="hidden sm:block w-1.5 h-6 bg-indigo-600 rounded-full shadow-[0_0_15px_rgba(79,70,229,0.5)]" /> 
               High Confidence Origination Trajectories
             </h2>
-            <button onClick={() => router.push("/targets")} className="text-[10px] font-black text-indigo-400 hover:text-indigo-300 uppercase tracking-widest transition-colors flex items-center gap-2 bg-indigo-500/5 px-5 py-2.5 rounded-2xl border border-indigo-500/10 hover:border-indigo-500/30">
+            <button onClick={() => router.push("/targets")} className="w-full sm:w-auto text-[10px] font-black text-indigo-400 hover:text-indigo-300 uppercase tracking-widest transition-colors flex items-center justify-center gap-2 bg-indigo-500/5 px-5 py-2.5 rounded-2xl border border-indigo-500/10 hover:border-indigo-500/30">
               Intelligence Vault <ChevronRight size={16} />
             </button>
           </div>
@@ -177,8 +177,8 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="mt-10 pt-8 border-t border-white/[0.05] flex justify-between items-center relative z-10">
-                  <div className="flex gap-12">
+                <div className="mt-10 pt-8 border-t border-white/[0.05] flex flex-col md:flex-row justify-between items-start md:items-center gap-6 relative z-10">
+                  <div className="flex gap-8 sm:gap-12">
                     <div className="space-y-1.5">
                       <span className="text-[10px] font-black text-gray-600 uppercase tracking-widest block">Core Thesis</span>
                       <span className="text-base text-gray-200 font-bold tracking-tight">{target.dealType}</span>
@@ -189,7 +189,7 @@ export default function Home() {
                     </div>
                   </div>
                   
-                  <button className="flex items-center gap-3 px-8 py-3.5 rounded-2xl bg-white text-black font-black text-[11px] uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition-all shadow-2xl shadow-black/50 active:scale-95 group/btn">
+                  <button className="w-full md:w-auto flex items-center justify-center gap-3 px-8 py-3.5 rounded-2xl bg-white text-black font-black text-[11px] uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition-all shadow-2xl shadow-black/50 active:scale-95 group/btn">
                     Open Intercept Data <ChevronRight size={18} className="group-hover/btn:translate-x-1 transition-transform" />
                   </button>
                 </div>

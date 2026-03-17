@@ -82,10 +82,10 @@ export default function GlobalCopilot() {
           initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
           onClick={() => setIsOpen(true)}
-          className="fixed bottom-8 right-8 z-[100] w-14 h-14 rounded-2xl bg-indigo-600 text-white shadow-[0_0_30px_rgba(99,102,241,0.5)] flex items-center justify-center hover:bg-indigo-500 transition-all border border-indigo-400 group"
+          className="fixed bottom-4 right-4 sm:bottom-8 sm:right-8 z-[100] w-12 h-12 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl bg-indigo-600 text-white shadow-[0_0_30px_rgba(99,102,241,0.5)] flex items-center justify-center hover:bg-indigo-500 transition-all border border-indigo-400 group"
         >
-          <Sparkles size={24} className="group-hover:rotate-12 transition-transform" />
-          <div className="absolute -top-1 -right-1 w-4 h-4 bg-amber-500 rounded-full border-2 border-[#050505] animate-pulse" />
+          <Sparkles size={20} className="sm:size-24 group-hover:rotate-12 transition-transform" />
+          <div className="absolute -top-1 -right-1 w-3 h-3 sm:w-4 sm:h-4 bg-amber-500 rounded-full border-2 border-[#050505] animate-pulse" />
         </motion.button>
       )}
 
@@ -96,8 +96,8 @@ export default function GlobalCopilot() {
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: "100%", opacity: 0 }}
             transition={{ type: "spring", damping: 25, stiffness: 200 }}
-            className={`fixed top-4 right-4 bottom-4 z-[110] bg-black/80 border border-white/10 backdrop-blur-2xl rounded-[2.5rem] shadow-[0_0_100px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden transition-all duration-300
-              ${isMinimized ? "w-20 h-20 overflow-hidden" : "w-96 md:w-[28rem]"}
+            className={`fixed top-0 right-0 sm:top-4 sm:right-4 bottom-0 sm:bottom-4 z-[110] bg-black/80 border-l sm:border border-white/10 backdrop-blur-3xl sm:rounded-[2.5rem] shadow-[0_0_100px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden transition-all duration-300
+              ${isMinimized ? "w-20 h-20 overflow-hidden" : "w-full sm:w-96 md:w-[28rem]"}
             `}
           >
             {/* Header */}

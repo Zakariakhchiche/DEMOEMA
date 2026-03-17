@@ -124,36 +124,38 @@ export default function PipelinePage() {
   return (
     <div className="flex flex-col gap-10 w-full max-w-full mx-auto h-[calc(100vh-8rem)] py-4 overflow-hidden relative">
       {/* Header */}
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 px-4 shrink-0">
+      <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 px-4 shrink-0">
         <div>
-          <h1 className="text-5xl font-black tracking-tighter text-white mb-3 flex items-center gap-5">
+          <h1 className="text-3xl md:text-5xl font-black tracking-tighter text-white mb-3 flex flex-wrap items-center gap-4 sm:gap-5">
             Pipeline Command
             <div className="flex items-center gap-2.5 px-4 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[10px] text-emerald-400 font-black uppercase tracking-[0.2em]">
                <Radio size={14} className="animate-pulse" /> Live Flow
             </div>
           </h1>
-          <p className="text-gray-400 text-lg font-medium max-w-2xl leading-relaxed">
+          <p className="text-gray-400 text-base md:text-lg font-medium max-w-2xl leading-relaxed">
             Active origination lifecycle management. Coordinating <span className="text-white">anomaly detection</span> to deal execution.
           </p>
         </div>
         
-        <div className="flex gap-4">
-           <div className="flex -space-x-3 items-center mr-4">
+        <div className="flex flex-col sm:flex-row gap-4 w-full lg:w-auto items-center">
+           <div className="hidden sm:flex -space-x-3 items-center mr-4">
               {[1, 2, 3, 4].map(i => (
-                <div key={i} className="w-10 h-10 rounded-2xl bg-black border-2 border-[#0a0a0a] ring-2 ring-white/5 flex items-center justify-center text-[11px] font-black text-white bg-gradient-to-br from-white/10 to-transparent backdrop-blur-xl">
+                <div key={i} className="w-8 h-8 lg:w-10 lg:h-10 rounded-xl lg:rounded-2xl bg-black border-2 border-[#0a0a0a] ring-2 ring-white/5 flex items-center justify-center text-[10px] lg:text-[11px] font-black text-white bg-gradient-to-br from-white/10 to-transparent backdrop-blur-xl">
                    {String.fromCharCode(64 + i)}
                 </div>
               ))}
-              <div className="w-10 h-10 rounded-2xl bg-indigo-600 border-2 border-[#0a0a0a] ring-2 ring-indigo-500/30 flex items-center justify-center text-[10px] font-black text-white relative z-10 shadow-lg">
+              <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-xl lg:rounded-2xl bg-indigo-600 border-2 border-[#0a0a0a] ring-2 ring-indigo-500/30 flex items-center justify-center text-[9px] lg:text-[10px] font-black text-white relative z-10 shadow-lg">
                  +12
               </div>
            </div>
-           <button className="px-6 py-3 rounded-2xl bg-white/[0.03] border border-white/10 text-[11px] font-black uppercase tracking-widest text-white hover:bg-white/10 transition-all flex items-center gap-3 backdrop-blur-xl">
-             <Filter size={16} className="text-indigo-400" /> View Config
-           </button>
-           <button className="px-6 py-3 rounded-2xl bg-indigo-600 text-white shadow-2xl shadow-indigo-600/30 hover:bg-indigo-500 transition-all flex items-center gap-3 font-black text-[11px] uppercase tracking-widest active:scale-95">
-             <Sparkles size={16} /> Force Sync
-           </button>
+           <div className="flex gap-3 w-full sm:w-auto">
+             <button className="flex-1 sm:flex-none px-6 py-3 rounded-2xl bg-white/[0.03] border border-white/10 text-[11px] font-black uppercase tracking-widest text-white hover:bg-white/10 transition-all flex items-center justify-center gap-3 backdrop-blur-xl">
+               <Filter size={16} className="text-indigo-400" /> <span className="sm:hidden lg:inline">Config</span>
+             </button>
+             <button className="flex-1 sm:flex-none px-6 py-3 rounded-2xl bg-indigo-600 text-white shadow-2xl shadow-indigo-600/30 hover:bg-indigo-50 transition-all flex items-center justify-center gap-3 font-black text-[11px] uppercase tracking-widest active:scale-95">
+               <Sparkles size={16} /> Force Sync
+             </button>
+           </div>
         </div>
       </header>
 
@@ -161,8 +163,8 @@ export default function PipelinePage() {
       <div className="flex-1 overflow-x-auto pb-10 scrollbar-hide px-4">
         <DragDropContext onDragEnd={onDragEnd}>
           <div className="flex gap-8 h-full w-max min-w-full">
-            {columns.map((column) => (
-              <div key={column.id} className="w-[340px] flex flex-col h-full bg-black/40 rounded-[3rem] border border-white/10 shadow-2xl overflow-hidden backdrop-blur-3xl group/col">
+             {columns.map((column) => (
+              <div key={column.id} className="w-[300px] sm:w-[340px] flex flex-col h-full bg-black/40 rounded-[2.5rem] sm:rounded-[3rem] border border-white/10 shadow-2xl overflow-hidden backdrop-blur-3xl group/col shrink-0">
                 
                 {/* Stage Header */}
                 <div className="p-8 pb-5 flex items-center justify-between relative overflow-hidden">
@@ -256,34 +258,36 @@ export default function PipelinePage() {
           <motion.div 
             initial={{ y: 50, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
-            className="fixed bottom-10 left-1/2 -translate-x-1/2 flex gap-6 px-10 py-5 rounded-[2.5rem] bg-black/60 border border-white/10 backdrop-blur-3xl shadow-[0_20px_60px_rgba(0,0,0,0.8)] z-50 items-center ring-1 ring-white/10"
+            className="fixed bottom-6 lg:bottom-10 left-4 right-4 lg:left-1/2 lg:-translate-x-1/2 flex flex-col sm:flex-row gap-4 sm:gap-6 px-6 sm:px-10 py-4 sm:py-5 rounded-[2rem] lg:rounded-[2.5rem] bg-black/60 border border-white/10 backdrop-blur-3xl shadow-[0_20px_60px_rgba(0,0,0,0.8)] z-50 items-center ring-1 ring-white/10"
           >
-              <div className="flex items-center gap-4">
-                 <div className="w-10 h-10 rounded-2xl bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20">
-                    <Clock size={20} className="text-indigo-400" />
-                 </div>
-                 <div>
-                    <div className="text-[9px] font-black text-gray-600 uppercase tracking-widest">Avg Cycle Speed</div>
-                    <div className="text-sm font-black text-emerald-400 mt-0.5 tracking-tight italic">14.2 Days (OPTIMAL)</div>
-                 </div>
-              </div>
-              
-              <div className="w-px h-8 bg-white/10 mx-2" />
-              
-              <div className="flex items-center gap-4">
-                 <div className="w-10 h-10 rounded-2xl bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20">
-                    <Layers size={20} className="text-indigo-400" />
-                 </div>
-                 <div>
-                    <div className="text-[9px] font-black text-gray-600 uppercase tracking-widest">Pipeline Volume</div>
-                    <div className="text-sm font-black text-white mt-0.5 tracking-tight italic">12 Strategic Units</div>
-                 </div>
+              <div className="flex items-center justify-between w-full sm:w-auto sm:gap-6">
+                <div className="flex items-center gap-3 sm:gap-4">
+                  <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20">
+                      <Clock size={16} className="text-indigo-400" />
+                  </div>
+                  <div>
+                      <div className="text-[8px] sm:text-[9px] font-black text-gray-600 uppercase tracking-widest">Avg Speed</div>
+                      <div className="text-[10px] sm:text-sm font-black text-emerald-400 mt-0.5 tracking-tight italic">14.2d</div>
+                  </div>
+                </div>
+                
+                <div className="sm:hidden w-px h-6 bg-white/10 mx-2" />
+                
+                <div className="flex items-center gap-3 sm:gap-4">
+                  <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20">
+                      <Layers size={16} className="text-indigo-400" />
+                  </div>
+                  <div>
+                      <div className="text-[8px] sm:text-[9px] font-black text-gray-600 uppercase tracking-widest">Volume</div>
+                      <div className="text-[10px] sm:text-sm font-black text-white mt-0.5 tracking-tight italic">12 Units</div>
+                  </div>
+                </div>
               </div>
 
-              <div className="w-px h-8 bg-white/10 mx-2" />
+              <div className="hidden sm:block w-px h-8 bg-white/10 mx-2" />
 
-              <button className="flex items-center gap-3 px-6 py-3 rounded-2xl bg-white text-black font-black text-[10px] uppercase tracking-widest hover:bg-indigo-50 transition-all shadow-xl group/btn active:scale-95 ml-4">
-                 Analytics Deep-Dive <ChevronRight size={16} className="group-hover/btn:translate-x-1 transition-transform" />
+              <button className="w-full sm:w-auto flex items-center justify-center gap-3 px-6 py-2.5 sm:py-3 rounded-[1.5rem] sm:rounded-2xl bg-white text-black font-black text-[10px] uppercase tracking-widest hover:bg-indigo-50 transition-all shadow-xl group/btn active:scale-95 sm:ml-4">
+                 Analytics <ChevronRight size={14} className="group-hover/btn:translate-x-1 transition-transform" />
               </button>
           </motion.div>
       </AnimatePresence>

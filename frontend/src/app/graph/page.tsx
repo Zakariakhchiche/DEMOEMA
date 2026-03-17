@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Network, Search, Filter, ZoomIn, ZoomOut, Download, Users, Briefcase, ChevronRight, MapPin, CheckCircle, ExternalLink, Info, Target as TargetIcon, Zap, ArrowUpRight } from "lucide-react";
+import { Network, Search, Filter, ZoomIn, ZoomOut, Download, Users, Briefcase, ChevronRight, MapPin, CheckCircle, ExternalLink, Info, Target as TargetIcon, Zap, ArrowUpRight, X } from "lucide-react";
 import dynamic from 'next/dynamic';
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -50,21 +50,21 @@ export default function RelationshipGraph() {
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] w-full max-w-7xl mx-auto pb-4 px-4 overflow-hidden">
       {/* Header */}
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6 pt-4">
+      <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mb-6 pt-4">
         <div>
-          <h1 className="text-4xl font-black tracking-tight text-white mb-2 flex items-center gap-4">
+          <h1 className="text-3xl md:text-4xl font-black tracking-tight text-white mb-2 flex items-center gap-4">
             <div className="p-2 rounded-2xl bg-indigo-500/10 border border-indigo-500/20">
-              <Network size={32} className="text-indigo-400" />
+              <Network size={24} className="text-indigo-400" />
             </div>
             Network Intelligence
           </h1>
           <p className="text-gray-400 text-sm font-medium">
-            Proprietary relationship mapping identifying warm entry paths to C-level targets.
+            Proprietary relationship mapping identifying warm entry paths.
           </p>
         </div>
         
-        <div className="flex gap-3">
-          <div className="relative group">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="relative group w-full sm:w-80">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-indigo-400 transition-colors">
                <Search size={18} />
             </span>
@@ -72,12 +72,12 @@ export default function RelationshipGraph() {
                type="text" 
                value={search}
                onChange={(e) => setSearch(e.target.value)}
-               placeholder="Search entities or path nodes..." 
-               className="w-80 bg-white/[0.03] border border-white/10 rounded-2xl py-3 pl-12 pr-4 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-indigo-500/50 focus:bg-white/[0.05] transition-all"
+               placeholder="Search nodes..." 
+               className="w-full bg-white/[0.03] border border-white/10 rounded-2xl py-3 pl-12 pr-4 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-indigo-500/50 focus:bg-white/[0.05] transition-all"
             />
           </div>
-          <button className="px-5 py-3 rounded-2xl bg-white/[0.03] border border-white/10 text-sm font-bold text-white hover:bg-white/10 transition-all flex items-center gap-2">
-            <Filter size={18} /> Relationship Depth
+          <button className="px-5 py-3 rounded-2xl bg-white/[0.03] border border-white/10 text-sm font-bold text-white hover:bg-white/10 transition-all flex items-center justify-center gap-2">
+            <Filter size={18} /> <span className="sm:hidden lg:inline">Depth</span>
           </button>
         </div>
       </header>
@@ -88,20 +88,20 @@ export default function RelationshipGraph() {
         {/* Graph Area */}
         <div className="lg:col-span-3 rounded-[2.5rem] bg-[#050505] border border-white/10 relative overflow-hidden flex flex-col group shadow-[0_4px_50px_rgba(0,0,0,0.8)] backdrop-blur-xl">
           {/* Legend */}
-          <div className="absolute top-6 left-6 z-10 flex flex-col gap-3">
-             <div className="px-4 py-2 rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md text-[10px] uppercase font-black tracking-widest text-gray-400 flex items-center gap-3">
-                <div className="w-2 h-2 rounded-full bg-[#6366f1] animate-pulse" /> Internal Team
+          <div className="absolute top-4 sm:top-6 left-4 sm:left-6 z-10 flex flex-col gap-2 sm:gap-3">
+             <div className="px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl sm:rounded-2xl bg-black/60 border border-white/10 backdrop-blur-md text-[8px] sm:text-[10px] uppercase font-black tracking-widest text-gray-400 flex items-center gap-2 sm:gap-3">
+                <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-[#6366f1] animate-pulse" /> Team
              </div>
-             <div className="px-4 py-2 rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md text-[10px] uppercase font-black tracking-widest text-gray-400 flex items-center gap-3">
-                <div className="w-2 h-2 rounded-full bg-[#10b981]" /> Target C-Level
+             <div className="px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl sm:rounded-2xl bg-black/60 border border-white/10 backdrop-blur-md text-[8px] sm:text-[10px] uppercase font-black tracking-widest text-gray-400 flex items-center gap-2 sm:gap-3">
+                <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-[#10b981]" /> Target
              </div>
-             <div className="px-4 py-2 rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md text-[10px] uppercase font-black tracking-widest text-gray-400 flex items-center gap-3">
-                <div className="w-2 h-2 rounded-full bg-[#f59e0b]" /> Advisors
+             <div className="px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl sm:rounded-2xl bg-black/60 border border-white/10 backdrop-blur-md text-[8px] sm:text-[10px] uppercase font-black tracking-widest text-gray-400 flex items-center gap-2 sm:gap-3">
+                <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-[#f59e0b]" /> Advisor
              </div>
           </div>
 
-          <div className="absolute top-6 right-6 z-10 flex flex-col gap-2">
-             <button onClick={() => fgRef.current?.zoomToFit(400)} className="w-10 h-10 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 transition-all">
+          <div className="absolute top-4 sm:top-6 right-4 sm:right-6 z-10 flex flex-col gap-2">
+             <button onClick={() => fgRef.current?.zoomToFit(400)} className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-black/60 border border-white/10 flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 transition-all">
                 <Download size={18} />
              </button>
           </div>
@@ -156,16 +156,20 @@ export default function RelationshipGraph() {
           </div>
         </div>
 
-        {/* Node Detail Sidebar */}
+        {/* Node Detail Sidebar / Overlay */}
         <AnimatePresence mode="wait">
-          <motion.div 
-            key={selectedNode?.id}
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="rounded-[2.5rem] bg-black/40 border border-white/10 backdrop-blur-xl p-8 flex flex-col overflow-y-auto shadow-2xl space-y-8"
-          >
-            {selectedNode ? (
-              <>
+          {selectedNode && (
+            <motion.div 
+              key={selectedNode?.id}
+              initial={{ opacity: 0, x: 20, y: 100 }}
+              animate={{ opacity: 1, x: 0, y: 0 }}
+              exit={{ opacity: 0, y: 100 }}
+              className="fixed lg:relative bottom-6 sm:bottom-10 left-4 right-4 lg:bottom-0 lg:left-0 lg:right-0 lg:col-span-1 rounded-[2rem] sm:rounded-[2.5rem] bg-black/80 lg:bg-black/40 border border-white/10 backdrop-blur-3xl p-6 sm:p-8 flex flex-col max-h-[50vh] lg:max-h-full overflow-y-auto shadow-2xl space-y-6 sm:space-y-8 z-[60]"
+            >
+              <div className="flex items-center justify-between lg:hidden mb-2">
+                <span className="text-[10px] font-black text-gray-600 uppercase tracking-widest">Entity Intel</span>
+                <button onClick={() => setSelectedNode(null)} className="p-2 rounded-lg bg-white/5 text-gray-500"><X size={16} /></button>
+              </div>
                 <div className="space-y-4">
                   <div className="w-16 h-16 rounded-[1.5rem] bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-white font-black text-2xl shadow-[0_0_20px_rgba(99,102,241,0.2)]">
                     {selectedNode.name.split(' ').map((n: any) => n[0]).join('')}
@@ -216,14 +220,8 @@ export default function RelationshipGraph() {
                      Generate Dossier <ArrowUpRight size={18} />
                   </Link>
                 </div>
-              </>
-            ) : (
-              <div className="flex-1 flex flex-col items-center justify-center text-center opacity-40">
-                 <TargetIcon size={48} className="mb-4 text-gray-600" />
-                 <p className="text-sm font-bold text-gray-500 uppercase tracking-widest">Select a node to extract relationship intelligence</p>
-              </div>
-            )}
-          </motion.div>
+            </motion.div>
+          )}
         </AnimatePresence>
 
       </div>

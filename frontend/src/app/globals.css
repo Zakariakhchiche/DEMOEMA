@@ -14,11 +14,25 @@
   --color-indigo-900: #1e1b4b;
 }
 
+@layer utilities {
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
 @layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+  
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
-    @apply antialiased selection:bg-indigo-500/30 font-sans;
+    @apply antialiased selection:bg-indigo-500/30 font-sans overflow-x-hidden;
   }
 
   h1, h2, h3, h4, h5, h6 {
@@ -29,5 +43,9 @@
 @layer components {
   .glass {
     @apply bg-black/40 border border-white/10 backdrop-blur-xl shadow-2xl;
+  }
+  
+  .premium-gradient {
+    @apply bg-gradient-to-br from-indigo-500 to-purple-600;
   }
 }

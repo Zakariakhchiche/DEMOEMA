@@ -50,21 +50,23 @@ export default function SignalsPage() {
   return (
     <div className="flex flex-col gap-8 w-full max-w-7xl mx-auto py-4 h-[calc(100vh-8rem)]">
       {/* Header */}
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 shrink-0">
-        <div>
-          <h1 className="text-4xl font-black tracking-tight text-white mb-2 flex items-center gap-4">
-            Intelligence Feed
+      <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 shrink-0">
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-4">
+            <h1 className="text-3xl md:text-4xl font-black tracking-tight text-white flex items-center gap-4">
+              Intelligence Feed
+            </h1>
             <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-[10px] text-indigo-400 font-black uppercase tracking-[0.2em]">
                <Radio size={12} className="animate-pulse" /> Live Stream
             </div>
-          </h1>
+          </div>
           <p className="text-gray-400 text-sm font-medium">
             Real-time anomaly detection and strategic market triggers calibrated by Aethelgard.
           </p>
         </div>
         
-        <div className="flex gap-3">
-          <div className="relative group">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="relative group w-full sm:w-80">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-indigo-400 transition-colors">
                <Search size={18} />
             </span>
@@ -73,11 +75,11 @@ export default function SignalsPage() {
                value={search}
                onChange={(e) => setSearch(e.target.value)}
                placeholder="Search intercept data..." 
-               className="w-80 bg-white/[0.03] border border-white/10 rounded-2xl py-3 pl-12 pr-4 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-indigo-500/50 focus:bg-white/[0.05] transition-all"
+               className="w-full bg-white/[0.03] border border-white/10 rounded-2xl py-3 pl-12 pr-4 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-indigo-500/50 focus:bg-white/[0.05] transition-all"
             />
           </div>
-          <button className="px-5 py-3 rounded-2xl bg-white/[0.03] border border-white/10 text-[10px] font-black uppercase tracking-widest text-white hover:bg-white/10 transition-all flex items-center gap-2">
-            <AlertCircle size={16} /> Notification Matrix
+          <button className="px-5 py-3 rounded-2xl bg-white/[0.03] border border-white/10 text-[10px] font-black uppercase tracking-widest text-white hover:bg-white/10 transition-all flex items-center justify-center gap-2">
+            <AlertCircle size={16} /> <span className="sm:hidden lg:inline">Notification Matrix</span>
           </button>
         </div>
       </header>
@@ -145,7 +147,7 @@ export default function SignalsPage() {
                       </span>
                     </div>
                     
-                    <h3 className="text-xl font-black text-white mb-4 group-hover:text-indigo-400 transition-colors tracking-tight">
+                    <h3 className="text-lg md:text-xl font-black text-white mb-4 group-hover:text-indigo-400 transition-colors tracking-tight">
                       {signal.title}
                     </h3>
                     
