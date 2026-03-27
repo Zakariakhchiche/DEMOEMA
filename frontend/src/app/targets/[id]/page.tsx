@@ -6,16 +6,23 @@ import { motion, AnimatePresence } from "framer-motion";
 import { 
   ArrowLeft, Target, ShieldCheck, Zap, TrendingUp, AlertCircle, 
   Share2, ArrowRight, Radio, Fingerprint, Activity, Clock, 
-  Users, Briefcase, Crosshair, MapPin, Gauge
+  Users, Briefcase, Crosshair, MapPin, Gauge, FileText, AlertTriangle
 } from "lucide-react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { Target as TargetType } from "@/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
 export default function TargetDetail() {
   const params = useParams();
-  const id = params?.id as string;
+  const router = useRouter();
+  const [id, setId] = useState<string>("");
+
+  useEffect(() => {
+    if (params && typeof params.id === 'string') {
+      setId(params.id);
+    }
+  }, [params]);
 
   const [targetData, setTargetData] = useState<TargetType | null>(null);
   const [loading, setLoading] = useState(true);
@@ -42,7 +49,7 @@ export default function TargetDetail() {
     if (!id) return;
     
     setLoading(true);
-    fetch(`${API_URL}/api/targets/${id}`)
+    fetch(`/api/targets/${id}`)
       .then(res => {
         if (!res.ok) throw new Error();
         return res.json();
@@ -86,9 +93,9 @@ export default function TargetDetail() {
   }
 
   const getPriorityColor = (level: string) => {
-    if (level === "Opportunité Forte") return "text-emerald-400 bg-emerald-500/10 border-emerald-500/20";
-    if (level === "Cible Prioritaire") return "text-indigo-400 bg-indigo-500/10 border-indigo-500/20";
-    if (level === "Cible à Préparer") return "text-amber-400 bg-amber-500/10 border-amber-500/20";
+    if (level === "Strong Opportunity") return "text-emerald-400 bg-emerald-500/10 border-emerald-500/20";
+    if (level === "Priority Target") return "text-indigo-400 bg-indigo-500/10 border-indigo-500/20";
+    if (level === "Preparation Needed") return "text-amber-400 bg-amber-500/10 border-amber-500/20";
     return "text-gray-400 bg-white/5 border-white/10";
   };
 
@@ -111,12 +118,12 @@ export default function TargetDetail() {
       {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-8 sm:gap-6 border-b border-white/5 pb-12">
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
-          <Link href="/targets" className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 transition-all backdrop-blur-xl group shrink-0">
+          <button onClick={() => router.push('/targets')} className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 transition-all backdrop-blur-xl group shrink-0">
             <ArrowLeft size={20} className="group-hover:-translate-x-1 transition-transform" />
-          </Link>
+          </button>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-4 mb-3">
-              <h1 className="text-3xl md:text-5xl font-black tracking-tighter text-white truncate max-w-full uppercase">{targetData.name}</h1>
+              <h1 className="text-3xl md:text-5xl font-black tracking-tighter text-white truncate max-w-full uppercase italic">{targetData.name}</h1>
               <div className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-[0.2em] border ${getPriorityColor(targetData.priorityLevel)}`}>
                 {targetData.priorityLevel}
               </div>
@@ -126,7 +133,7 @@ export default function TargetDetail() {
                   {targetData.sector} • EDRCF Radar V5.0
                </div>
                <p className="text-gray-500 text-[10px] sm:text-xs font-black uppercase tracking-[0.2em]">
-                  ID: <span className="text-gray-300">{targetData.id.toUpperCase()}</span> • Transaction Window: <span className="text-white">{targetData.analysis.window}</span>
+                  ID: <span className="text-gray-300">{targetData.id.toUpperCase()}</span> • Window: <span className="text-white">{targetData.analysis.window}</span>
                </p>
             </div>
           </div>
@@ -135,7 +142,7 @@ export default function TargetDetail() {
         <div className="flex gap-4 w-full lg:w-auto">
           <button 
             onClick={() => handleAction('share', 'Dossier link copied')}
-            className="flex-1 lg:flex-none w-14 h-14 rounded-2xl bg-white/[0.03] border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 transition-all flex items-center justify-center"
+            className="flex-1 lg:flex-none w-14 h-14 rounded-2xl bg-white/[0.03] border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 transition-all flex items-center justify-center shadow-xl"
           >
             <Share2 size={24} />
           </button>
@@ -158,8 +165,6 @@ export default function TargetDetail() {
         
         {/* Left Column - Origination Card */}
         <div className="lg:col-span-4 flex flex-col gap-8">
-          
-          {/* Fiche d'Origination Core */}
           <div className="p-10 rounded-[3rem] bg-black/40 border border-indigo-500/20 relative overflow-hidden group shadow-2xl backdrop-blur-3xl">
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-600/10 via-transparent to-transparent opacity-50" />
             
@@ -169,7 +174,7 @@ export default function TargetDetail() {
                   <Fingerprint size={32} />
                 </div>
                 <div className="text-right">
-                  <div className="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-400/80 mb-1">EDRCF Integrity</div>
+                  <div className="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-400/80 mb-1">Intelligence Integrity</div>
                   <div className="text-xs font-black text-white flex items-center gap-2 justify-end">
                     <ShieldCheck size={14} className="text-emerald-500" /> 100% SECURE
                   </div>
@@ -178,153 +183,113 @@ export default function TargetDetail() {
 
               <div className="flex flex-col items-center mb-12">
                 <div className="relative">
-                  <svg className="w-64 h-64 transform -rotate-90">
-                    <circle cx="128" cy="128" r="115" stroke="rgba(255,255,255,0.03)" strokeWidth="16" fill="transparent" />
-                    <motion.circle 
-                      initial={{ strokeDashoffset: 2 * Math.PI * 115 }}
-                      animate={{ strokeDashoffset: 2 * Math.PI * 115 * (1 - targetData.globalScore / 100) }}
-                      transition={{ duration: 1.5, ease: "easeOut" }}
-                      cx="128" cy="128" r="115" 
-                      stroke="url(#gradient-radar)" 
-                      strokeWidth="16" 
-                      strokeDasharray={2 * Math.PI * 115} 
-                      strokeLinecap="round" 
-                      fill="transparent" 
-                    />
-                    <defs>
-                      <linearGradient id="gradient-radar" x1="0%" y1="0%" x2="100%" y2="0%">
-                        <stop offset="0%" stopColor="#6366f1" />
-                        <stop offset="100%" stopColor="#a855f7" />
-                      </linearGradient>
-                    </defs>
-                  </svg>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-7xl font-black text-white leading-none tracking-tighter">{targetData.globalScore}</span>
-                    <span className="text-indigo-400/60 text-[10px] font-black uppercase tracking-[0.4em] mt-3">Score Global</span>
+                  <div className="flex flex-col items-center">
+                    <span className="text-7xl font-black text-white leading-none tracking-tighter mb-2">{targetData.globalScore}</span>
+                    <span className="text-[10px] font-black text-indigo-400/60 uppercase tracking-[0.4em]">Global Score</span>
                   </div>
+                </div>
+                <div className="mt-12 flex flex-col items-center">
+                   <span className="text-[10px] font-black text-gray-600 uppercase tracking-widest mb-4">Priority Status</span>
+                   <div className="text-lg font-black text-white px-6 py-2 rounded-2xl bg-white/5 border border-white/10 italic">
+                      {targetData.priorityLevel}
+                   </div>
                 </div>
               </div>
 
-              <div className="space-y-4">
-                <h4 className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-4">Signal Breakdown</h4>
-                {Object.entries(targetData.scores).map(([key, val]) => (
-                  <div key={key} className="flex justify-between items-center py-2 border-b border-white/5">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-gray-400 capitalize">{key}</span>
-                    <span className="text-sm font-black text-white">{val}%</span>
-                  </div>
-                ))}
+              <div className="space-y-6 mt-16 border-t border-white/[0.05] pt-12">
+                   <div className="flex justify-between items-center px-4">
+                     <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Active Cluster</span>
+                     <div className="flex items-center gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        <span className="text-[10px] font-black text-white uppercase tracking-widest">{targetData.sector}</span>
+                     </div>
+                   </div>
               </div>
             </div>
           </div>
-
-          {/* activation & Context */}
-          <div className="p-8 rounded-[2.5rem] bg-indigo-600 text-white shadow-2xl relative overflow-hidden group">
-             <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition-transform">
-                <Crosshair size={120} />
-             </div>
-             <h4 className="text-sm font-black uppercase tracking-widest mb-6 flex items-center gap-3">
-               <Crosshair size={18} /> Activation Strategique
-             </h4>
-             <div className="space-y-6 relative z-10">
-                <div>
-                   <div className="text-[9px] font-black text-indigo-200 uppercase tracking-widest mb-1.5 opacity-60">Angle d'approche</div>
-                   <div className="text-sm font-bold leading-relaxed">{targetData.activation.approach}</div>
-                </div>
-                <div>
-                   <div className="text-[9px] font-black text-indigo-200 uppercase tracking-widest mb-1.5 opacity-60">Raison objective</div>
-                   <div className="text-sm font-bold leading-relaxed">{targetData.activation.reason}</div>
-                </div>
-             </div>
-          </div>
-
         </div>
 
-        {/* Right Column - Deep Analysis */}
+        {/* Right Column - Deep Dive */}
         <div className="lg:col-span-8 flex flex-col gap-10">
-          
-          {/* Fiche d'Origination Narrative */}
-          <div className="p-12 rounded-[3.5rem] bg-black/40 border border-white/10 shadow-2xl relative overflow-hidden backdrop-blur-3xl">
-            <div className="flex items-center gap-4 mb-10">
-               <div className="w-1.5 h-8 bg-indigo-500 rounded-full" />
-               <h3 className="text-3xl font-black tracking-tighter text-white">Analyse Narrative</h3>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-12 mb-12">
-               <div>
-                  <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.3em] mb-4">Type Probable</h4>
-                  <div className="text-2xl font-black text-white italic">{targetData.analysis.type}</div>
-               </div>
-               <div>
-                  <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.3em] mb-4">Lecture Stratégique</h4>
-                  <p className="text-gray-300 leading-relaxed font-bold tracking-tight text-lg">
-                    {targetData.analysis.narrative}
-                  </p>
-               </div>
-            </div>
+           {/* Strategic Thesis */}
+           <section className="p-12 rounded-[4rem] bg-white/[0.02] border border-white/10 relative overflow-hidden group hover:border-indigo-500/30 transition-all">
+              <div className="absolute top-0 right-10 bottom-0 w-1/3 bg-gradient-to-l from-indigo-600/5 to-transparent skew-x-12" />
+              <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-500 mb-10 flex items-center gap-4">
+                 <span className="w-10 h-px bg-white/10" /> 01. Strategic Thesis
+              </h2>
+              <div className="space-y-12 relative z-10">
+                 <div>
+                    <div className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.3em] mb-4">Probable Technical Angle</div>
+                    <div className="text-4xl font-black text-white tracking-tighter uppercase italic leading-tight">{targetData.analysis.type}</div>
+                 </div>
+                 <p className="text-xl font-medium leading-relaxed text-gray-300 border-l border-indigo-500/30 pl-8">
+                   "{targetData.analysis.narrative}"
+                 </p>
+              </div>
+           </section>
 
-            <div className="p-8 rounded-3xl bg-white/[0.03] border border-white/10">
-               <h4 className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-6">Top 5 Signaux Détectés</h4>
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {targetData.topSignals.map((s, idx) => (
-                    <div key={idx} className="flex items-center gap-4 p-4 rounded-2xl bg-white/5 border border-white/5 group hover:border-indigo-500/30 transition-all">
-                       <span className="text-indigo-500 font-black text-xs">0{idx+1}</span>
-                       <div>
-                          <div className="text-xs font-black text-white uppercase tracking-tight">{s.label}</div>
-                          <div className="text-[9px] font-black text-gray-600 uppercase tracking-widest">{s.family}</div>
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+              {/* Conviction Indicators */}
+              <section className="p-12 rounded-[4rem] bg-white/[0.02] border border-white/10">
+                 <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-500 mb-10 flex items-center gap-4">
+                    <Radio size={16} /> 02. Conviction Indicators
+                 </h2>
+                 <div className="space-y-4">
+                    {targetData.topSignals.map((signal, i) => (
+                      <div key={i} className="p-6 rounded-3xl bg-white/[0.03] border border-white/5 hover:border-indigo-500/20 transition-all group/signal">
+                         <div className="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-2 group-hover/signal:text-indigo-400 transition-colors uppercase">{signal.family}</div>
+                         <div className="text-sm font-bold text-gray-200 uppercase tracking-tight">{signal.label}</div>
+                      </div>
+                    ))}
+                 </div>
+              </section>
+
+              {/* Strategic Activation */}
+              <section className="p-12 rounded-[4rem] bg-indigo-600 text-white shadow-2xl relative overflow-hidden group">
+                 <div className="absolute -top-10 -right-10 opacity-10 group-hover:scale-110 transition-transform duration-700">
+                    <Crosshair size={120} />
+                 </div>
+                 <h4 className="text-xs font-black uppercase tracking-widest mb-10 flex items-center gap-3">
+                   <Crosshair size={18} /> 03. Strategic Activation
+                 </h4>
+                 <div className="space-y-8 relative z-10">
+                    <div>
+                       <div className="text-[9px] font-black text-indigo-200 uppercase tracking-widest mb-2 opacity-60">Approach Angle</div>
+                       <div className="text-sm font-bold leading-relaxed">{targetData.activation.approach}</div>
+                    </div>
+                    <div>
+                       <div className="text-[9px] font-black text-indigo-200 uppercase tracking-widest mb-2 opacity-60">Decision Pipeline</div>
+                       <div className="flex flex-wrap gap-2">
+                          {targetData.activation.deciders.map((d, i) => (
+                            <span key={i} className="px-3 py-1 bg-black/20 rounded-xl text-[10px] font-black uppercase">{d}</span>
+                          ))}
                        </div>
                     </div>
-                  ))}
-               </div>
-            </div>
-          </div>
+                    <div>
+                        <div className="text-[9px] font-black text-indigo-200 uppercase tracking-widest mb-2 opacity-60">Objective reason</div>
+                        <div className="text-sm font-bold leading-relaxed">{targetData.activation.reason}</div>
+                    </div>
+                 </div>
+              </section>
+           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-             {/* Décideurs Section */}
-             <div className="p-10 rounded-[3rem] bg-black/40 border border-white/10">
-                <h3 className="text-xs font-black text-gray-500 uppercase tracking-[0.3em] mb-8 flex items-center gap-3">
-                   <Users size={16} /> Décideurs Probables
-                </h3>
-                <div className="flex flex-col gap-4">
-                   {targetData.activation.deciders.map((d, i) => (
-                     <div key={i} className="flex items-center gap-5 p-4 rounded-2xl bg-white/5 border border-white/5">
-                        <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-400">
-                           <Users size={20} />
-                        </div>
-                        <span className="font-black text-sm text-white">{d}</span>
-                     </div>
-                   ))}
-                </div>
-             </div>
-
-             {/* Risques Section */}
-             <div className="p-10 rounded-[3rem] bg-rose-500/5 border border-rose-500/10">
-                <h3 className="text-xs font-black text-rose-500 uppercase tracking-[0.3em] mb-8 flex items-center gap-3">
-                   <AlertCircle size={16} /> Vigilance & Risques
-                </h3>
-                <div className="space-y-6">
-                   <div>
-                      <div className="text-[9px] font-black text-rose-500/60 uppercase tracking-widest mb-1.5">Risque de Faux Positif</div>
-                      <div className="text-lg font-black text-rose-200">{targetData.risks.falsePositive}</div>
-                   </div>
-                   <div>
-                      <div className="text-[9px] font-black text-rose-500/60 uppercase tracking-widest mb-1.5">Points d'incertitude</div>
-                      <p className="text-xs font-bold text-gray-400 leading-relaxed">{targetData.risks.uncertainties}</p>
-                   </div>
-                </div>
-             </div>
-          </div>
-
-          {/* Generate PDF Section */}
-          <div className="p-10 rounded-[3rem] bg-white text-black flex flex-col sm:flex-row items-center justify-between gap-8">
-             <div className="text-center sm:text-left">
-                <h4 className="text-2xl font-black tracking-tighter mb-1">Dossier d'Origination Complet</h4>
-                <p className="text-sm font-bold opacity-60 uppercase tracking-widest">Générer le rapport PDF pour comité</p>
-             </div>
-             <Link href={`/targets/${id}/report`} className="px-12 py-5 bg-black text-white rounded-[2rem] font-black text-xs uppercase tracking-widest hover:bg-gray-800 transition-all flex items-center gap-4 shadow-2xl active:scale-95">
-                Générer Dossier <ArrowRight size={20} />
-             </Link>
-          </div>
-
+           {/* Bottom Bar */}
+           <div className="mt-10 pt-10 border-t border-white/5 flex flex-col sm:flex-row justify-between items-center gap-8">
+              <div className="flex items-center gap-10">
+                 <div>
+                    <div className="text-[10px] font-black text-gray-600 uppercase tracking-widest mb-2 uppercase">Vigilance Protocol</div>
+                    <div className="flex items-center gap-3 px-4 py-2 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-500 text-[10px] font-black uppercase">
+                       <AlertTriangle size={14} /> {targetData.risks.falsePositive} FPR
+                    </div>
+                 </div>
+              </div>
+              <button 
+                onClick={() => router.push(`/targets/${id}/report`)}
+                className="w-full sm:w-auto px-10 py-5 bg-white text-black rounded-[2rem] font-black uppercase tracking-widest text-[11px] hover:bg-indigo-500 hover:text-white transition-all shadow-2xl active:scale-95 group flex items-center justify-center gap-3"
+              >
+                <FileText size={18} /> Generate Origination Dossier
+              </button>
+           </div>
         </div>
       </div>
     </div>

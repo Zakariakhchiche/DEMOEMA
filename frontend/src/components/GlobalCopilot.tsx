@@ -2,25 +2,27 @@
 
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Send, Sparkles, MessageSquare, Bot, User, Zap, ChevronRight, Minimize2, Maximize2, Terminal, Info } from "lucide-react";
+import { 
+  Sparkles, Send, X, Minimize2, Maximize2, 
+  Terminal, User, Activity, Target, Zap, TrendingUp,
+  MessageSquare, Layers
+} from "lucide-react";
+import { usePathname } from "next/navigation";
 
-import { Message } from "@/types";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
+interface Message {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: number;
+}
 
 export default function GlobalCopilot() {
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      role: "assistant",
-      content: "Hello! I am your AI M&A Copilot. I have access to your relationship maps, market signals, and pipeline data. How can I assist your origination strategy today?",
-      timestamp: new Date().toISOString(),
-    }
-  ]);
   const [isLoading, setIsLoading] = useState(false);
+  const pathname = usePathname();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -29,21 +31,17 @@ export default function GlobalCopilot() {
     }
   }, [messages, isLoading]);
 
-  useEffect(() => {
-    const handleToggle = () => setIsOpen(true);
-    window.addEventListener("toggle-copilot", handleToggle);
-    return () => window.removeEventListener("toggle-copilot", handleToggle);
-  }, []);
-
-  const handleSend = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!input.trim() || isLoading) return;
+  const handleSend = async (e?: React.FormEvent, directValue?: string) => {
+    if (e) e.preventDefault();
+    
+    const query = directValue || input;
+    if (!query.trim() || isLoading) return;
 
     const userMsg: Message = {
       id: Date.now().toString(),
       role: "user",
-      content: input,
-      timestamp: new Date().toISOString(),
+      content: query,
+      timestamp: Date.now(),
     };
 
     setMessages(prev => [...prev, userMsg]);
@@ -51,24 +49,18 @@ export default function GlobalCopilot() {
     setIsLoading(true);
 
     try {
-      const response = await fetch(`${API_URL}/api/copilot/query?q=${encodeURIComponent(input)}`);
-      const data = await response.json();
-      
+      const res = await fetch(`/api/copilot/query?q=${encodeURIComponent(query)}`);
+      const data = await res.json();
+
       const assistantMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: data.response || "I encountered an error processing that request.",
-        timestamp: new Date().toISOString(),
+        content: data.response,
+        timestamp: Date.now(),
       };
-      
       setMessages(prev => [...prev, assistantMsg]);
     } catch (err) {
-      setMessages(prev => [...prev, {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        content: "I'm having trouble connecting to the intelligence engine. Please ensure the backend is running.",
-        timestamp: new Date().toISOString(),
-      }]);
+      console.error(err);
     } finally {
       setIsLoading(false);
     }
@@ -76,42 +68,43 @@ export default function GlobalCopilot() {
 
   return (
     <>
-      {/* Trigger Button - Floating or Sidebar integrated */}
-      {!isOpen && (
-        <motion.button
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: 1, scale: 1 }}
-          onClick={() => setIsOpen(true)}
-          className="fixed bottom-4 right-4 sm:bottom-8 sm:right-8 z-[100] w-12 h-12 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl bg-indigo-600 text-white shadow-[0_0_30px_rgba(99,102,241,0.5)] flex items-center justify-center hover:bg-indigo-500 transition-all border border-indigo-400 group"
-        >
-          <Sparkles size={20} className="sm:size-24 group-hover:rotate-12 transition-transform" />
-          <div className="absolute -top-1 -right-1 w-3 h-3 sm:w-4 sm:h-4 bg-amber-500 rounded-full border-2 border-[#050505] animate-pulse" />
-        </motion.button>
-      )}
+      {/* Floating Trigger */}
+      <motion.button
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        onClick={() => setIsOpen(!isOpen)}
+        className="fixed bottom-8 right-8 w-16 h-16 rounded-[2rem] bg-indigo-600 text-white shadow-[0_20px_50px_rgba(79,70,229,0.4)] z-[50] flex items-center justify-center border border-white/20 group"
+      >
+        {isOpen ? <X size={24} /> : <MessageSquare size={24} className="group-hover:rotate-12 transition-transform" />}
+        {!isOpen && (
+           <div className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full border-2 border-[#050505] animate-pulse" />
+        )}
+      </motion.button>
 
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ x: "100%", opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: "100%", opacity: 0 }}
-            transition={{ type: "spring", damping: 25, stiffness: 200 }}
-            className={`fixed top-0 right-0 sm:top-4 sm:right-4 bottom-0 sm:bottom-4 z-[110] bg-black/80 border-l sm:border border-white/10 backdrop-blur-3xl sm:rounded-[2.5rem] shadow-[0_0_100px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden transition-all duration-300
-              ${isMinimized ? "w-20 h-20 overflow-hidden" : "w-full sm:w-96 md:w-[28rem]"}
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            className={`
+              fixed right-8 z-[100] bg-[#0A0A0A]/95 backdrop-blur-3xl border border-white/10 rounded-[3rem] shadow-[0_30px_100px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden
+              ${isMinimized ? "bottom-32 w-80 h-20" : "bottom-32 w-[450px] h-[650px]"}
+              transition-all duration-500 ease-in-out
             `}
           >
             {/* Header */}
-            <div className="p-6 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
+            <div className="p-6 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
               <div className="flex items-center gap-4">
-                <div className="w-10 h-10 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
-                  <Bot size={20} />
+                <div className="w-10 h-10 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+                  <Sparkles size={20} />
                 </div>
                 <div>
-                  <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
-                    Origination Copilot
-                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  </h3>
-                  <p className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Engine: GPT-4o Optimized</p>
+                   <h3 className="text-sm font-black text-white uppercase tracking-widest leading-none mb-1">EDRCF Copilot</h3>
+                   <div className="flex items-center gap-1.5 ">
+                      <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
+                      <span className="text-[8px] font-black text-emerald-500/60 uppercase tracking-widest">Neural Link Active</span>
+                   </div>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -135,34 +128,44 @@ export default function GlobalCopilot() {
               <>
                 <div 
                   ref={scrollRef}
-                  className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-hide"
+                  className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar"
                 >
-                  {messages.map((m) => (
-                    <motion.div
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      key={m.id}
-                      className={`flex gap-4 ${m.role === "user" ? "flex-row-reverse" : ""}`}
-                    >
-                      <div className={`w-8 h-8 rounded-xl shrink-0 flex items-center justify-center border
-                        ${m.role === "user" 
-                          ? "bg-white/5 border-white/10 text-gray-400" 
-                          : "bg-indigo-500/10 border-indigo-500/20 text-indigo-400"}
-                      `}>
-                        {m.role === "user" ? <User size={16} /> : <Sparkles size={16} />}
-                      </div>
-                      <div className={`max-w-[80%] rounded-2xl p-4 text-[13px] leading-relaxed
-                        ${m.role === "user" 
-                          ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/10" 
-                          : "bg-white/[0.03] border border-white/10 text-gray-300 shadow-xl"}
-                      `}>
-                        {m.content}
-                        <div className={`text-[9px] mt-2 opacity-40 font-bold uppercase tracking-widest ${m.role === "user" ? "text-right" : ""}`}>
-                          {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  {messages.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center opacity-40 text-center space-y-4 px-10">
+                       <Target size={40} className="text-indigo-400 mb-2" />
+                       <p className="text-xs font-black text-white uppercase tracking-[0.2em]">EDRCF Intel Protocol</p>
+                       <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest leading-relaxed">
+                          Monitoring 2,408 entities. Ready for deep-dive analysis or sector mapping.
+                       </p>
+                    </div>
+                  ) : (
+                    messages.map((m) => (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        key={m.id}
+                        className={`flex gap-4 ${m.role === "user" ? "flex-row-reverse" : ""}`}
+                      >
+                        <div className={`w-8 h-8 rounded-xl shrink-0 flex items-center justify-center border
+                          ${m.role === "user" 
+                            ? "bg-white/5 border-white/10 text-gray-400" 
+                            : "bg-indigo-500/10 border-indigo-500/20 text-indigo-400"}
+                        `}>
+                          {m.role === "user" ? <User size={16} /> : <Sparkles size={16} />}
                         </div>
-                      </div>
-                    </motion.div>
-                  ))}
+                        <div className={`max-w-[80%] rounded-2xl p-4 text-[13px] leading-relaxed
+                          ${m.role === "user" 
+                            ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/10 rounded-tr-none" 
+                            : "bg-white/[0.03] border border-white/10 text-gray-300 shadow-xl rounded-tl-none"}
+                        `}>
+                          {m.content}
+                          <div className={`text-[9px] mt-2 opacity-40 font-bold uppercase tracking-widest ${m.role === "user" ? "text-right" : ""}`}>
+                            {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))
+                  )}
                   {isLoading && (
                     <div className="flex gap-4">
                       <div className="w-8 h-8 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
@@ -177,22 +180,22 @@ export default function GlobalCopilot() {
                   )}
                 </div>
 
-                {/* Suggestions */}
-                {messages.length < 3 && !isLoading && (
+                {/* Suggestions Chips - Show when few messages */}
+                {messages.length < 3 && (
                    <div className="px-6 py-2 flex gap-2 overflow-x-auto scrollbar-hide">
                       {[
-                        "Top French targets", 
-                        "Industrial signals",
-                        "High priority pipeline"
+                        "TOP STRATEGIC TARGETS",
+                        "TECHFLOW DEEP-DIVE",
+                        "INTENSITY MAPPING",
+                        "ANALYZE BIOGRID"
                       ].map(s => (
                         <button 
                           key={s}
                           onClick={() => {
                             setInput(s);
-                            // Auto trigger send after a small delay to feel natural
-                            setTimeout(() => handleSend(), 100);
+                            handleSend(undefined, s);
                           }}
-                          className="whitespace-nowrap px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-[10px] font-black uppercase text-gray-400 hover:bg-white/10 hover:text-white transition-all"
+                          className="whitespace-nowrap px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-[10px] font-black uppercase text-gray-400 hover:bg-white/10 hover:text-white transition-all active:scale-95"
                         >
                           {s}
                         </button>
@@ -231,7 +234,7 @@ export default function GlobalCopilot() {
                   </form>
                   <div className="mt-4 flex items-center justify-between">
                      <div className="flex items-center gap-2 text-[10px] text-gray-600 font-black uppercase tracking-widest">
-                        <Terminal size={12} /> Live Path Context: On
+                        <Terminal size={12} /> Context Awareness: Active
                      </div>
                      <div className="flex items-center gap-2 text-[10px] text-gray-600 font-bold">
                         Press ↵ to send

@@ -10,10 +10,10 @@ export default function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean, setIsO
   
   const navItems = [
     { label: "Dashboard", icon: LayoutDashboard, href: "/" },
-    { label: "Strategic Targets", icon: Target, href: "/targets" },
+    { label: "Intelligence Vault", icon: Target, href: "/targets" },
     { label: "Relationship Graph", icon: Network, href: "/graph" },
     { label: "Pipeline Command", icon: Layers, href: "/pipeline" },
-    { label: "Market Intelligence", icon: Activity, href: "/signals" },
+    { label: "Market Signals", icon: Activity, href: "/signals" },
   ];
 
   return (
@@ -68,7 +68,7 @@ export default function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean, setIsO
         <div className="absolute inset-0 bg-indigo-500/5 blur-xl group-hover:bg-indigo-500/10 transition-all opacity-0 group-hover:opacity-100" />
         <div className="relative w-full bg-white/[0.03] border border-white/10 rounded-2xl py-3 pl-12 pr-4 text-xs text-gray-400 flex justify-between items-center group-hover:bg-white/[0.06] group-hover:border-white/20 transition-all font-black uppercase tracking-widest ring-1 ring-transparent group-hover:ring-indigo-500/20">
           <Search size={16} className="absolute left-4 text-gray-600 group-hover:text-indigo-400 transition-colors" />
-          <span>Intercept...</span>
+          <span>Search Vault...</span>
           <span className="px-2 py-1 rounded-lg bg-black border border-white/10 text-[9px] font-black text-gray-500 shadow-xl group-hover:text-white transition-colors">⌘K</span>
         </div>
       </div>
@@ -105,7 +105,7 @@ export default function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean, setIsO
               
               {isActive && <ChevronRight size={14} className="text-gray-700" />}
               
-              {!isActive && item.label === "Market Intelligence" && (
+              {!isActive && item.label === "Market Signals" && (
                 <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20">
                    <span className="text-[9px] font-black text-amber-500">3</span>
                 </div>

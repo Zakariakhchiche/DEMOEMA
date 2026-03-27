@@ -19,12 +19,12 @@ export default function TargetsPage() {
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [showFilters, setShowFilters] = useState(false);
   const [selectedSectors, setSelectedSectors] = useState<string[]>([]);
-  const [minScore, setMinScore] = useState(40);
+  const [minScore, setMinScore] = useState(0);
   
   const router = useRouter();
 
   useEffect(() => {
-    fetch(`${API_URL}/api/targets`)
+    fetch(`/api/targets`)
       .then(res => res.json())
       .then(data => {
         setTargets(data.data);
@@ -145,7 +145,7 @@ export default function TargetsPage() {
                  <button 
                    onClick={() => {
                      setSelectedSectors([]);
-                     setMinScore(40);
+                     setMinScore(0);
                    }}
                    className="w-full py-4 rounded-3xl bg-white/5 border border-white/10 text-[11px] font-black uppercase text-gray-500 hover:bg-rose-500/10 hover:text-rose-400 hover:border-rose-500/20 transition-all tracking-widest active:scale-95"
                  >

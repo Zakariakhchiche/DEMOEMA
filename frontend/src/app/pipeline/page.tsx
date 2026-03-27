@@ -39,7 +39,7 @@ export default function PipelinePage() {
   useEffect(() => {
     setIsClient(true);
     setLoading(true);
-    fetch(`${API_URL}/api/pipeline`)
+    fetch(`/api/pipeline`)
       .then(res => res.json())
       .then(json => {
         setColumns(json.data);
@@ -113,7 +113,7 @@ export default function PipelinePage() {
         <div className="flex gap-4 items-center">
              <button 
                onClick={() => handleAction('sync', 'Full radar synchronization complete.')}
-               className="px-8 py-3.5 rounded-2xl bg-indigo-600 text-white shadow-2xl shadow-indigo-600/30 hover:bg-indigo-50 transition-all flex items-center justify-center gap-3 font-black text-[11px] uppercase tracking-widest active:scale-95"
+               className="px-8 py-3.5 rounded-2xl bg-indigo-600 text-white shadow-2xl shadow-indigo-600/30 hover:bg-indigo-500 transition-all flex items-center justify-center gap-3 font-black text-[11px] uppercase tracking-widest active:scale-95"
              >
                {processingAction === 'sync' ? (
                   <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />

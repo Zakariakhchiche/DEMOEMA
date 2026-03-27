@@ -14,15 +14,17 @@ export default function ReportPage() {
   const router = useRouter();
   const [target, setTarget] = useState<TargetType | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
     if (!id) return;
-    fetch(`${API_URL}/api/targets/${id}`)
+    fetch(`/api/targets/${id}`)
       .then(res => res.json())
       .then(json => {
         setTarget(json.data);
         setLoading(false);
-      });
+      })
+      .catch(() => setLoading(false));
   }, [id]);
 
   if (loading || !target) {
@@ -32,8 +34,6 @@ export default function ReportPage() {
       </div>
     );
   }
-
-  const [isExporting, setIsExporting] = useState(false);
 
   const handlePrint = () => {
     setIsExporting(true);
@@ -63,7 +63,7 @@ export default function ReportPage() {
           ) : (
             <Download size={16} />
           )}
-          {isExporting ? "Génération PDF..." : "Export Dossier (PDF)"}
+          {isExporting ? "Generating PDF..." : "Export Dossier (PDF)"}
         </button>
       </div>
 
@@ -82,7 +82,7 @@ export default function ReportPage() {
                <span className="font-black text-3xl tracking-tighter uppercase">EDRCF 5.0</span>
             </div>
             <h1 className="text-5xl font-black tracking-tighter mb-2 italic">EXTRACTION : ORIGINATION</h1>
-            <p className="text-gray-500 font-bold uppercase tracking-[0.3em] text-xs">Radar de Signaux Faibles • {new Date().toLocaleDateString('fr-FR')}</p>
+            <p className="text-gray-500 font-bold uppercase tracking-[0.3em] text-xs">Weak Signals Radar • {new Date().toLocaleDateString('en-US')}</p>
           </div>
           <div className="text-left sm:text-right">
              <div className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">Protocol Confidence</div>
@@ -94,21 +94,21 @@ export default function ReportPage() {
         {/* 01. Identification */}
         <section>
            <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-400 mb-8 flex items-center gap-4">
-              <span className="w-1.5 h-6 bg-black rounded-full" /> 01. IDENTITÉ DE LA CIBLE
+              <span className="w-1.5 h-6 bg-black rounded-full" /> 01. TARGET IDENTITY
            </h2>
            <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
               <div className="space-y-8">
                  <div>
-                    <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Société</div>
+                    <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Company</div>
                     <div className="text-3xl font-black uppercase tracking-tight">{target.name}</div>
                  </div>
                  <div className="flex gap-12">
                     <div>
-                       <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Secteur</div>
+                       <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Sectorcluster</div>
                        <div className="text-sm font-black uppercase">{target.sector}</div>
                     </div>
                     <div>
-                       <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Fenêtre Estimée</div>
+                       <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Estimated Window</div>
                        <div className="text-sm font-black uppercase italic">{target.analysis.window}</div>
                     </div>
                  </div>
@@ -132,10 +132,10 @@ export default function ReportPage() {
            <div className="absolute top-0 right-0 p-12 opacity-10">
               <Activity size={120} />
            </div>
-           <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-500 mb-8 relative z-10">02. ANALYSE NARRATIVE</h2>
+           <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-500 mb-8 relative z-10">02. NARRATIVE ANALYSIS</h2>
            <div className="space-y-8 relative z-10">
               <div>
-                 <div className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-2">Type probable technique</div>
+                 <div className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-2">Probable Technical Type</div>
                  <div className="text-2xl font-black italic">{target.analysis.type}</div>
               </div>
               <p className="text-lg font-bold leading-relaxed text-gray-200 border-l border-white/20 pl-8">
@@ -144,13 +144,12 @@ export default function ReportPage() {
            </div>
         </section>
 
-        {/* 03. Activation */}
-        <section className="grid grid-cols-1 md:grid-cols-2 gap-12">
+        {/* 03. Activat         <section className="grid grid-cols-1 md:grid-cols-2 gap-12">
            <div>
-              <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-400 mb-8">03. ACTIVATION STRATÉGIQUE</h2>
+              <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-400 mb-8">03. STRATEGIC ACTIVATION</h2>
               <div className="space-y-6">
                  <div>
-                    <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-2">Décideurs probables</div>
+                    <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-2">Probable Deciders</div>
                     <div className="flex flex-wrap gap-2">
                        {target.activation.deciders.map((d, i) => (
                          <span key={i} className="px-3 py-1 bg-gray-100 rounded-lg text-[10px] font-black uppercase">{d}</span>
@@ -158,33 +157,33 @@ export default function ReportPage() {
                     </div>
                  </div>
                  <div>
-                    <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-2">Angle d'approche recommandé</div>
+                    <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-2">Recommended Approach</div>
                     <div className="text-sm font-bold leading-relaxed">{target.activation.approach}</div>
                  </div>
                  <div>
-                    <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-2">Raison objective de contact</div>
+                    <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-2">Objective contact reason</div>
                     <div className="text-sm font-bold leading-relaxed">{target.activation.reason}</div>
                  </div>
               </div>
            </div>
            <div className="p-10 border-4 border-rose-500/10 rounded-[3rem] bg-rose-50/20">
               <h2 className="text-xs font-black uppercase tracking-[0.4em] text-rose-500 mb-8 flex items-center gap-3">
-                 <AlertTriangle size={18} /> VIGILANCE & RISQUES
+                 <AlertTriangle size={18} /> VIGILANCE & RISKS
               </h2>
               <div className="space-y-8">
                  <div>
-                    <div className="text-[9px] font-black text-rose-500/60 uppercase tracking-widest mb-2">Risque de faux positif</div>
+                    <div className="text-[9px] font-black text-rose-500/60 uppercase tracking-widest mb-2">False Positive Risk</div>
                     <div className="text-2xl font-black text-rose-600">{target.risks.falsePositive}</div>
                  </div>
                  <div>
-                    <div className="text-[9px] font-black text-rose-500/60 uppercase tracking-widest mb-2">Points d'incertitude</div>
+                    <div className="text-[9px] font-black text-rose-500/60 uppercase tracking-widest mb-2">Incertainty Points</div>
                     <p className="text-xs font-bold leading-relaxed text-gray-500">
                        {target.risks.uncertainties}
                     </p>
                  </div>
               </div>
            </div>
-        </section>
+        </section>  </section>
 
         {/* Footer */}
         <div className="mt-12 pt-12 border-t border-black flex justify-between items-center text-[8px] font-black text-gray-400 uppercase tracking-widest">
@@ -192,7 +191,7 @@ export default function ReportPage() {
               <span>EDRCF-ARCHIVE-V5</span>
               <span>GEN-LATENCY-42ms</span>
            </div>
-           <div>CONFIDENTIALITÉ TOTALE • USAGE INTERNE UNIQUEMENT</div>
+           <div>TOTAL CONFIDENTIALITY • INTERNAL USE ONLY</div>
         </div>
       </motion.div>
 

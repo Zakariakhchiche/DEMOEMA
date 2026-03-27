@@ -26,7 +26,7 @@ export default function SignalsPage() {
 
   useEffect(() => {
     setLoading(true);
-    fetch(`${API_URL}/api/signals`)
+    fetch(`/api/signals`)
       .then(res => res.json())
       .then(json => {
         setSignals(json.data);

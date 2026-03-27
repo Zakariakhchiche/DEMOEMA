@@ -2,7 +2,6 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Any, Optional
 import time
-import random
 
 app = FastAPI(title="EDRCF 5.0 | M&A Signal Radar", version="5.0.0")
 
@@ -52,29 +51,29 @@ MOCK_TARGETS: List[Dict[str, Any]] = [
         "name": "TechFlow Industrials",
         "sector": "Industrial Tech",
         "globalScore": 42.5,
-        "priorityLevel": "Opportunité Forte",
+        "priorityLevel": "Strong Opportunity",
         "topSignals": [
-            {"id": "cfo_recruitment", "label": "Recrutement DAF (ex-PE)", "family": "Management"},
-            {"id": "holding_creation", "label": "Création Holding de contrôle", "family": "Patrimonial"},
-            {"id": "founder_age_58_plus", "label": "Fondateur > 60 ans", "family": "Dirigeant"},
-            {"id": "carve_out", "label": "Filialisation branche non-core", "family": "Structure"}
+            {"id": "cfo_recruitment", "label": "CFO Recruitment (ex-PE)", "family": "Management"},
+            {"id": "holding_creation", "label": "Holding Structure Creation", "family": "Ownership"},
+            {"id": "founder_age_58_plus", "label": "Founder Age > 60", "family": "Executive"},
+            {"id": "carve_out", "label": "Non-core branch Filialisation", "family": "Structure"}
         ],
         "analysis": {
             "type": "Transmission / LBO",
-            "window": "6-12 mois",
-            "narrative": "Le faisceau de signaux suggère une mise en ordre patrimoniale préalable à une transmission ou une ouverture minoritaire sous 6 à 12 mois. Le recrutement récent d'un DAF issu du Private Equity confirme la professionnalisation en vue d'un processus."
+            "window": "6-12 months",
+            "narrative": "The convergence of signals suggests ownership restructuring prior to a transmission or minority opening within 6 to 12 months. The recent recruitment of a CFO from a Private Equity background confirms professionalization in view of a process."
         },
         "activation": {
-            "deciders": ["Jean-Marc Vallet (Fondateur)", "Sophie Durand (DAF)"],
-            "approach": "Approche directe via réseau alumni (X-Mines)",
-            "reason": "Discussion sur la pérennisation industrielle et la structuration du capital post-carveout."
+            "deciders": ["Jean-Marc Vallet (Founder)", "Sophie Durand (CFO)"],
+            "approach": "Direct approach via alumni network (Ivy League/Mines)",
+            "reason": "Discussion on industrial sustainability and capital structuring post-carveout."
         },
         "risks": {
-            "falsePositive": "Léger (0.12)",
-            "uncertainties": "Capacité réelle du fondateur à déléguer le processus opérationnel."
+            "falsePositive": "Low (0.12)",
+            "uncertainties": "Founder's actual willingness to delegate the operational process."
         },
         "scores": {
-            "patrimonial": 85,
+            "ownership": 85,
             "management": 92,
             "financial": 45,
             "structure": 88,
@@ -86,28 +85,28 @@ MOCK_TARGETS: List[Dict[str, Any]] = [
         "name": "BioGrid Pharma",
         "sector": "MedTech",
         "globalScore": 31.2,
-        "priorityLevel": "Cible Prioritaire",
+        "priorityLevel": "Priority Target",
         "topSignals": [
-            {"id": "strategic_refocus", "label": "Recentrage stratégique annoncé", "family": "Stratégie"},
-            {"id": "debt_surge", "label": "Hausse de l'endettement financier", "family": "Financier"},
-            {"id": "ceo_non_founder", "label": "DG non fondateur en place", "family": "Management"}
+            {"id": "strategic_refocus", "label": "Strategic refocus announced", "family": "Strategy"},
+            {"id": "debt_surge", "label": "Surge in financial debt", "family": "Financial"},
+            {"id": "ceo_non_founder", "label": "External CEO in place", "family": "Management"}
         ],
         "analysis": {
-            "type": "Ouverture de Capital",
-            "window": "12-18 mois",
-            "narrative": "La montée de l'endettement couplée à un recentrage sur les actifs core indique un besoin probable de fonds propres pour financer la prochaine phase de croissance ou un désengagement partiel des actionnaires historiques."
+            "type": "Capital Opening",
+            "window": "12-18 months",
+            "narrative": "The rise in debt combined with a focus on core assets indicates a probable need for equity to finance the next growth phase or a partial exit of historical shareholders."
         },
         "activation": {
-            "deciders": ["Marc Lepic (DG)", "Conseil d'Administration"],
-            "approach": "Angle sectoriel / Consolidation",
-            "reason": "Support au plan stratégique 2027 et optimisation de la structure de bilan."
+            "deciders": ["Marc Lepic (CEO)", "Board of Directors"],
+            "approach": "Sector angle / Consolidation",
+            "reason": "Support for the 2027 strategic plan and optimization of the balance sheet structure."
         },
         "risks": {
-            "falsePositive": "Moyen (0.21)",
-            "uncertainties": "Calendrier de refinancement de la dette senior."
+            "falsePositive": "Medium (0.21)",
+            "uncertainties": "Refinancing calendar for senior debt."
         },
         "scores": {
-            "patrimonial": 40,
+            "ownership": 40,
             "management": 75,
             "financial": 88,
             "structure": 30,
@@ -119,27 +118,27 @@ MOCK_TARGETS: List[Dict[str, Any]] = [
         "name": "Lumix Logistics",
         "sector": "Logistics",
         "globalScore": 24.8,
-        "priorityLevel": "Cible à Préparer",
+        "priorityLevel": "Preparation Needed",
         "topSignals": [
-            {"id": "sci_creation", "label": "Création SCI immobilière", "family": "Patrimonial"},
-            {"id": "sector_consolidation", "label": "Consolidation forte du secteur", "family": "Secteur"}
+            {"id": "sci_creation", "label": "Real Estate Holding Creation", "family": "Ownership"},
+            {"id": "sector_consolidation", "label": "Strong sector consolidation", "family": "Sector"}
         ],
         "analysis": {
-            "type": "Cession / Consolidation",
-            "window": "18+ mois",
-            "narrative": "L'isolation des actifs immobiliers via une SCI est un signal classique de préparation de cession d'exploitation. Dans un secteur en pleine consolidation, Lumix devient une proie naturelle pour un roll-up."
+            "type": "Disposal / Consolidation",
+            "window": "18+ months",
+            "narrative": "Isolating real estate assets is a classic signal of preparing for an operating business sale. In a rapidly consolidating sector, Lumix is a natural target for a roll-up strategy."
         },
         "activation": {
-            "deciders": ["Famille Luminaire"],
-            "approach": "Veille stratégique / Partenariat",
-            "reason": "Discussion sur la valeur des actifs immobiliers vs opérationnels dans le marché actuel."
+            "deciders": ["Luminaire Family"],
+            "approach": "Strategic monitoring / Partnership",
+            "reason": "Discussion on the value of real estate vs. operational assets in the current market."
         },
         "risks": {
-            "falsePositive": "Fort (0.35)",
-            "uncertainties": "Attachement émotionnel à l'entreprise familiale."
+            "falsePositive": "High (0.35)",
+            "uncertainties": "Emotional attachment of the family to the business."
         },
         "scores": {
-            "patrimonial": 90,
+            "ownership": 90,
             "management": 30,
             "financial": 50,
             "structure": 60,
@@ -176,11 +175,11 @@ def get_signals():
             signals_feed.append({
                 "id": f"{t['id']}-{s['id']}",
                 "type": s["family"],
-                "title": f"{s['label']} détecté chez {t['name']}",
-                "time": "Récent",
+                "title": f"{s['label']} detected at {t['name']}",
+                "time": "Recent",
                 "source": "EDRCF Radar",
                 "severity": "high" if t["globalScore"] > 35 else "medium",
-                "location": "France",
+                "location": "Global",
                 "tags": [s["family"], t["sector"]]
             })
     return {"data": signals_feed}
@@ -190,9 +189,9 @@ def get_pipeline():
     pipeline = [
         { "id": "id", "title": "Identification", "cards": [] },
         { "id": "qual", "title": "Qualification", "cards": [] },
-        { "id": "prep", "title": "Cible à Préparer", "cards": [] },
-        { "id": "prio", "title": "Cible Prioritaire", "cards": [] },
-        { "id": "opp", "title": "Opportunité Forte", "cards": [] }
+        { "id": "prep", "title": "Preparation Needed", "cards": [] },
+        { "id": "prio", "title": "Priority Target", "cards": [] },
+        { "id": "opp", "title": "Strong Opportunity", "cards": [] }
     ]
     
     for t in MOCK_TARGETS:
@@ -205,9 +204,9 @@ def get_pipeline():
             "tags": [t["analysis"]["type"]],
             "priority": "high" if t["globalScore"] > 30 else "medium"
         }
-        if level == "Opportunité Forte": pipeline[4]["cards"].append(card)
-        elif level == "Cible Prioritaire": pipeline[3]["cards"].append(card)
-        elif level == "Cible à Préparer": pipeline[2]["cards"].append(card)
+        if level == "Strong Opportunity": pipeline[4]["cards"].append(card)
+        elif level == "Priority Target": pipeline[3]["cards"].append(card)
+        elif level == "Preparation Needed": pipeline[2]["cards"].append(card)
         elif level == "Watchlist": pipeline[1]["cards"].append(card)
         else: pipeline[0]["cards"].append(card)
         
@@ -217,9 +216,29 @@ def get_pipeline():
 def copilot_query(q: str = Query(...)):
     time.sleep(1)
     q_l = q.lower()
-    if "radar" in q_l or "signal" in q_l:
-        return {"response": "Le radar EDRCF 5.0 a identifié une convergence majeure chez TechFlow Industrials : création de holding + recrutement DAF + fondateur > 60 ans. Score de 42.5 (Opportunité Forte). Je recommande une approche via réseau alumni."}
-    return {"response": "Je peux analyser une cible spécifique ou filtrer le radar par famille de signaux (ex: Patrimonial, Dirigeant). Que souhaitez-vous approfondir ?"}
+    
+    # Intent Detection
+    if "radar" in q_l or "signal" in q_l or "highest" in q_l:
+        return {"response": "The EDRCF 5.0 Radar has identified a major convergence at **TechFlow Industrials**: Holding creation + CFO recruitment + Founder > 60 years. Global Score: **42.5** (Strong Opportunity). I recommend an immediate approach via the alumni network."}
+    
+    if "sector" in q_l or "industry" in q_l:
+        return {"response": "Current High-Intensity sectors: **Industrial Tech** (Volatility +24%) and **MedTech** (6-12 month window opening). TechFlow and BioGrid are the leading entities in these clusters."}
+    
+    if "techflow" in q_l:
+        t = MOCK_TARGETS[0]
+        return {"response": f"**TechFlow Industrials** ({t['sector']}) analysis: {t['analysis']['narrative']} Window: {t['analysis']['window']}. Activation: {t['activation']['approach']}."}
+
+    if "biogrid" in q_l:
+        t = MOCK_TARGETS[1]
+        return {"response": f"**BioGrid Pharma** ({t['sector']}) shows a debt surge and strategic refocus. This indicates a potential Capital Opening within {t['analysis']['window']}. Deciders: {', '.join(t['activation']['deciders'])}."}
+
+    if "lumix" in q_l:
+        return {"response": "Lumix Logistics is in the 'Preparation Needed' phase. The isolation of real estate assets suggests a future exit. Monitor for a 18+ month horizon."}
+
+    if "how are you" in q_l or "hello" in q_l:
+        return {"response": "I am fully operational. I am currently monitoring 2,408 entities and processing 14M signals per second. How can I assist your deal origination strategy today?"}
+
+    return {"response": "I can provide deep-dives on specific targets (TechFlow, BioGrid, Lumix), analyze specific sectors, or filter the pipeline by deal type. What would you like to explore?"}
 
 if __name__ == "__main__":
     import uvicorn

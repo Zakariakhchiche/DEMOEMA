@@ -35,7 +35,7 @@ export default function Home() {
 
   // Fetch targets from FastAPI backend
   useEffect(() => {
-    fetch(`${API_URL}/api/targets`)
+    fetch(`/api/targets`)
       .then(res => {
         if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
         return res.json();
@@ -218,7 +218,7 @@ export default function Home() {
                       {target.globalScore}
                     </span>
                     <span className="text-[10px] uppercase tracking-[0.4em] text-indigo-400/80 font-black mt-3">
-                      Score Global
+                      Global Score
                     </span>
                   </div>
                 </div>
@@ -226,11 +226,11 @@ export default function Home() {
                 <div className="mt-10 pt-8 border-t border-white/[0.05] flex flex-col md:flex-row justify-between items-start md:items-center gap-6 relative z-10">
                   <div className="flex gap-8 sm:gap-12">
                     <div className="space-y-1.5">
-                      <span className="text-[10px] font-black text-gray-600 uppercase tracking-widest block">Type Probable</span>
+                      <span className="text-[10px] font-black text-gray-600 uppercase tracking-widest block">Probable Type</span>
                       <span className="text-base text-gray-200 font-bold tracking-tight">{target.analysis.type}</span>
                     </div>
                     <div className="space-y-1.5">
-                      <span className="text-[10px] font-black text-gray-600 uppercase tracking-widest block">Fenêtre Estimée</span>
+                      <span className="text-[10px] font-black text-gray-600 uppercase tracking-widest block">Estimated Window</span>
                       <span className="text-base text-gray-200 font-bold tracking-tight">{target.analysis.window}</span>
                     </div>
                   </div>
