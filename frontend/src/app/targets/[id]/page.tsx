@@ -219,7 +219,7 @@ export default function TargetDetail() {
         {/* Left Column - Origination Card */}
         <div className="lg:col-span-4 flex flex-col gap-8">
           {/* Score + Financials Card */}
-          <div className="p-10 rounded-[3rem] bg-black/40 border border-indigo-500/20 relative overflow-hidden group shadow-2xl backdrop-blur-3xl">
+          <div className="p-6 sm:p-10 rounded-[2rem] sm:rounded-[3rem] bg-black/40 border border-indigo-500/20 relative overflow-hidden group shadow-2xl lg:backdrop-blur-3xl">
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-600/10 via-transparent to-transparent opacity-50" />
 
             <div className="relative z-10">
@@ -325,7 +325,7 @@ export default function TargetDetail() {
           </div>
 
           {/* Company Identity */}
-          <div className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl backdrop-blur-xl">
+          <div className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl lg:backdrop-blur-xl">
             <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] flex items-center gap-2 mb-8">
               <Building2 size={16} className="text-indigo-400" /> Identite Societe
             </h3>
@@ -352,7 +352,7 @@ export default function TargetDetail() {
 
           {/* Dirigeants Section */}
           {targetData.dirigeants && targetData.dirigeants.length > 0 && (
-            <div className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl backdrop-blur-xl">
+            <div className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl lg:backdrop-blur-xl">
               <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] flex items-center gap-2 mb-8">
                 <Users size={16} className="text-indigo-400" /> Dirigeants
               </h3>
@@ -399,7 +399,7 @@ export default function TargetDetail() {
 
           {/* Group Section */}
           {targetData.group?.is_group && (
-            <div className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl backdrop-blur-xl">
+            <div className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl lg:backdrop-blur-xl">
               <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] flex items-center gap-2 mb-8">
                 <Network size={16} className="text-indigo-400" /> Structure du Groupe
               </h3>
@@ -537,7 +537,7 @@ export default function TargetDetail() {
            </div>
 
            {/* Google News Section */}
-           <section className="p-10 rounded-[3rem] bg-white/[0.02] border border-white/10 space-y-6">
+           <section className="p-6 sm:p-10 rounded-[2rem] sm:rounded-[3rem] bg-white/[0.02] border border-white/10 space-y-6">
               <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-500 flex items-center gap-4">
                  <span className="w-10 h-px bg-white/10" />
                  <Newspaper size={16} className="text-indigo-400" /> Veille Presse
@@ -579,7 +579,7 @@ export default function TargetDetail() {
            </section>
 
            {/* Infogreffe Actes Section */}
-           <section className="p-10 rounded-[3rem] bg-white/[0.02] border border-white/10 space-y-6">
+           <section className="p-6 sm:p-10 rounded-[2rem] sm:rounded-[3rem] bg-white/[0.02] border border-white/10 space-y-6">
               <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-500 flex items-center gap-4">
                  <span className="w-10 h-px bg-white/10" />
                  <ScrollText size={16} className="text-amber-400" /> Actes RCS — Infogreffe

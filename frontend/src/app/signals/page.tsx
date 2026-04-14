@@ -166,7 +166,7 @@ export default function SignalsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 min-h-0">
 
         {/* Main Feed */}
-        <div className="lg:col-span-8 bg-black/40 border border-white/10 rounded-[2.5rem] overflow-hidden flex flex-col shadow-2xl backdrop-blur-xl">
+        <div className="lg:col-span-8 bg-black/40 border border-white/10 rounded-[2.5rem] overflow-hidden flex flex-col shadow-2xl lg:backdrop-blur-xl">
           <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between bg-white/[0.02] flex-wrap gap-2">
              <div className="flex gap-2 flex-wrap">
                 {[
@@ -342,7 +342,7 @@ export default function SignalsPage() {
         {/* Sidebar Analytics */}
         <div className="lg:col-span-4 flex flex-col gap-8 overflow-y-auto custom-scrollbar">
           {/* Sector Heat */}
-          <div className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl backdrop-blur-xl flex-1 flex flex-col">
+          <div className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl lg:backdrop-blur-xl flex-1 flex flex-col">
             <h3 className="text-[10px] font-black text-gray-500 mb-8 uppercase tracking-[0.2em] flex items-center gap-2">
                <Globe size={16} className="text-indigo-400" /> Chaleur Sectorielle
             </h3>
@@ -373,7 +373,7 @@ export default function SignalsPage() {
           </div>
 
           {/* Distribution par Dimension */}
-          <div className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl backdrop-blur-xl">
+          <div className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl lg:backdrop-blur-xl">
              <div className="flex items-center justify-between mb-8">
                 <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] flex items-center gap-2">
                   <TrendingUp size={16} className="text-indigo-400" /> Distribution par Dimension
@@ -400,7 +400,7 @@ export default function SignalsPage() {
           </div>
 
           {/* Signal Catalog */}
-          <div className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl backdrop-blur-xl">
+          <div className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl lg:backdrop-blur-xl">
             <button
               onClick={() => setCatalogOpen(!catalogOpen)}
               className="w-full flex items-center justify-between"

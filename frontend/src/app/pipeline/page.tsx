@@ -178,7 +178,7 @@ export default function PipelinePage() {
              {columns.map((column) => {
               const colors = STAGE_COLORS[column.color] || STAGE_COLORS.indigo;
               return (
-              <div key={column.id} className="w-[260px] sm:w-[300px] lg:w-[340px] flex flex-col h-full bg-black/40 rounded-[2rem] sm:rounded-[3rem] border border-white/10 shadow-2xl overflow-hidden backdrop-blur-3xl group/col shrink-0">
+              <div key={column.id} className="w-[260px] sm:w-[300px] lg:w-[340px] flex flex-col h-full bg-black/40 rounded-[2rem] sm:rounded-[3rem] border border-white/10 shadow-2xl overflow-hidden lg:backdrop-blur-3xl group/col shrink-0">
 
                 <div className="p-4 sm:p-6 lg:p-8 pb-3 sm:pb-5 flex items-center justify-between">
                   <div className="flex items-center gap-4">
@@ -206,7 +206,7 @@ export default function PipelinePage() {
                               ref={provided.innerRef}
                               {...provided.draggableProps}
                               {...provided.dragHandleProps}
-                              className={`group p-4 sm:p-6 lg:p-8 rounded-[1.5rem] sm:rounded-[2rem] lg:rounded-[2.5rem] bg-white/[0.03] border border-white/10 ${colors.cardHover} cursor-grab active:cursor-grabbing transition-all shadow-xl backdrop-blur-2xl relative overflow-hidden
+                              className={`group p-4 sm:p-6 lg:p-8 rounded-[1.5rem] sm:rounded-[2rem] lg:rounded-[2.5rem] bg-white/[0.03] border border-white/10 ${colors.cardHover} cursor-grab active:cursor-grabbing transition-all shadow-xl lg:backdrop-blur-2xl relative overflow-hidden
                                 ${snapshot.isDragging ? "rotate-2 scale-[1.05] shadow-[0_40px_80px_rgba(0,0,0,0.8)] !border-indigo-500/60 !bg-indigo-500/10 z-[1000]" : ""}
                               `}
                             >

@@ -148,7 +148,7 @@ export default function Home() {
             initial={{ opacity: 0, y: 50, x: "-50%" }}
             animate={{ opacity: 1, y: 0, x: "-50%" }}
             exit={{ opacity: 0, y: 20, x: "-50%" }}
-            className="fixed bottom-10 left-1/2 z-[200] px-6 py-3 rounded-2xl bg-indigo-600 text-white font-black text-[10px] uppercase tracking-widest shadow-2xl flex items-center gap-3 border border-indigo-400 backdrop-blur-xl"
+            className="fixed bottom-24 lg:bottom-10 left-1/2 z-[200] px-6 py-3 rounded-2xl bg-indigo-600 text-white font-black text-[10px] uppercase tracking-widest shadow-2xl flex items-center gap-3 border border-indigo-400"
           >
             <ShieldCheck size={16} /> {notification}
           </motion.div>
@@ -176,7 +176,7 @@ export default function Home() {
             onClick={() =>
               handleAction("diag", "Diagnostics système terminés. Tous les clusters opérationnels.")
             }
-            className="px-6 py-3 rounded-2xl bg-white/[0.03] border border-white/10 text-[11px] font-black uppercase tracking-widest text-white hover:bg-white/10 transition-all flex items-center justify-center gap-3 backdrop-blur-md"
+            className="px-6 py-3 rounded-2xl bg-white/[0.03] border border-white/10 text-[11px] font-black uppercase tracking-widest text-white hover:bg-white/10 transition-all flex items-center justify-center gap-3"
           >
             {processingAction === "diag" ? (
               <div className="w-4 h-4 border-2 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
@@ -245,7 +245,7 @@ export default function Home() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: idx * 0.1, duration: 0.5 }}
                 key={card.label}
-                className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 backdrop-blur-2xl group hover:border-indigo-500/40 transition-all shadow-2xl relative overflow-hidden"
+                className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 lg:backdrop-blur-2xl group hover:border-indigo-500/40 transition-all shadow-2xl relative overflow-hidden"
               >
                 <div className="absolute top-0 right-0 p-6 opacity-[0.02] group-hover:opacity-[0.05] transition-opacity">
                   <card.icon size={80} />
@@ -326,7 +326,7 @@ export default function Home() {
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: 0.2 + idx * 0.1 }}
                     key={target.id}
-                    className="group p-10 rounded-[3rem] bg-black/40 border border-white/10 hover:border-indigo-500/40 transition-all cursor-pointer relative overflow-hidden backdrop-blur-3xl shadow-2xl active:scale-[0.99]"
+                    className="group p-6 sm:p-10 rounded-[2rem] sm:rounded-[3rem] bg-black/40 border border-white/10 hover:border-indigo-500/40 transition-all cursor-pointer relative overflow-hidden lg:backdrop-blur-3xl shadow-2xl active:scale-[0.99]"
                   >
                     <div className="flex justify-between items-start relative z-10 gap-4">
                       <div className="flex-1 min-w-0">
@@ -429,7 +429,7 @@ export default function Home() {
         {/* Intelligence Sidebar */}
         <div className="lg:col-span-4 flex flex-col gap-10 sticky top-4 min-w-0 overflow-hidden">
           {/* ── Distribution par Seuil ──────────────────────────── */}
-          <div className="p-10 rounded-[3rem] bg-black/40 border border-white/10 backdrop-blur-3xl shadow-2xl">
+          <div className="p-6 sm:p-10 rounded-[2rem] sm:rounded-[3rem] bg-black/40 border border-white/10 lg:backdrop-blur-3xl shadow-2xl">
             <div className="flex items-center justify-between mb-10">
               <h2 className="text-[11px] font-black text-white uppercase tracking-[0.3em] flex items-center gap-3">
                 <BarChart3 size={18} className="text-indigo-400" /> Distribution par Seuil
@@ -457,7 +457,7 @@ export default function Home() {
           </div>
 
           {/* ── Volatilité Sectorielle ─────────────────────────── */}
-          <div className="p-10 rounded-[3rem] bg-black/40 border border-white/10 backdrop-blur-3xl shadow-2xl">
+          <div className="p-6 sm:p-10 rounded-[2rem] sm:rounded-[3rem] bg-black/40 border border-white/10 lg:backdrop-blur-3xl shadow-2xl">
             <div className="flex items-center justify-between mb-10">
               <h2 className="text-[11px] font-black text-white uppercase tracking-[0.3em] flex items-center gap-3">
                 <Activity size={18} className="text-indigo-400" /> Volatilité Sectorielle

@@ -174,7 +174,7 @@ export default function GlobalCopilot() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             className={`
-              fixed z-[100] bg-[#0A0A0A]/95 backdrop-blur-3xl border border-white/10 shadow-[0_30px_100px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden
+              fixed z-[100] bg-[#0A0A0A]/95 lg:backdrop-blur-3xl border border-white/10 shadow-[0_30px_100px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden
               ${isMinimized
                 ? "bottom-32 right-4 sm:right-8 w-72 sm:w-80 h-20 rounded-[2rem] sm:rounded-[3rem]"
                 : "bottom-4 right-4 left-4 sm:left-auto sm:bottom-32 sm:right-8 sm:w-[420px] lg:w-[450px] h-[calc(100vh-6rem)] sm:h-[600px] lg:h-[650px] rounded-2xl sm:rounded-[3rem]"

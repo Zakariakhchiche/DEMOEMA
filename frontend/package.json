@@ -10,14 +10,17 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@antv/g6": "^5.1.0",
     "@hello-pangea/dnd": "^18.0.1",
-    "d3-force": "^3.0.0",
+    "@tanstack/query-sync-storage-persister": "^5.99.0",
+    "@tanstack/react-query": "^5.99.0",
+    "@tanstack/react-query-persist-client": "^5.99.0",
+    "@tanstack/react-virtual": "^3.13.23",
     "framer-motion": "^12.37.0",
     "lucide-react": "^0.577.0",
     "next": "15.1.0",
     "react": "19.2.3",
-    "react-dom": "19.2.3",
-    "react-force-graph-2d": "^1.29.1"
+    "react-dom": "19.2.3"
   },
   "devDependencies": {
     "@serwist/next": "^9.5.7",

@@ -540,7 +540,7 @@ export default function TargetsPage() {
       </header>
 
       {/* ── Table Area ───────────────────────────────────────────── */}
-      <div className="flex-1 bg-black/40 border border-white/10 rounded-[3rem] overflow-hidden flex flex-col shadow-2xl backdrop-blur-3xl relative">
+      <div className="flex-1 bg-black/40 border border-white/10 rounded-[2rem] sm:rounded-[3rem] overflow-hidden flex flex-col shadow-2xl lg:backdrop-blur-3xl relative">
         {/* Table Header - Desktop Only */}
         <div className="hidden lg:grid grid-cols-12 gap-4 px-10 py-6 border-b border-white/10 bg-white/[0.02] text-[11px] font-black text-gray-500 uppercase tracking-[0.2em]">
           <div

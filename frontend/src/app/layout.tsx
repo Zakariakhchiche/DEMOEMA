@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter, Outfit } from "next/font/google";
 import "./globals.css";
 import MainLayout from "@/components/MainLayout";
+import QueryProvider from "@/lib/providers/QueryProvider";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -49,9 +50,11 @@ export default function RootLayout({
   return (
     <html lang="fr" className="dark">
       <body className={`${inter.variable} ${outfit.variable} antialiased selection:bg-indigo-500/30 font-sans overflow-x-hidden`}>
-        <MainLayout>
-          {children}
-        </MainLayout>
+        <QueryProvider>
+          <MainLayout>
+            {children}
+          </MainLayout>
+        </QueryProvider>
       </body>
     </html>
   );

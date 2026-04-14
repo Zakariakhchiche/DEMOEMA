@@ -63,8 +63,21 @@
   .glass {
     @apply bg-black/40 border border-white/10 backdrop-blur-xl shadow-2xl;
   }
-  
+
+  .glass-mobile {
+    @apply bg-black/70 border border-white/10 shadow-2xl;
+  }
+
   .premium-gradient {
     @apply bg-gradient-to-br from-indigo-500 to-purple-600;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
