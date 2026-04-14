@@ -6,6 +6,7 @@ import { Layers, Plus, MoreHorizontal, Activity, Target, Zap, Clock, ShieldCheck
 import { useRouter } from "next/navigation";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { Target as TargetType } from "@/types";
+import { usePipeline, useMoveCard } from "@/lib/queries/usePipeline";
 
 interface PipelineCard {
   id: string;
@@ -24,8 +25,6 @@ interface Column {
   color: string;
   cards: PipelineCard[];
 }
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
 const STAGE_COLORS: Record<string, { bg: string; border: string; text: string; indicator: string; cardHover: string }> = {
   indigo:  { bg: "bg-indigo-500/10",  border: "border-indigo-500/20",  text: "text-indigo-400",  indicator: "bg-indigo-500",  cardHover: "hover:border-indigo-500/40" },
@@ -50,12 +49,14 @@ function parseEbitdaValue(ebitda: string): number {
 }
 
 export default function PipelinePage() {
-  const [columns, setColumns] = useState<Column[]>([]);
   const [isClient, setIsClient] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [processingAction, setProcessingAction] = useState<string | null>(null);
   const [notification, setNotification] = useState<string | null>(null);
   const router = useRouter();
+
+  const { data, isLoading } = usePipeline();
+  const columns = data?.data ?? [];
+  const moveCard = useMoveCard();
 
   useEffect(() => {
     if (notification) {
@@ -74,17 +75,6 @@ export default function PipelinePage() {
 
   useEffect(() => {
     setIsClient(true);
-    setLoading(true);
-    fetch(`/api/pipeline`)
-      .then(res => res.json())
-      .then(json => {
-        setColumns(json.data || []);
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error("Failed to fetch pipeline:", err);
-        setLoading(false);
-      });
   }, []);
 
   const pipelineStats = useMemo(() => {
@@ -103,28 +93,16 @@ export default function PipelinePage() {
     if (!destination) return;
     if (destination.droppableId === source.droppableId && destination.index === source.index) return;
 
-    const sourceColIndex = columns.findIndex(col => col.id === source.droppableId);
-    const destColIndex = columns.findIndex(col => col.id === destination.droppableId);
+    const sourceCol = columns.find(col => col.id === source.droppableId);
+    if (!sourceCol) return;
+    const card = sourceCol.cards[source.index];
 
-    const sourceCol = columns[sourceColIndex];
-    const destCol = columns[destColIndex];
-
-    const sourceCards = Array.from(sourceCol.cards);
-    const [movedCard] = sourceCards.splice(source.index, 1);
-
-    if (sourceColIndex === destColIndex) {
-      sourceCards.splice(destination.index, 0, movedCard);
-      const newColumns = [...columns];
-      newColumns[sourceColIndex] = { ...sourceCol, cards: sourceCards };
-      setColumns(newColumns);
-    } else {
-      const destCards = Array.from(destCol.cards);
-      destCards.splice(destination.index, 0, movedCard);
-      const newColumns = [...columns];
-      newColumns[sourceColIndex] = { ...sourceCol, cards: sourceCards };
-      newColumns[destColIndex] = { ...destCol, cards: destCards };
-      setColumns(newColumns);
-    }
+    moveCard.mutate({
+      cardId: card.id,
+      fromStage: source.droppableId,
+      toStage: destination.droppableId,
+      newIndex: destination.index,
+    });
   };
 
   if (!isClient) return null;

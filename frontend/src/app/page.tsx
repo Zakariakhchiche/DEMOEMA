@@ -21,13 +21,18 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { SkeletonCard, SkeletonKPI } from "@/components/LoadingSkeleton";
+import { useQueryClient } from "@tanstack/react-query";
+import { useTargets } from "@/lib/queries/useTargets";
 
 import { Target } from "@/types";
 
 export default function Home() {
-  const [targets, setTargets] = useState<Target[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState(false);
+  const { data, isLoading, error } = useTargets();
+  const queryClient = useQueryClient();
+  const targets = data?.data || [];
+  const loading = isLoading;
+  const fetchError = !!error;
+
   const [processingAction, setProcessingAction] = useState<string | null>(null);
   const [notification, setNotification] = useState<string | null>(null);
   const router = useRouter();
@@ -47,40 +52,14 @@ export default function Home() {
     }, 1500);
   };
 
-  // Fetch targets from FastAPI backend
-  useEffect(() => {
-    fetch(`/api/targets`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
-        return res.json();
-      })
-      .then((data) => {
-        setTargets(data.data || []);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("Failed to fetch targets:", err);
-        setFetchError(true);
-        setLoading(false);
-      });
-  }, []);
-
   // Re-fetch targets when copilot injects new ones from Pappers
   useEffect(() => {
     const handleTargetsUpdated = () => {
-      fetch(`/api/targets`)
-        .then((res) => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          return res.json();
-        })
-        .then((data) => {
-          setTargets(data.data || []);
-        })
-        .catch((err) => console.error("Failed to refresh targets:", err));
+      queryClient.invalidateQueries({ queryKey: ["targets"] });
     };
     window.addEventListener("targets-updated", handleTargetsUpdated);
     return () => window.removeEventListener("targets-updated", handleTargetsUpdated);
-  }, []);
+  }, [queryClient]);
 
   // ── Dynamic KPI computation ────────────────────────────────────
   const kpis = useMemo(() => {

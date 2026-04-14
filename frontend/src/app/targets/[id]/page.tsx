@@ -10,9 +10,9 @@ import {
   ExternalLink, Building2, Calendar, Hash, User, Newspaper, ScrollText
 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { Target as TargetType } from "@/types";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
+import { useTarget } from "@/lib/queries/useTarget";
 
 const DIMENSION_FR: Record<string, string> = {
   signaux_patrimoniaux: "Patrimoniaux",
@@ -52,15 +52,28 @@ export default function TargetDetail() {
     setMounted(true);
   }, []);
 
-  const [targetData, setTargetData] = useState<TargetType | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  const { data: targetData, isLoading: loading, error } = useTarget(id);
+  const siren = targetData?.siren;
+
+  const { data: newsData, isLoading: newsLoading } = useQuery({
+    queryKey: ["news", siren],
+    queryFn: () => fetch(`/api/news/${siren}`).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+    enabled: !!siren,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const { data: actesData, isLoading: actesLoading } = useQuery({
+    queryKey: ["actes", siren],
+    queryFn: () => fetch(`/api/infogreffe/${siren}`).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+    enabled: !!siren,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const news: any[] = newsData?.data?.articles ?? [];
+  const actes: any[] = actesData?.data?.actes ?? [];
+
   const [processingAction, setProcessingAction] = useState<string | null>(null);
   const [notification, setNotification] = useState<{message: string, type: 'success' | 'info'} | null>(null);
-  const [news, setNews] = useState<{title:string; link:string; date:string; source:string; signals:string[]}[]>([]);
-  const [newsLoading, setNewsLoading] = useState(false);
-  const [actes, setActes] = useState<{type:string; date:string; description:string}[]>([]);
-  const [actesLoading, setActesLoading] = useState(false);
 
   useEffect(() => {
     if (notification) {
@@ -77,40 +90,6 @@ export default function TargetDetail() {
     }, 1500);
   };
 
-  useEffect(() => {
-    if (!id) return;
-
-    setLoading(true);
-    fetch(`/api/targets/${id}`)
-      .then(res => {
-        if (!res.ok) throw new Error();
-        return res.json();
-      })
-      .then(json => {
-        setTargetData(json.data);
-        setLoading(false);
-        // Fetch external enrichments after main data loads
-        const siren = json.data?.siren;
-        if (siren) {
-          setNewsLoading(true);
-          fetch(`/api/news/${siren}`)
-            .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-            .then(d => { setNews(d.data?.articles || []); setNewsLoading(false); })
-            .catch(() => setNewsLoading(false));
-          setActesLoading(true);
-          fetch(`/api/infogreffe/${siren}`)
-            .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-            .then(d => { setActes(d.data?.actes || []); setActesLoading(false); })
-            .catch(() => setActesLoading(false));
-        }
-      })
-      .catch(err => {
-        console.error(err);
-        setError(true);
-        setLoading(false);
-      });
-  }, [id]);
-
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-white">
@@ -123,7 +102,7 @@ export default function TargetDetail() {
     );
   }
 
-  if (error || !targetData) {
+  if (!!error || !targetData) {
       return (
         <div className="flex flex-col items-center justify-center min-h-[60vh] text-white">
           <div className="w-20 h-20 rounded-[2rem] bg-rose-500/10 border border-rose-500/20 flex items-center justify-center mb-6 shadow-2xl">
@@ -565,7 +544,7 @@ export default function TargetDetail() {
                         <div className="flex items-center gap-3 mt-2 flex-wrap">
                           <span className="text-[9px] font-black text-gray-600 uppercase tracking-widest">{article.source}</span>
                           <span className="text-[9px] text-gray-700">{article.date?.split(',')[0]}</span>
-                          {article.signals?.map(sig => (
+                          {article.signals?.map((sig: string) => (
                             <span key={sig} className="px-2 py-0.5 rounded-md bg-rose-500/10 border border-rose-500/20 text-[8px] font-black text-rose-400 uppercase tracking-widest">
                               Signal M&A
                             </span>

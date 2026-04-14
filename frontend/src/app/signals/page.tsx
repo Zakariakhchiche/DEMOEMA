@@ -1,35 +1,33 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Activity, Bell, Filter, Search, ShieldAlert, ArrowUpRight, Clock, MapPin, Zap, TrendingUp, Globe, AlertCircle, Radio, ExternalLink, ChevronDown, ChevronUp, Hash } from "lucide-react";
 import Link from "next/link";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
+import { useSignals } from "@/lib/queries/useSignals";
 
 // --- Types ---
 interface Signal {
   id: string;
-  type: string;
-  title: string;
-  time: string;
+  label: string;
   source: string;
   source_url?: string;
+  dimension: string;
+  points: number;
   severity: "high" | "medium" | "low";
-  location: string;
-  tags: string[];
+  family: string;
   target_id?: string;
   target_name?: string;
-  dimension?: string;
-  points?: number;
 }
 
 interface SignalCatalogEntry {
   id: string;
   label: string;
   dimension: string;
-  description: string;
+  family: string;
+  severity: string;
   points: number;
+  source: string;
 }
 
 const SEVERITY_FR: Record<string, string> = {
@@ -49,25 +47,11 @@ const DIMENSION_FR: Record<string, string> = {
 export default function SignalsPage() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("All");
-  const [signals, setSignals] = useState<Signal[]>([]);
-  const [catalog, setCatalog] = useState<Record<string, SignalCatalogEntry[]>>({});
-  const [loading, setLoading] = useState(true);
   const [catalogOpen, setCatalogOpen] = useState(false);
 
-  useEffect(() => {
-    setLoading(true);
-    fetch(`/api/signals`)
-      .then(res => res.json())
-      .then(json => {
-        setSignals(json.data || []);
-        if (json.catalog) setCatalog(json.catalog);
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error("Failed to fetch signals:", err);
-        setLoading(false);
-      });
-  }, []);
+  const { data, isLoading } = useSignals();
+  const signals = data?.data ?? [];
+  const catalog = data?.catalog ?? {};
 
   const severityCounts = useMemo(() => {
     const counts = { all: signals.length, high: 0, medium: 0, low: 0 };
@@ -82,7 +66,7 @@ export default function SignalsPage() {
   const dimensionCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     signals.forEach(s => {
-      const dim = s.dimension || s.type || "Autre";
+      const dim = s.dimension || "Autre";
       counts[dim] = (counts[dim] || 0) + 1;
     });
     return counts;
@@ -91,7 +75,7 @@ export default function SignalsPage() {
   const sectorHeat = useMemo(() => {
     const sectors: Record<string, { count: number; totalPoints: number }> = {};
     signals.forEach(s => {
-      const sectorTag = s.tags?.find(t => t !== s.type) || "Autre";
+      const sectorTag = s.family || s.dimension || "Autre";
       if (!sectors[sectorTag]) sectors[sectorTag] = { count: 0, totalPoints: 0 };
       sectors[sectorTag].count++;
       sectors[sectorTag].totalPoints += s.points || 0;
@@ -108,8 +92,8 @@ export default function SignalsPage() {
 
   const filteredSignals = useMemo(() => {
     return signals.filter(s => {
-      const matchSearch = s.title.toLowerCase().includes(search.toLowerCase()) ||
-                          s.type.toLowerCase().includes(search.toLowerCase()) ||
+      const matchSearch = s.label.toLowerCase().includes(search.toLowerCase()) ||
+                          s.dimension.toLowerCase().includes(search.toLowerCase()) ||
                           (s.target_name || "").toLowerCase().includes(search.toLowerCase());
       const matchFilter = filter === "All" || s.severity === filter.toLowerCase();
       return matchSearch && matchFilter;
@@ -234,7 +218,7 @@ export default function SignalsPage() {
                         {SEVERITY_FR[signal.severity] || signal.severity}
                       </span>
                       <span className="text-[9px] font-black uppercase tracking-[0.15em] px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/10">
-                        {signal.type}
+                        {DIMENSION_FR[signal.dimension] || signal.dimension}
                       </span>
                       {signal.points !== undefined && (
                         <span className="text-[9px] font-black uppercase tracking-[0.15em] px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/10">
@@ -242,12 +226,12 @@ export default function SignalsPage() {
                         </span>
                       )}
                       <span className="text-[10px] font-black text-gray-600 flex items-center gap-1.5 uppercase tracking-[0.15em]">
-                        <Clock size={11} /> {signal.time}
+                        <Clock size={11} /> {signal.source}
                       </span>
                     </div>
 
                     <h3 className="text-lg md:text-xl font-black text-white mb-3 group-hover:text-indigo-400 transition-colors tracking-tight leading-tight">
-                      {signal.title}
+                      {signal.label}
                     </h3>
 
                     {/* Target + Dimension row */}
@@ -271,7 +255,7 @@ export default function SignalsPage() {
 
                     <div className="flex flex-wrap items-center gap-4">
                       <div className="flex items-center gap-2 text-[10px] font-black text-gray-500 uppercase tracking-widest bg-white/5 px-3 py-1.5 rounded-xl border border-white/5">
-                        <Globe size={14} className="opacity-50" /> {signal.location}
+                        <Globe size={14} className="opacity-50" /> {signal.family || signal.dimension}
                       </div>
                       {signal.source_url ? (
                         <a
@@ -287,13 +271,13 @@ export default function SignalsPage() {
                           <ShieldAlert size={14} className="opacity-50 text-indigo-500" /> {signal.source}
                         </div>
                       )}
-                      <div className="flex gap-2 ml-auto">
-                        {signal.tags?.map(tag => (
-                          <span key={tag} className="text-[9px] font-black text-gray-500 bg-indigo-500/5 px-2 py-1 rounded-md border border-indigo-500/10 uppercase tracking-widest">
-                            {tag}
+                      {signal.family && (
+                        <div className="flex gap-2 ml-auto">
+                          <span className="text-[9px] font-black text-gray-500 bg-indigo-500/5 px-2 py-1 rounded-md border border-indigo-500/10 uppercase tracking-widest">
+                            {signal.family}
                           </span>
-                        ))}
-                      </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -315,7 +299,7 @@ export default function SignalsPage() {
               ))}
             </AnimatePresence>
 
-            {filteredSignals.length === 0 && !loading && (
+            {filteredSignals.length === 0 && !isLoading && (
               <div className="p-20 text-center flex flex-col items-center gap-6">
                  <div className="w-20 h-20 bg-white/5 rounded-[2rem] flex items-center justify-center border border-white/10">
                     <ShieldAlert size={40} className="text-gray-700" />
@@ -327,7 +311,7 @@ export default function SignalsPage() {
               </div>
             )}
 
-            {loading && (
+            {isLoading && (
               <div className="p-20 text-center flex flex-col items-center gap-6">
                  <div className="relative w-16 h-16">
                    <div className="absolute inset-0 border-4 border-indigo-500/10 rounded-full" />
@@ -433,9 +417,9 @@ export default function SignalsPage() {
                         <div className="text-[11px] font-bold text-gray-300 leading-relaxed">
                           {entry.label}
                         </div>
-                        {entry.description && (
+                        {entry.family && (
                           <div className="text-[10px] text-gray-500 mt-1 leading-relaxed">
-                            {entry.description}
+                            {entry.family}
                           </div>
                         )}
                       </div>

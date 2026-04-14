@@ -7,6 +7,9 @@ interface PipelineCard {
   ebitda: string;
   priority: string;
   score: number;
+  window?: string;
+  region?: string;
+  tags?: string[];
 }
 
 interface PipelineStage {

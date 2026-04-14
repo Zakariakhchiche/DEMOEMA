@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useTargets } from "@/lib/queries/useTargets";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Target,
@@ -53,10 +55,11 @@ function getScoreThresholdLabel(score: number) {
 }
 
 export default function TargetsPage() {
-  const [targets, setTargets] = useState<TargetData[]>([]);
-  const [totalCount, setTotalCount] = useState(0);
-  const [apiFilters, setApiFilters] = useState<FilterOptions | null>(null);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const { data, isLoading: loading } = useTargets();
+  const targets = data?.data || [];
+  const totalCount = data?.total || targets.length;
+  const apiFilters = data?.filters || null;
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("globalScore");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
@@ -78,34 +81,14 @@ export default function TargetsPage() {
 
   const router = useRouter();
 
-  const fetchTargets = useCallback(() => {
-    setLoading(true);
-    fetch(`/api/targets`)
-      .then((res) => res.json())
-      .then((data) => {
-        setTargets(data.data || []);
-        setTotalCount(data.total || data.data?.length || 0);
-        if (data.filters) setApiFilters(data.filters);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error(err);
-        setLoading(false);
-      });
-  }, []);
-
-  useEffect(() => {
-    fetchTargets();
-  }, [fetchTargets]);
-
   // Re-fetch targets when copilot injects new ones from Pappers
   useEffect(() => {
     const handleTargetsUpdated = () => {
-      fetchTargets();
+      queryClient.invalidateQueries({ queryKey: ["targets"] });
     };
     window.addEventListener("targets-updated", handleTargetsUpdated);
     return () => window.removeEventListener("targets-updated", handleTargetsUpdated);
-  }, [fetchTargets]);
+  }, [queryClient]);
 
   // Fetch scoring config
   useEffect(() => {
@@ -167,7 +150,7 @@ export default function TargetsPage() {
       });
       setScoringConfig(payload);
       setShowWeights(false);
-      fetchTargets();
+      queryClient.invalidateQueries({ queryKey: ["targets"] });
     } catch (err) {
       console.error(err);
     } finally {
