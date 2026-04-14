@@ -1,9 +1,6 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
   async rewrites() {
     // Only proxy to localhost in development.
     // In production (Vercel), vercel.json handles /api/* routing.

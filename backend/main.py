@@ -499,7 +499,7 @@ async def get_google_news(company_name: str, max_results: int = 6) -> list:
     query = urllib.parse.quote(f'"{company_name}"')
     url = f"https://news.google.com/rss/search?q={query}&hl=fr&gl=FR&ceid=FR:fr"
     try:
-        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=6, follow_redirects=True) as client:
             resp = await client.get(url, headers={
                 "User-Agent": "Mozilla/5.0 (compatible; EdRCF/6.0)"
             })
@@ -548,7 +548,7 @@ INFOGREFFE_BASE = "https://opendata.datainfogreffe.fr/api/explore/v2.1/catalog/d
 async def get_infogreffe_actes(siren: str, max_results: int = 10) -> list:
     """
     Fetch recent actes RCS from Infogreffe open data by SIREN.
-    Tries multiple dataset names gracefully.
+    Tries multiple dataset names gracefully (3s per dataset, 8s total).
     """
     for dataset in INFOGREFFE_DATASETS:
         url = f"{INFOGREFFE_BASE}/{dataset}/records"
@@ -558,7 +558,7 @@ async def get_infogreffe_actes(siren: str, max_results: int = 10) -> list:
             "order_by": "date_depot desc",
         }
         try:
-            async with httpx.AsyncClient(timeout=8) as client:
+            async with httpx.AsyncClient(timeout=3) as client:
                 resp = await client.get(url, params=params)
             if resp.status_code == 200:
                 data = resp.json()
@@ -1277,20 +1277,29 @@ async def get_news_for_company(siren: str):
     """
     Fetch recent press articles from Google News RSS for a company.
     Returns articles with M&A signal detection.
+    Optimised: Pappers name lookup + Google News run concurrently with 8s guard.
     """
     siren = siren.strip().replace(" ", "")
-    # Find company name: 1) enriched_targets, 2) Pappers live lookup, 3) fallback SIREN
+    # Fast path: target already in memory
     target = next((t for t in enriched_targets if t.get("siren") == siren), None)
     if target:
         company_name = target["name"]
+        articles = await asyncio.wait_for(get_google_news(company_name), timeout=8)
     else:
-        try:
-            pappers_data = await get_pappers_company(siren)
-            company_name = (pappers_data or {}).get("nom_entreprise") or siren
-        except Exception:
-            company_name = siren
+        # Slow path: need Pappers lookup — run concurrently with a generous timeout
+        async def _resolve_and_fetch():
+            try:
+                pappers_data = await asyncio.wait_for(get_pappers_company(siren), timeout=6)
+                name = (pappers_data or {}).get("nom_entreprise") or siren
+            except Exception:
+                name = siren
+            return name, await get_google_news(name)
 
-    articles = await get_google_news(company_name)
+        try:
+            company_name, articles = await asyncio.wait_for(_resolve_and_fetch(), timeout=9)
+        except asyncio.TimeoutError:
+            company_name, articles = siren, []
+
     # Aggregate detected signals across all articles
     detected_signals: set = set()
     for a in articles:
@@ -1313,7 +1322,10 @@ async def get_infogreffe_endpoint(siren: str):
     Fetch recent actes RCS from Infogreffe open data for a SIREN.
     """
     siren = _validate_siren(siren)
-    actes = await get_infogreffe_actes(siren)
+    try:
+        actes = await asyncio.wait_for(get_infogreffe_actes(siren), timeout=8)
+    except asyncio.TimeoutError:
+        actes = []
     # Detect signals from actes
     detected_signals: set = set()
     for acte in actes:
@@ -2364,11 +2376,11 @@ async def _enrich_with_external_sources(targets: list) -> list:
             news_task = asyncio.create_task(get_google_news(name, max_results=6))
             infogreffe_task = asyncio.create_task(get_infogreffe_actes(siren)) if siren else None
 
-            news = await asyncio.wait_for(news_task, timeout=12)
+            news = await asyncio.wait_for(news_task, timeout=8)
             actes = []
             if infogreffe_task:
                 try:
-                    actes = await asyncio.wait_for(infogreffe_task, timeout=10)
+                    actes = await asyncio.wait_for(infogreffe_task, timeout=7)
                 except asyncio.TimeoutError:
                     print(f"[Infogreffe] Timeout for SIREN {siren}")
 

@@ -14,30 +14,37 @@ from demo_data import SIGNAL_CATALOG, SECTORS_HEAT
 # Cache management
 # ============================================================================
 
-CACHE_PATH = os.path.join(os.path.dirname(__file__), "targets_cache.json")
+_LOCAL_CACHE = os.path.join(os.path.dirname(__file__), "targets_cache.json")
+_TMP_CACHE = "/tmp/edrcf_targets_cache.json"
+
+# On Vercel the deploy dir is read-only; fall back to /tmp
+CACHE_PATH = _LOCAL_CACHE if os.access(os.path.dirname(__file__), os.W_OK) else _TMP_CACHE
 
 
 def save_cache(targets):
     """Save targets to JSON cache file."""
-    try:
-        with open(CACHE_PATH, "w", encoding="utf-8") as f:
-            json.dump(targets, f, ensure_ascii=False, indent=2)
-        print(f"[EdRCF] Cache saved: {len(targets)} targets -> {CACHE_PATH}")
-    except Exception as e:
-        print(f"[EdRCF] Cache save error: {e}")
+    for path in (CACHE_PATH, _TMP_CACHE):
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(targets, f, ensure_ascii=False, indent=2)
+            print(f"[EdRCF] Cache saved: {len(targets)} targets -> {path}")
+            return
+        except Exception as e:
+            print(f"[EdRCF] Cache save error ({path}): {e}")
 
 
 def load_cache():
-    """Load targets from JSON cache file. Returns None if no cache."""
-    try:
-        if os.path.exists(CACHE_PATH):
-            with open(CACHE_PATH, "r", encoding="utf-8") as f:
-                targets = json.load(f)
-            if targets and isinstance(targets, list):
-                print(f"[EdRCF] Cache loaded: {len(targets)} targets")
-                return targets
-    except Exception as e:
-        print(f"[EdRCF] Cache load error: {e}")
+    """Load targets from JSON cache file. Tries local then /tmp."""
+    for path in (_LOCAL_CACHE, _TMP_CACHE):
+        try:
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    targets = json.load(f)
+                if targets and isinstance(targets, list):
+                    print(f"[EdRCF] Cache loaded: {len(targets)} targets from {path}")
+                    return targets
+        except Exception as e:
+            print(f"[EdRCF] Cache load error ({path}): {e}")
     return None
 
 
@@ -644,17 +651,15 @@ def build_target(idx, company_info, search_info, search_had_age_filter=False):
             parent_name = be.get("denomination") or be.get("nom")
             break
 
-    # Etablissements secondaires
+    # Etablissements secondaires (as strings for frontend compatibility)
     subsidiaries = []
     if isinstance(etablissements, list):
         for etab in etablissements[1:6]:
             etab_siret = etab.get("siret", "")
             etab_ville = etab.get("ville", "")
             if etab_siret:
-                subsidiaries.append({
-                    "siret": etab_siret,
-                    "city": etab_ville,
-                })
+                label = f"{etab_ville} ({etab_siret})" if etab_ville else etab_siret
+                subsidiaries.append(label)
 
     is_group = is_holding or (parent_name is not None) or (isinstance(etablissements, list) and len(etablissements) > 1)
 
