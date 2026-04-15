@@ -44,12 +44,12 @@ export default function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean, setIsO
       </AnimatePresence>
 
       <aside className={`
-        fixed left-0 top-0 h-screen bg-black/40 backdrop-blur-3xl border-r border-white/5 flex flex-col p-6 z-[100] transition-all duration-500 
+        fixed left-0 top-0 h-dvh bg-black/40 backdrop-blur-3xl border-r border-white/5 flex flex-col p-4 lg:p-5 z-[100] transition-all duration-500
         ${isOpen ? "translate-x-0 w-full max-w-xs sm:max-w-none sm:w-72" : "-translate-x-full lg:translate-x-0 w-72"}
         lg:hover:border-white/10
       `}>
         {/* Branding */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-4 shrink-0">
           <div className="flex items-center gap-4 px-2 py-4 group cursor-pointer">
             <div className="w-10 h-10 rounded-[1.2rem] bg-indigo-600 flex items-center justify-center shadow-[0_0_30px_rgba(79,70,229,0.4)] border border-white/10 group-hover:scale-110 transition-transform duration-500 relative overflow-hidden">
               <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent" />
@@ -69,7 +69,7 @@ export default function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean, setIsO
         </div>
 
       {/* Global Search Trigger */}
-      <div className="relative mb-10 group cursor-pointer" onClick={() => {
+      <div className="relative mb-4 shrink-0 group cursor-pointer" onClick={() => {
         const event = new KeyboardEvent('keydown', {
           key: 'k',
           ctrlKey: true,
@@ -86,7 +86,7 @@ export default function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean, setIsO
       </div>
 
       {/* Primary Navigation */}
-      <nav className="flex-1 flex flex-col gap-1.5">
+      <nav className="flex-1 flex flex-col gap-1.5 overflow-y-auto min-h-0 custom-scrollbar">
         <div className="px-3 py-2 text-[9px] font-black text-gray-600 uppercase tracking-[0.3em] mb-2 flex items-center gap-3">
           <div className="w-4 h-px bg-gray-800" /> Modules Intelligence
         </div>
@@ -127,10 +127,10 @@ export default function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean, setIsO
         })}
 
         {/* AI Action */}
-        <div className="mt-10">
-           <button 
+        <div className="mt-4 lg:mt-6">
+           <button
              onClick={() => window.dispatchEvent(new CustomEvent("toggle-copilot"))}
-             className="w-full flex items-center gap-4 px-5 py-5 rounded-[2rem] text-[12px] font-black uppercase tracking-[0.2em] transition-all duration-500 bg-white text-black hover:bg-indigo-600 hover:text-white group border border-transparent shadow-2xl shadow-indigo-500/10 hover:shadow-indigo-600/40 active:scale-95"
+             className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all duration-500 bg-white text-black hover:bg-indigo-600 hover:text-white group border border-transparent shadow-2xl shadow-indigo-500/10 hover:shadow-indigo-600/40 active:scale-95"
            >
               <div className="relative">
                 <Sparkles size={20} className="text-indigo-600 group-hover:text-white transition-all duration-500 group-hover:rotate-12" />
@@ -145,28 +145,27 @@ export default function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean, setIsO
       </nav>
 
       {/* Footer Profile */}
-      <div className="mt-auto pt-8">
-        <div className="p-5 rounded-[2.5rem] bg-white/[0.02] border border-white/5 group hover:border-indigo-500/30 transition-all cursor-pointer relative overflow-hidden">
+      <div className="pt-3 shrink-0 border-t border-white/5 mt-3">
+        <div className="p-3 rounded-2xl bg-white/[0.02] border border-white/5 group hover:border-indigo-500/30 transition-all cursor-pointer relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-          
-          <div className="flex items-center justify-between mb-4 relative z-10">
-             <div className="flex items-center gap-2.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9px] font-black uppercase tracking-[0.2em]">
-                <ShieldCheck size={12} /> SECURED
-             </div>
-             <Settings size={14} className="text-gray-700 hover:text-white transition-colors" />
-          </div>
 
-          <div className="flex items-center gap-4 relative z-10">
-            <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center font-black text-indigo-400 group-hover:bg-indigo-600 group-hover:text-white transition-all transform duration-500 text-sm">
+          <div className="flex items-center gap-3 relative z-10">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center font-black text-indigo-400 group-hover:bg-indigo-600 group-hover:text-white transition-all duration-500 text-xs shrink-0">
                QM
             </div>
-            <div>
+            <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                 <div className="text-sm text-white font-black tracking-tight">Quentin Moreau</div>
-                 <Fingerprint size={12} className="text-gray-700" />
+                 <div className="text-sm text-white font-black tracking-tight truncate">Quentin Moreau</div>
+                 <Fingerprint size={10} className="text-gray-700 shrink-0" />
               </div>
-              <div className="text-[9px] text-gray-500 uppercase tracking-widest font-black mt-0.5 mt-1 border border-white/5 px-2 py-0.5 rounded-lg inline-block">Analyste Senior</div>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">Analyste Senior</span>
+                <span className="flex items-center gap-1 text-emerald-400 text-[8px] font-black uppercase">
+                  <ShieldCheck size={10} /> OK
+                </span>
+              </div>
             </div>
+            <Settings size={14} className="text-gray-700 hover:text-white transition-colors shrink-0" />
           </div>
         </div>
       </div>

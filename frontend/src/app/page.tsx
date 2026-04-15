@@ -278,7 +278,7 @@ export default function Home() {
       </div>
 
       {/* Main Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 lg:gap-10 items-start overflow-hidden">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 lg:gap-10 items-start">
         {/* Targets Feed - top 5 */}
         <div className="lg:col-span-8 flex flex-col gap-6 min-w-0">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 sm:mb-6 gap-3 sm:gap-4">
@@ -427,7 +427,7 @@ export default function Home() {
         </div>
 
         {/* Intelligence Sidebar */}
-        <div className="lg:col-span-4 flex flex-col gap-5 sm:gap-8 lg:gap-10 lg:sticky top-4 min-w-0 overflow-hidden">
+        <div className="lg:col-span-4 flex flex-col gap-5 sm:gap-8 lg:gap-10 min-w-0">
           {/* ── Distribution par Seuil ──────────────────────────── */}
           <div className="p-5 sm:p-7 lg:p-10 rounded-2xl sm:rounded-[2rem] lg:rounded-[3rem] bg-black/40 border border-white/10 backdrop-blur-3xl shadow-2xl">
             <div className="flex items-center justify-between mb-6 sm:mb-8 lg:mb-10">
