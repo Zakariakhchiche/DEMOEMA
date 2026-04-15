@@ -278,10 +278,10 @@ export default function Home() {
       </div>
 
       {/* Main Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 lg:gap-10 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 lg:gap-8 items-start">
         {/* Targets Feed - top 5 */}
-        <div className="lg:col-span-8 flex flex-col gap-6 min-w-0">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 sm:mb-6 gap-3 sm:gap-4">
+        <div className="lg:col-span-8 flex flex-col gap-4 sm:gap-5 min-w-0">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-2 sm:mb-4 gap-3 sm:gap-4">
             <h2 className="text-xs font-black text-white uppercase tracking-[0.3em] flex items-center gap-4">
               <div className="hidden sm:block w-1.5 h-6 bg-indigo-600 rounded-full shadow-[0_0_15px_rgba(79,70,229,0.5)]" />
               Trajectoires d&apos;Origination Haute Confiance
@@ -325,7 +325,7 @@ export default function Home() {
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: 0.2 + idx * 0.1 }}
                     key={target.id}
-                    className="group p-5 sm:p-7 lg:p-10 rounded-2xl sm:rounded-[2rem] lg:rounded-[3rem] bg-black/40 border border-white/10 hover:border-indigo-500/40 transition-all cursor-pointer relative overflow-hidden backdrop-blur-3xl shadow-2xl active:scale-[0.99]"
+                    className="group p-5 sm:p-6 lg:p-8 rounded-2xl sm:rounded-3xl bg-black/40 border border-white/10 hover:border-indigo-500/40 transition-all cursor-pointer relative overflow-hidden backdrop-blur-3xl shadow-2xl active:scale-[0.99]"
                   >
                     <div className="flex justify-between items-start relative z-10 gap-3 sm:gap-4">
                       <div className="flex-1 min-w-0">
@@ -377,8 +377,8 @@ export default function Home() {
                       </div>
                     </div>
 
-                    <div className="mt-5 sm:mt-8 lg:mt-10 pt-4 sm:pt-6 lg:pt-8 border-t border-white/[0.05] flex flex-col md:flex-row justify-between items-start md:items-center gap-4 sm:gap-6 relative z-10">
-                      <div className="flex flex-wrap gap-5 sm:gap-8 lg:gap-12">
+                    <div className="mt-4 sm:mt-6 lg:mt-8 pt-4 sm:pt-5 lg:pt-6 border-t border-white/[0.05] flex flex-col md:flex-row justify-between items-start md:items-center gap-4 sm:gap-5 relative z-10">
+                      <div className="flex flex-wrap gap-5 sm:gap-6 lg:gap-10">
                         <div className="space-y-1.5">
                           <span className="text-[10px] font-black text-gray-600 uppercase tracking-widest block">
                             Type Probable
@@ -427,10 +427,10 @@ export default function Home() {
         </div>
 
         {/* Intelligence Sidebar */}
-        <div className="lg:col-span-4 flex flex-col gap-5 sm:gap-8 lg:gap-10 min-w-0">
+        <div className="lg:col-span-4 flex flex-col gap-4 sm:gap-5 lg:gap-6 min-w-0">
           {/* ── Distribution par Seuil ──────────────────────────── */}
-          <div className="p-5 sm:p-7 lg:p-10 rounded-2xl sm:rounded-[2rem] lg:rounded-[3rem] bg-black/40 border border-white/10 backdrop-blur-3xl shadow-2xl">
-            <div className="flex items-center justify-between mb-6 sm:mb-8 lg:mb-10">
+          <div className="p-5 sm:p-6 lg:p-7 rounded-2xl sm:rounded-3xl bg-black/40 border border-white/10 backdrop-blur-3xl shadow-2xl">
+            <div className="flex items-center justify-between mb-5 sm:mb-6 lg:mb-7">
               <h2 className="text-[11px] font-black text-white uppercase tracking-[0.3em] flex items-center gap-3">
                 <BarChart3 size={18} className="text-indigo-400" /> Distribution par Seuil
               </h2>
@@ -457,8 +457,8 @@ export default function Home() {
           </div>
 
           {/* ── Volatilité Sectorielle ─────────────────────────── */}
-          <div className="p-5 sm:p-7 lg:p-10 rounded-2xl sm:rounded-[2rem] lg:rounded-[3rem] bg-black/40 border border-white/10 backdrop-blur-3xl shadow-2xl">
-            <div className="flex items-center justify-between mb-6 sm:mb-8 lg:mb-10">
+          <div className="p-5 sm:p-6 lg:p-7 rounded-2xl sm:rounded-3xl bg-black/40 border border-white/10 backdrop-blur-3xl shadow-2xl">
+            <div className="flex items-center justify-between mb-5 sm:mb-6 lg:mb-7">
               <h2 className="text-[11px] font-black text-white uppercase tracking-[0.3em] flex items-center gap-3">
                 <Activity size={18} className="text-indigo-400" /> Volatilité Sectorielle
               </h2>
@@ -530,7 +530,7 @@ export default function Home() {
           <motion.button
             whileHover={{ y: -5 }}
             onClick={() => window.dispatchEvent(new CustomEvent("toggle-copilot"))}
-            className="relative p-5 sm:p-7 lg:p-10 rounded-2xl sm:rounded-[2rem] lg:rounded-[3rem] bg-indigo-600 text-left shadow-[0_30px_60px_rgba(79,70,229,0.4)] border border-indigo-400 hover:bg-indigo-500 transition-all group overflow-hidden"
+            className="relative p-5 sm:p-6 lg:p-8 rounded-2xl sm:rounded-3xl bg-indigo-600 text-left shadow-[0_30px_60px_rgba(79,70,229,0.4)] border border-indigo-400 hover:bg-indigo-500 transition-all group overflow-hidden"
           >
             <div className="absolute top-0 right-0 p-6 sm:p-10 opacity-10 group-hover:scale-125 group-hover:rotate-6 transition-all duration-700">
               <MessageSquare size={100} className="sm:hidden" />

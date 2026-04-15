@@ -146,7 +146,7 @@ export default function PipelinePage() {
 
       <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 sm:gap-6 px-4 shrink-0">
         <div>
-          <h1 className="text-2xl sm:text-3xl lg:text-5xl font-black tracking-tighter text-white mb-2 sm:mb-3 flex flex-wrap items-center gap-3 sm:gap-5">
+          <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black tracking-tighter text-white mb-2 sm:mb-3 flex flex-wrap items-center gap-3 sm:gap-4">
             Pipeline Origination
             <div className="flex items-center gap-2.5 px-4 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[10px] text-emerald-400 font-black uppercase tracking-[0.2em]">
                <Radio size={14} className="animate-pulse" /> Radar Actif
@@ -174,13 +174,13 @@ export default function PipelinePage() {
 
       <div className="flex-1 overflow-x-auto pb-20 px-4 custom-scrollbar">
         <DragDropContext onDragEnd={onDragEnd}>
-          <div className="flex gap-4 sm:gap-6 lg:gap-8 h-full min-w-max">
+          <div className="flex gap-3 sm:gap-4 lg:gap-5 h-full min-w-max">
              {columns.map((column) => {
               const colors = STAGE_COLORS[column.color] || STAGE_COLORS.indigo;
               return (
-              <div key={column.id} className="w-[280px] sm:w-[310px] lg:w-[340px] flex flex-col h-full bg-black/40 rounded-2xl sm:rounded-[2rem] lg:rounded-[3rem] border border-white/10 shadow-2xl overflow-hidden backdrop-blur-3xl group/col shrink-0">
+              <div key={column.id} className="w-[260px] sm:w-[280px] lg:w-[300px] flex flex-col h-full bg-black/40 rounded-2xl sm:rounded-3xl border border-white/10 shadow-2xl overflow-hidden backdrop-blur-3xl group/col shrink-0">
 
-                <div className="px-5 py-4 sm:p-6 lg:p-8 lg:pb-5 flex items-center justify-between">
+                <div className="px-4 py-3 sm:px-5 sm:py-4 lg:px-6 lg:py-5 flex items-center justify-between">
                   <div className="flex items-center gap-4">
                     <div className={`w-2 h-8 rounded-full ${colors.indicator}`} />
                     <h3 className="font-black text-white text-[11px] uppercase tracking-[0.3em]">{column.title}</h3>
@@ -193,7 +193,7 @@ export default function PipelinePage() {
                     <div
                       {...provided.droppableProps}
                       ref={provided.innerRef}
-                      className={`flex-1 p-3 sm:p-4 lg:p-6 overflow-y-auto flex flex-col gap-4 sm:gap-5 lg:gap-6 transition-all custom-scrollbar
+                      className={`flex-1 p-3 sm:p-4 lg:p-5 overflow-y-auto flex flex-col gap-3 sm:gap-4 transition-all custom-scrollbar
                         ${snapshot.isDraggingOver ? "bg-white/[0.04]" : ""}
                       `}
                     >
@@ -206,7 +206,7 @@ export default function PipelinePage() {
                               ref={provided.innerRef}
                               {...provided.draggableProps}
                               {...provided.dragHandleProps}
-                              className={`group p-4 sm:p-5 lg:p-8 rounded-2xl sm:rounded-3xl lg:rounded-[2.5rem] bg-white/[0.03] border border-white/10 ${colors.cardHover} cursor-grab active:cursor-grabbing transition-all shadow-xl backdrop-blur-2xl relative overflow-hidden
+                              className={`group p-4 sm:p-5 lg:p-6 rounded-2xl sm:rounded-3xl bg-white/[0.03] border border-white/10 ${colors.cardHover} cursor-grab active:cursor-grabbing transition-all shadow-xl backdrop-blur-2xl relative overflow-hidden
                                 ${snapshot.isDragging ? "rotate-2 scale-[1.05] shadow-[0_40px_80px_rgba(0,0,0,0.8)] !border-indigo-500/60 !bg-indigo-500/10 z-[1000]" : ""}
                               `}
                             >
@@ -260,7 +260,7 @@ export default function PipelinePage() {
 
                       <button
                         onClick={() => handleAction('register', 'Ouverture du formulaire d\'enregistrement...')}
-                        className="w-full py-6 rounded-[2rem] border-2 border-dashed border-white/5 text-[10px] text-gray-700 font-black uppercase tracking-[0.3em] hover:border-indigo-500/20 hover:text-indigo-400 transition-all flex items-center justify-center gap-4 group/add active:scale-95"
+                        className="w-full py-4 rounded-2xl border-2 border-dashed border-white/5 text-[10px] text-gray-700 font-black uppercase tracking-[0.3em] hover:border-indigo-500/20 hover:text-indigo-400 transition-all flex items-center justify-center gap-3 group/add active:scale-95"
                       >
                         <Plus size={18} /> Ajouter une Cible
                       </button>
@@ -278,7 +278,7 @@ export default function PipelinePage() {
       <motion.div
         initial={{ y: 50, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        className="fixed bottom-4 left-3 right-3 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 sm:bottom-10 flex flex-wrap sm:flex-nowrap justify-center gap-3 sm:gap-6 lg:gap-12 px-4 py-3 sm:px-8 lg:px-10 sm:py-5 rounded-2xl sm:rounded-[2.5rem] bg-black/80 sm:bg-black/60 border border-white/10 backdrop-blur-3xl shadow-2xl z-50 items-center ring-1 ring-white/10 sm:w-max"
+        className="fixed bottom-4 left-3 right-3 lg:left-72 lg:right-auto lg:-translate-x-0 sm:bottom-8 flex flex-wrap sm:flex-nowrap justify-center gap-3 sm:gap-5 lg:gap-8 px-4 py-3 sm:px-6 lg:px-8 sm:py-4 rounded-2xl sm:rounded-3xl bg-black/80 sm:bg-black/60 border border-white/10 backdrop-blur-3xl shadow-2xl z-50 items-center ring-1 ring-white/10 lg:w-[calc(100%-19rem)] lg:mx-auto"
       >
         <div className="flex items-center gap-2 sm:gap-4">
           <Activity size={16} className="text-indigo-400" />
