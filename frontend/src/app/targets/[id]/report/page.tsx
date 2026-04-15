@@ -75,7 +75,7 @@ export default function ReportPage() {
   return (
     <div className="min-h-screen bg-[#050505] text-white p-4 md:p-8 pb-32 flex flex-col items-center">
       {/* Controls */}
-      <div className="w-full max-w-4xl flex flex-col sm:flex-row justify-between items-center mb-12 print:hidden gap-6">
+      <div className="w-full max-w-4xl flex flex-col sm:flex-row justify-between items-center mb-6 sm:mb-8 lg:mb-12 print:hidden gap-4 sm:gap-6">
         <button 
           onClick={() => router.back()}
           className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors font-black uppercase tracking-widest text-[10px]"
@@ -99,23 +99,23 @@ export default function ReportPage() {
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-4xl bg-white text-black p-10 md:p-20 shadow-none flex flex-col gap-12 print:rounded-none overflow-hidden"
+        className="w-full max-w-4xl bg-white text-black p-5 sm:p-10 lg:p-20 shadow-none flex flex-col gap-6 sm:gap-8 lg:gap-12 print:rounded-none overflow-hidden"
       >
         {/* Document Header */}
-        <div className="flex flex-col sm:flex-row justify-between items-start border-b-8 border-black pb-12 gap-8">
+        <div className="flex flex-col sm:flex-row justify-between items-start border-b-4 sm:border-b-8 border-black pb-6 sm:pb-8 lg:pb-12 gap-5 sm:gap-8">
           <div>
-            <div className="flex items-center gap-3 mb-6">
-               <div className="w-12 h-12 bg-black flex items-center justify-center rounded-xl">
-                  <Fingerprint size={28} className="text-white" />
+            <div className="flex items-center gap-3 mb-4 sm:mb-6">
+               <div className="w-10 h-10 sm:w-12 sm:h-12 bg-black flex items-center justify-center rounded-lg sm:rounded-xl">
+                  <Fingerprint size={22} className="text-white sm:hidden" /><Fingerprint size={28} className="text-white hidden sm:block" />
                </div>
-               <span className="font-black text-3xl tracking-tighter uppercase">EDRCF 6.0</span>
+               <span className="font-black text-2xl sm:text-3xl tracking-tighter uppercase">EDRCF 6.0</span>
             </div>
-            <h1 className="text-5xl font-black tracking-tighter mb-2 italic uppercase">Dossier : Origination</h1>
+            <h1 className="text-2xl sm:text-4xl lg:text-5xl font-black tracking-tighter mb-2 italic uppercase">Dossier : Origination</h1>
             <p className="text-gray-500 font-bold uppercase tracking-[0.3em] text-xs">Weak Signals Radar • {mounted ? currentDate : "Loading..."}</p>
           </div>
           <div className="text-left sm:text-right">
              <div className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">Protocol Confidence</div>
-             <div className="text-4xl font-black">{target.globalScore}</div>
+             <div className="text-3xl sm:text-4xl font-black">{target.globalScore}</div>
              <div className="text-[10px] font-black uppercase tracking-widest text-indigo-600 mt-1 italic">{target.priorityLevel}</div>
           </div>
         </div>
@@ -172,24 +172,24 @@ export default function ReportPage() {
         </section>
 
         {/* 02. Analysis */}
-        <section className="bg-black text-white p-12 rounded-[3.5rem] relative overflow-hidden shadow-2xl">
-           <div className="absolute top-0 right-0 p-12 opacity-10">
-              <Activity size={120} />
+        <section className="bg-black text-white p-6 sm:p-8 lg:p-12 rounded-2xl sm:rounded-[2.5rem] lg:rounded-[3.5rem] relative overflow-hidden shadow-2xl">
+           <div className="absolute top-0 right-0 p-6 sm:p-12 opacity-10">
+              <Activity size={80} className="sm:hidden" /><Activity size={120} className="hidden sm:block" />
            </div>
-           <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-500 mb-8 relative z-10">02. STRATEGIC NARRATIVE</h2>
-           <div className="space-y-8 relative z-10">
+           <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-500 mb-6 sm:mb-8 relative z-10">02. STRATEGIC NARRATIVE</h2>
+           <div className="space-y-5 sm:space-y-8 relative z-10">
               <div>
                  <div className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-2">Deal Type Identification</div>
-                 <div className="text-2xl font-black italic">{target.analysis.type}</div>
+                 <div className="text-xl sm:text-2xl font-black italic">{target.analysis.type}</div>
               </div>
-              <p className="text-xl font-bold leading-relaxed text-gray-200 border-l border-indigo-500/40 pl-8 italic">
+              <p className="text-base sm:text-lg lg:text-xl font-bold leading-relaxed text-gray-200 border-l border-indigo-500/40 pl-4 sm:pl-6 lg:pl-8 italic">
                 "{target.analysis.narrative}"
               </p>
            </div>
         </section>
 
         {/* 03. Entry Path */}
-        <section className="grid grid-cols-1 md:grid-cols-2 gap-12">
+        <section className="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8 lg:gap-12">
            <div>
               <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-400 mb-8 flex items-center gap-3">
                  <Crosshair size={18} /> 03. ACTIVATION PROTOCOL
@@ -220,14 +220,14 @@ export default function ReportPage() {
               </div>
            </div>
            
-           <div className="p-10 border-4 border-rose-500/10 rounded-[3rem] bg-rose-50/20">
-              <h2 className="text-xs font-black uppercase tracking-[0.4em] text-rose-500 mb-8 flex items-center gap-3">
+           <div className="p-5 sm:p-7 lg:p-10 border-4 border-rose-500/10 rounded-2xl sm:rounded-[2rem] lg:rounded-[3rem] bg-rose-50/20">
+              <h2 className="text-xs font-black uppercase tracking-[0.4em] text-rose-500 mb-5 sm:mb-6 lg:mb-8 flex items-center gap-3">
                  <AlertTriangle size={18} /> VIGILANCE PROTOCOL
               </h2>
               <div className="space-y-8">
                  <div>
                     <div className="text-[9px] font-black text-rose-500/60 uppercase tracking-widest mb-2 uppercase">False Positive Probability</div>
-                    <div className="text-3xl font-black text-rose-600 tracking-tighter">{target.risks.falsePositive}</div>
+                    <div className="text-2xl sm:text-3xl font-black text-rose-600 tracking-tighter">{target.risks.falsePositive}</div>
                  </div>
                  <div>
                     <div className="text-[9px] font-black text-rose-500/60 uppercase tracking-widest mb-2">Uncertainty Vectors</div>
@@ -240,8 +240,8 @@ export default function ReportPage() {
         </section>
 
         {/* Footer */}
-        <div className="mt-12 pt-12 border-t border-black flex flex-col sm:flex-row justify-between items-center gap-6 text-[8px] font-black text-gray-400 uppercase tracking-widest">
-           <div className="flex gap-8">
+        <div className="mt-6 sm:mt-8 lg:mt-12 pt-6 sm:pt-8 lg:pt-12 border-t border-black flex flex-col sm:flex-row justify-between items-center gap-4 sm:gap-6 text-[7px] sm:text-[8px] font-black text-gray-400 uppercase tracking-widest">
+           <div className="flex flex-wrap justify-center gap-4 sm:gap-8">
               <span>EDRCF-ARCHIVE-V5</span>
               <span>CONFIDENTIALITY LEVEL: INTERNAL</span>
               <span>GEN-TIME: {mounted ? currentTime : "Sync..."}</span>

@@ -218,7 +218,7 @@ export default function TargetsPage() {
   const ebitdaRanges = apiFilters?.ebitda_ranges || ["< 3M", "3-10M", "10-30M", "> 30M"];
 
   return (
-    <div className="flex flex-col gap-10 w-full max-w-7xl mx-auto py-4 h-[calc(100vh-8rem)]">
+    <div className="flex flex-col gap-5 sm:gap-8 lg:gap-10 w-full max-w-7xl mx-auto py-4 h-[calc(100dvh-7rem)] sm:h-[calc(100dvh-8rem)]">
 
       {/* ── Filter Sidebar Overlay ───────────────────────────────── */}
       <AnimatePresence>
@@ -483,21 +483,21 @@ export default function TargetsPage() {
       </AnimatePresence>
 
       {/* ── Header ───────────────────────────────────────────────── */}
-      <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 shrink-0">
+      <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 sm:gap-6 shrink-0">
         <div>
-          <h1 className="text-3xl md:text-5xl font-black tracking-tighter text-white mb-3 flex flex-wrap items-center gap-4 sm:gap-5">
+          <h1 className="text-2xl sm:text-3xl lg:text-5xl font-black tracking-tighter text-white mb-2 sm:mb-3 flex flex-wrap items-center gap-3 sm:gap-5">
             Intelligence Vault
             <div className="px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-[10px] text-indigo-400 font-black uppercase tracking-[0.2em]">
               {filteredAndSortedTargets.length} entités sur {totalCount}
             </div>
           </h1>
-          <p className="text-gray-400 text-base md:text-lg font-medium max-w-2xl leading-relaxed">
+          <p className="text-gray-400 text-sm sm:text-base lg:text-lg font-medium max-w-2xl leading-relaxed">
             Répertoire universel des entités analysées. Calibré par le <span className="text-white">Scoring EDRCF Haute-Fidélité</span>.
           </p>
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-4 w-full lg:w-auto">
-          <div className="relative group w-full lg:w-80">
+        <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 w-full lg:w-auto">
+          <div className="relative group w-full sm:w-64 lg:w-80">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-indigo-400 transition-colors">
               <Search size={20} />
             </span>
@@ -506,19 +506,19 @@ export default function TargetsPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Rechercher une entité..."
-              className="w-full bg-white/[0.03] border border-white/10 rounded-[2rem] py-4 pl-14 pr-6 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-indigo-500/50 focus:bg-white/[0.05] transition-all backdrop-blur-md"
+              className="w-full bg-white/[0.03] border border-white/10 rounded-2xl sm:rounded-[2rem] py-3 sm:py-4 pl-12 sm:pl-14 pr-4 sm:pr-6 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-indigo-500/50 focus:bg-white/[0.05] transition-all backdrop-blur-md"
             />
           </div>
-          <div className="flex gap-4 w-full sm:w-auto">
+          <div className="flex gap-2 sm:gap-4 w-full sm:w-auto">
             <button
               onClick={() => setShowWeights(true)}
-              className="flex-1 sm:flex-none px-6 py-4 rounded-[2rem] bg-white/[0.03] border border-white/10 text-white hover:bg-white/10 transition-all flex items-center justify-center gap-3 font-black text-[11px] uppercase tracking-widest"
+              className="flex-1 sm:flex-none px-4 sm:px-6 py-3 sm:py-4 rounded-2xl sm:rounded-[2rem] bg-white/[0.03] border border-white/10 text-white hover:bg-white/10 transition-all flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-[11px] uppercase tracking-widest"
             >
-              <BarChart3 size={18} /> Pondérations
+              <BarChart3 size={16} /> <span className="hidden sm:inline">Pondérations</span><span className="sm:hidden">Poids</span>
             </button>
             <button
               onClick={() => setShowFilters(true)}
-              className={`flex-1 sm:flex-none px-6 py-4 rounded-[2rem] transition-all flex items-center justify-center gap-3 font-black text-[11px] uppercase tracking-widest relative
+              className={`flex-1 sm:flex-none px-4 sm:px-6 py-3 sm:py-4 rounded-2xl sm:rounded-[2rem] transition-all flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-[11px] uppercase tracking-widest relative
                 ${activeFilterCount > 0
                   ? "bg-indigo-600 border border-indigo-500 text-white shadow-2xl shadow-indigo-600/30"
                   : "bg-white/[0.03] border border-white/10 text-white hover:bg-white/10"
@@ -532,15 +532,15 @@ export default function TargetsPage() {
                 </span>
               )}
             </button>
-            <button className="flex-1 sm:flex-none px-6 py-4 rounded-[2rem] bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-600 hover:text-white transition-all flex items-center justify-center gap-3 font-black text-[11px] uppercase tracking-widest active:scale-95 shadow-2xl">
-              <Download size={18} /> <span className="sm:hidden lg:inline">Export</span>
+            <button className="flex-1 sm:flex-none px-4 sm:px-6 py-3 sm:py-4 rounded-2xl sm:rounded-[2rem] bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-600 hover:text-white transition-all flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-[11px] uppercase tracking-widest active:scale-95 shadow-2xl">
+              <Download size={16} /> <span className="hidden lg:inline">Export</span>
             </button>
           </div>
         </div>
       </header>
 
       {/* ── Table Area ───────────────────────────────────────────── */}
-      <div className="flex-1 bg-black/40 border border-white/10 rounded-[3rem] overflow-hidden flex flex-col shadow-2xl backdrop-blur-3xl relative">
+      <div className="flex-1 bg-black/40 border border-white/10 rounded-2xl sm:rounded-[2rem] lg:rounded-[3rem] overflow-hidden flex flex-col shadow-2xl backdrop-blur-3xl relative">
         {/* Table Header - Desktop Only */}
         <div className="hidden lg:grid grid-cols-12 gap-4 px-10 py-6 border-b border-white/10 bg-white/[0.02] text-[11px] font-black text-gray-500 uppercase tracking-[0.2em]">
           <div

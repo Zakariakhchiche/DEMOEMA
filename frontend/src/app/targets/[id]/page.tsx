@@ -153,7 +153,7 @@ export default function TargetDetail() {
   const scoringDimensions = targetData.scoring_details ? Object.entries(targetData.scoring_details) : [];
 
   return (
-    <div className="flex flex-col gap-12 w-full max-w-7xl mx-auto pb-32 pt-6 px-4 relative">
+    <div className="flex flex-col gap-6 sm:gap-8 lg:gap-12 w-full max-w-7xl mx-auto pb-20 sm:pb-32 pt-4 sm:pt-6 px-0 sm:px-4 relative">
       {/* Toast Notification */}
       <AnimatePresence>
         {notification && (
@@ -161,7 +161,7 @@ export default function TargetDetail() {
             initial={{ opacity: 0, y: 50, x: '-50%' }}
             animate={{ opacity: 1, y: 0, x: '-50%' }}
             exit={{ opacity: 0, y: 20, x: '-50%' }}
-            className="fixed bottom-10 left-1/2 z-[200] px-6 py-3 rounded-2xl bg-indigo-600 text-white font-black text-[10px] uppercase tracking-widest shadow-2xl flex items-center gap-3 border border-indigo-400 backdrop-blur-xl"
+            className="fixed bottom-4 left-4 right-4 sm:left-1/2 sm:right-auto sm:bottom-10 z-[200] px-5 py-3 rounded-2xl bg-indigo-600 text-white font-black text-[10px] uppercase tracking-widest shadow-2xl flex items-center justify-center gap-3 border border-indigo-400 backdrop-blur-xl sm:w-max"
           >
             <ShieldCheck size={16} /> {notification.message}
           </motion.div>
@@ -169,14 +169,14 @@ export default function TargetDetail() {
       </AnimatePresence>
 
       {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-8 sm:gap-6 border-b border-white/5 pb-12">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5 sm:gap-6 border-b border-white/5 pb-6 sm:pb-8 lg:pb-12">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-6">
           <button onClick={() => router.push('/targets')} className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 transition-all backdrop-blur-xl group shrink-0">
             <ArrowLeft size={20} className="group-hover:-translate-x-1 transition-transform" />
           </button>
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-4 mb-3">
-              <h1 className="text-3xl md:text-5xl font-black tracking-tighter text-white truncate max-w-full uppercase italic">{targetData.name}</h1>
+            <div className="flex flex-wrap items-center gap-3 sm:gap-4 mb-2 sm:mb-3">
+              <h1 className="text-xl sm:text-3xl lg:text-5xl font-black tracking-tighter text-white truncate max-w-full uppercase italic">{targetData.name}</h1>
               <div className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-[0.2em] border ${getPriorityColor(targetData.priorityLevel)}`}>
                 {targetData.priorityLevel}
               </div>
@@ -202,7 +202,7 @@ export default function TargetDetail() {
           <button
             disabled={processingAction === 'fetch'}
             onClick={() => handleAction('fetch', 'Radar synchronise')}
-            className="flex-[4] lg:flex-none flex items-center justify-center gap-3 px-10 py-4 rounded-2xl bg-indigo-600 text-white font-black text-xs uppercase tracking-widest shadow-2xl shadow-indigo-600/40 hover:bg-indigo-500 transition-all active:scale-95 disabled:opacity-50"
+            className="flex-[4] lg:flex-none flex items-center justify-center gap-2 sm:gap-3 px-6 sm:px-10 py-3 sm:py-4 rounded-2xl bg-indigo-600 text-white font-black text-[11px] sm:text-xs uppercase tracking-widest shadow-2xl shadow-indigo-600/40 hover:bg-indigo-500 transition-all active:scale-95 disabled:opacity-50"
           >
             {processingAction === 'fetch' ? (
               <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
@@ -214,18 +214,18 @@ export default function TargetDetail() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 lg:gap-10">
 
         {/* Left Column - Origination Card */}
-        <div className="lg:col-span-4 flex flex-col gap-8">
+        <div className="lg:col-span-4 flex flex-col gap-5 sm:gap-6 lg:gap-8">
           {/* Score + Financials Card */}
-          <div className="p-10 rounded-[3rem] bg-black/40 border border-indigo-500/20 relative overflow-hidden group shadow-2xl backdrop-blur-3xl">
+          <div className="p-5 sm:p-7 lg:p-10 rounded-2xl sm:rounded-[2rem] lg:rounded-[3rem] bg-black/40 border border-indigo-500/20 relative overflow-hidden group shadow-2xl backdrop-blur-3xl">
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-600/10 via-transparent to-transparent opacity-50" />
 
             <div className="relative z-10">
-              <div className="flex justify-between items-center mb-12">
-                <div className="p-4 rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                  <Fingerprint size={32} />
+              <div className="flex justify-between items-center mb-6 sm:mb-8 lg:mb-12">
+                <div className="p-3 sm:p-4 rounded-xl sm:rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                  <Fingerprint size={24} className="sm:hidden" /><Fingerprint size={32} className="hidden sm:block" />
                 </div>
                 <div className="text-right">
                   <div className="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-400/80 mb-1">Integrite des Donnees</div>
@@ -235,10 +235,10 @@ export default function TargetDetail() {
                 </div>
               </div>
 
-              <div className="flex flex-col items-center mb-12">
+              <div className="flex flex-col items-center mb-6 sm:mb-8 lg:mb-12">
                 <div className="relative">
                   <div className="flex flex-col items-center">
-                    <span className="text-7xl font-black text-white leading-none tracking-tighter mb-2">{targetData.globalScore}</span>
+                    <span className="text-5xl sm:text-6xl lg:text-7xl font-black text-white leading-none tracking-tighter mb-2">{targetData.globalScore}</span>
                     <span className="text-[10px] font-black text-indigo-400/60 uppercase tracking-[0.4em]">Score Global</span>
                   </div>
                 </div>
@@ -434,33 +434,33 @@ export default function TargetDetail() {
         </div>
 
         {/* Right Column - Deep Dive */}
-        <div className="lg:col-span-8 flex flex-col gap-10">
+        <div className="lg:col-span-8 flex flex-col gap-6 sm:gap-8 lg:gap-10">
            {/* Strategic Thesis */}
-           <section className="p-12 rounded-[4rem] bg-white/[0.02] border border-white/10 relative overflow-hidden group hover:border-indigo-500/30 transition-all">
+           <section className="p-5 sm:p-8 lg:p-12 rounded-2xl sm:rounded-[2.5rem] lg:rounded-[4rem] bg-white/[0.02] border border-white/10 relative overflow-hidden group hover:border-indigo-500/30 transition-all">
               <div className="absolute top-0 right-10 bottom-0 w-1/3 bg-gradient-to-l from-indigo-600/5 to-transparent skew-x-12" />
-              <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-500 mb-10 flex items-center gap-4">
-                 <span className="w-10 h-px bg-white/10" /> 01. These Strategique
+              <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-500 mb-6 sm:mb-8 lg:mb-10 flex items-center gap-3 sm:gap-4">
+                 <span className="w-6 sm:w-10 h-px bg-white/10" /> 01. These Strategique
               </h2>
-              <div className="space-y-12 relative z-10">
+              <div className="space-y-6 sm:space-y-8 lg:space-y-12 relative z-10">
                  <div>
-                    <div className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.3em] mb-4">Angle Technique Probable</div>
-                    <div className="text-4xl font-black text-white tracking-tighter uppercase italic leading-tight">{targetData.analysis?.type ?? "—"}</div>
+                    <div className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.3em] mb-3 sm:mb-4">Angle Technique Probable</div>
+                    <div className="text-2xl sm:text-3xl lg:text-4xl font-black text-white tracking-tighter uppercase italic leading-tight">{targetData.analysis?.type ?? "—"}</div>
                  </div>
-                 <p className="text-xl font-medium leading-relaxed text-gray-300 border-l border-indigo-500/30 pl-8">
+                 <p className="text-base sm:text-lg lg:text-xl font-medium leading-relaxed text-gray-300 border-l border-indigo-500/30 pl-4 sm:pl-6 lg:pl-8">
                    &laquo;{targetData.analysis?.narrative ?? "Analyse en cours."}&raquo;
                  </p>
               </div>
            </section>
 
-           <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8 lg:gap-10">
               {/* Conviction Indicators / Signals */}
-              <section className="p-12 rounded-[4rem] bg-white/[0.02] border border-white/10">
-                 <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-500 mb-10 flex items-center gap-4">
+              <section className="p-5 sm:p-8 lg:p-12 rounded-2xl sm:rounded-[2.5rem] lg:rounded-[4rem] bg-white/[0.02] border border-white/10">
+                 <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-500 mb-6 sm:mb-8 lg:mb-10 flex items-center gap-3 sm:gap-4">
                     <Radio size={16} /> 02. Indicateurs de Conviction
                  </h2>
                  <div className="space-y-4">
                     {(targetData.topSignals ?? []).map((signal, i) => (
-                      <div key={i} className="p-6 rounded-3xl bg-white/[0.03] border border-white/5 hover:border-indigo-500/20 transition-all group/signal">
+                      <div key={i} className="p-4 sm:p-5 lg:p-6 rounded-2xl sm:rounded-3xl bg-white/[0.03] border border-white/5 hover:border-indigo-500/20 transition-all group/signal">
                          <div className="flex items-center justify-between mb-2">
                            <span className="text-[9px] font-black text-gray-500 uppercase tracking-widest group-hover/signal:text-indigo-400 transition-colors">
                              {signal.family}
@@ -508,11 +508,11 @@ export default function TargetDetail() {
               </section>
 
               {/* Strategic Activation */}
-              <section className="p-12 rounded-[4rem] bg-indigo-600 text-white shadow-2xl relative overflow-hidden group">
+              <section className="p-5 sm:p-8 lg:p-12 rounded-2xl sm:rounded-[2.5rem] lg:rounded-[4rem] bg-indigo-600 text-white shadow-2xl relative overflow-hidden group">
                  <div className="absolute -top-10 -right-10 opacity-10 group-hover:scale-110 transition-transform duration-700">
-                    <Crosshair size={120} />
+                    <Crosshair size={80} className="sm:hidden" /><Crosshair size={120} className="hidden sm:block" />
                  </div>
-                 <h4 className="text-xs font-black uppercase tracking-widest mb-10 flex items-center gap-3">
+                 <h4 className="text-xs font-black uppercase tracking-widest mb-6 sm:mb-8 lg:mb-10 flex items-center gap-3">
                    <Crosshair size={18} /> 03. Activation Strategique
                  </h4>
                  <div className="space-y-8 relative z-10">
@@ -537,9 +537,9 @@ export default function TargetDetail() {
            </div>
 
            {/* Google News Section */}
-           <section className="p-10 rounded-[3rem] bg-white/[0.02] border border-white/10 space-y-6">
-              <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-500 flex items-center gap-4">
-                 <span className="w-10 h-px bg-white/10" />
+           <section className="p-5 sm:p-7 lg:p-10 rounded-2xl sm:rounded-[2rem] lg:rounded-[3rem] bg-white/[0.02] border border-white/10 space-y-4 sm:space-y-6">
+              <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-500 flex items-center gap-3 sm:gap-4">
+                 <span className="hidden sm:block w-10 h-px bg-white/10" />
                  <Newspaper size={16} className="text-indigo-400" /> Veille Presse
               </h2>
               {newsLoading ? (
@@ -579,9 +579,9 @@ export default function TargetDetail() {
            </section>
 
            {/* Infogreffe Actes Section */}
-           <section className="p-10 rounded-[3rem] bg-white/[0.02] border border-white/10 space-y-6">
-              <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-500 flex items-center gap-4">
-                 <span className="w-10 h-px bg-white/10" />
+           <section className="p-5 sm:p-7 lg:p-10 rounded-2xl sm:rounded-[2rem] lg:rounded-[3rem] bg-white/[0.02] border border-white/10 space-y-4 sm:space-y-6">
+              <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-500 flex items-center gap-3 sm:gap-4">
+                 <span className="hidden sm:block w-10 h-px bg-white/10" />
                  <ScrollText size={16} className="text-amber-400" /> Actes RCS — Infogreffe
               </h2>
               {actesLoading ? (
@@ -612,8 +612,8 @@ export default function TargetDetail() {
            </section>
 
            {/* Bottom Bar */}
-           <div className="mt-10 pt-10 border-t border-white/5 flex flex-col sm:flex-row justify-between items-center gap-8">
-              <div className="flex items-center gap-10">
+           <div className="mt-6 sm:mt-8 lg:mt-10 pt-6 sm:pt-8 lg:pt-10 border-t border-white/5 flex flex-col sm:flex-row justify-between items-center gap-5 sm:gap-8">
+              <div className="flex items-center gap-6 sm:gap-10">
                  <div>
                     <div className="text-[10px] font-black text-gray-600 uppercase tracking-widest mb-2">Protocole de Vigilance</div>
                     <div className="flex items-center gap-3 px-4 py-2 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-500 text-[10px] font-black uppercase">
@@ -623,7 +623,7 @@ export default function TargetDetail() {
               </div>
               <button
                 onClick={() => router.push(`/targets/${id}/report`)}
-                className="w-full sm:w-auto px-10 py-5 bg-white text-black rounded-[2rem] font-black uppercase tracking-widest text-[11px] hover:bg-indigo-500 hover:text-white transition-all shadow-2xl active:scale-95 group flex items-center justify-center gap-3"
+                className="w-full sm:w-auto px-6 sm:px-10 py-4 sm:py-5 bg-white text-black rounded-2xl sm:rounded-[2rem] font-black uppercase tracking-widest text-[10px] sm:text-[11px] hover:bg-indigo-500 hover:text-white transition-all shadow-2xl active:scale-95 group flex items-center justify-center gap-3"
               >
                 <FileText size={18} /> Generer le Dossier d&apos;Origination
               </button>

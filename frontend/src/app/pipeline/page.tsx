@@ -130,29 +130,29 @@ export default function PipelinePage() {
   if (!isClient) return null;
 
   return (
-    <div className="flex flex-col gap-10 w-full max-w-full mx-auto h-[calc(100vh-8rem)] py-4 overflow-hidden relative">
+    <div className="flex flex-col gap-5 sm:gap-8 lg:gap-10 w-full max-w-full mx-auto h-[calc(100dvh-7rem)] sm:h-[calc(100dvh-8rem)] py-4 overflow-hidden relative">
       <AnimatePresence>
         {notification && (
           <motion.div
             initial={{ opacity: 0, y: 50, x: '-50%' }}
             animate={{ opacity: 1, y: 0, x: '-50%' }}
             exit={{ opacity: 0, y: 20, x: '-50%' }}
-            className="fixed bottom-10 left-1/2 z-[200] px-6 py-3 rounded-2xl bg-indigo-600 text-white font-black text-[10px] uppercase tracking-widest shadow-2xl flex items-center gap-3 border border-indigo-400 backdrop-blur-xl"
+            className="fixed bottom-4 left-4 right-4 sm:left-1/2 sm:right-auto sm:bottom-10 z-[200] px-5 py-3 rounded-2xl bg-indigo-600 text-white font-black text-[10px] uppercase tracking-widest shadow-2xl flex items-center justify-center gap-3 border border-indigo-400 backdrop-blur-xl sm:w-max"
           >
             <ShieldCheck size={16} /> {notification}
           </motion.div>
         )}
       </AnimatePresence>
 
-      <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 px-4 shrink-0">
+      <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 sm:gap-6 px-4 shrink-0">
         <div>
-          <h1 className="text-3xl md:text-5xl font-black tracking-tighter text-white mb-3 flex flex-wrap items-center gap-4 sm:gap-5">
+          <h1 className="text-2xl sm:text-3xl lg:text-5xl font-black tracking-tighter text-white mb-2 sm:mb-3 flex flex-wrap items-center gap-3 sm:gap-5">
             Pipeline Origination
             <div className="flex items-center gap-2.5 px-4 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[10px] text-emerald-400 font-black uppercase tracking-[0.2em]">
                <Radio size={14} className="animate-pulse" /> Radar Actif
             </div>
           </h1>
-          <p className="text-gray-400 text-base md:text-lg font-medium max-w-2xl leading-relaxed">
+          <p className="text-gray-400 text-sm sm:text-base lg:text-lg font-medium max-w-2xl leading-relaxed">
             Gestion du cycle d&apos;origination. Les cibles sont classees par <span className="text-white">probabilite de transaction dans 6-18 mois</span>.
           </p>
         </div>
@@ -174,13 +174,13 @@ export default function PipelinePage() {
 
       <div className="flex-1 overflow-x-auto pb-20 px-4 custom-scrollbar">
         <DragDropContext onDragEnd={onDragEnd}>
-          <div className="flex gap-8 h-full min-w-max">
+          <div className="flex gap-4 sm:gap-6 lg:gap-8 h-full min-w-max">
              {columns.map((column) => {
               const colors = STAGE_COLORS[column.color] || STAGE_COLORS.indigo;
               return (
-              <div key={column.id} className="w-[340px] flex flex-col h-full bg-black/40 rounded-[3rem] border border-white/10 shadow-2xl overflow-hidden backdrop-blur-3xl group/col shrink-0">
+              <div key={column.id} className="w-[280px] sm:w-[310px] lg:w-[340px] flex flex-col h-full bg-black/40 rounded-2xl sm:rounded-[2rem] lg:rounded-[3rem] border border-white/10 shadow-2xl overflow-hidden backdrop-blur-3xl group/col shrink-0">
 
-                <div className="p-8 pb-5 flex items-center justify-between">
+                <div className="px-5 py-4 sm:p-6 lg:p-8 lg:pb-5 flex items-center justify-between">
                   <div className="flex items-center gap-4">
                     <div className={`w-2 h-8 rounded-full ${colors.indicator}`} />
                     <h3 className="font-black text-white text-[11px] uppercase tracking-[0.3em]">{column.title}</h3>
@@ -193,7 +193,7 @@ export default function PipelinePage() {
                     <div
                       {...provided.droppableProps}
                       ref={provided.innerRef}
-                      className={`flex-1 p-6 overflow-y-auto flex flex-col gap-6 transition-all custom-scrollbar
+                      className={`flex-1 p-3 sm:p-4 lg:p-6 overflow-y-auto flex flex-col gap-4 sm:gap-5 lg:gap-6 transition-all custom-scrollbar
                         ${snapshot.isDraggingOver ? "bg-white/[0.04]" : ""}
                       `}
                     >
@@ -206,7 +206,7 @@ export default function PipelinePage() {
                               ref={provided.innerRef}
                               {...provided.draggableProps}
                               {...provided.dragHandleProps}
-                              className={`group p-8 rounded-[2.5rem] bg-white/[0.03] border border-white/10 ${colors.cardHover} cursor-grab active:cursor-grabbing transition-all shadow-xl backdrop-blur-2xl relative overflow-hidden
+                              className={`group p-4 sm:p-5 lg:p-8 rounded-2xl sm:rounded-3xl lg:rounded-[2.5rem] bg-white/[0.03] border border-white/10 ${colors.cardHover} cursor-grab active:cursor-grabbing transition-all shadow-xl backdrop-blur-2xl relative overflow-hidden
                                 ${snapshot.isDragging ? "rotate-2 scale-[1.05] shadow-[0_40px_80px_rgba(0,0,0,0.8)] !border-indigo-500/60 !bg-indigo-500/10 z-[1000]" : ""}
                               `}
                             >
@@ -219,7 +219,7 @@ export default function PipelinePage() {
                                 </div>
                               </div>
 
-                              <h4 className="font-black text-white text-lg mb-4 leading-tight tracking-tighter uppercase">{card.name}</h4>
+                              <h4 className="font-black text-white text-base sm:text-lg mb-3 sm:mb-4 leading-tight tracking-tighter uppercase">{card.name}</h4>
 
                               {/* Priority + EBITDA + Window */}
                               <div className="flex flex-wrap items-center gap-2 mb-4">
@@ -278,21 +278,21 @@ export default function PipelinePage() {
       <motion.div
         initial={{ y: 50, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        className="fixed bottom-10 left-1/2 -translate-x-1/2 flex gap-12 px-10 py-5 rounded-[2.5rem] bg-black/60 border border-white/10 backdrop-blur-3xl shadow-2xl z-50 items-center ring-1 ring-white/10"
+        className="fixed bottom-4 left-3 right-3 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 sm:bottom-10 flex flex-wrap sm:flex-nowrap justify-center gap-3 sm:gap-6 lg:gap-12 px-4 py-3 sm:px-8 lg:px-10 sm:py-5 rounded-2xl sm:rounded-[2.5rem] bg-black/80 sm:bg-black/60 border border-white/10 backdrop-blur-3xl shadow-2xl z-50 items-center ring-1 ring-white/10 sm:w-max"
       >
-        <div className="flex items-center gap-4">
-          <Activity size={20} className="text-indigo-400" />
-          <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Cibles: <span className="text-white">{pipelineStats.totalCards}</span></div>
+        <div className="flex items-center gap-2 sm:gap-4">
+          <Activity size={16} className="text-indigo-400" />
+          <div className="text-[9px] sm:text-[10px] font-black text-gray-400 uppercase tracking-widest">Cibles: <span className="text-white">{pipelineStats.totalCards}</span></div>
         </div>
-        <div className="h-4 w-px bg-white/10" />
-        <div className="flex items-center gap-4">
-          <TrendingUp size={20} className="text-emerald-400" />
-          <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Taux conversion: <span className="text-emerald-400">{pipelineStats.conversionRate}%</span></div>
+        <div className="hidden sm:block h-4 w-px bg-white/10" />
+        <div className="flex items-center gap-2 sm:gap-4">
+          <TrendingUp size={16} className="text-emerald-400" />
+          <div className="text-[9px] sm:text-[10px] font-black text-gray-400 uppercase tracking-widest">Conv: <span className="text-emerald-400">{pipelineStats.conversionRate}%</span></div>
         </div>
-        <div className="h-4 w-px bg-white/10" />
-        <div className="flex items-center gap-4">
-          <DollarSign size={20} className="text-amber-400" />
-          <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">EBITDA Total: <span className="text-white">{pipelineStats.totalEbitda.toFixed(1)}M</span></div>
+        <div className="hidden sm:block h-4 w-px bg-white/10" />
+        <div className="flex items-center gap-2 sm:gap-4">
+          <DollarSign size={16} className="text-amber-400" />
+          <div className="text-[9px] sm:text-[10px] font-black text-gray-400 uppercase tracking-widest">EBITDA: <span className="text-white">{pipelineStats.totalEbitda.toFixed(1)}M</span></div>
         </div>
       </motion.div>
     </div>

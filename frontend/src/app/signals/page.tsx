@@ -127,12 +127,12 @@ export default function SignalsPage() {
   }, [catalog]);
 
   return (
-    <div className="flex flex-col gap-8 w-full max-w-7xl mx-auto py-4 h-[calc(100vh-8rem)]">
+    <div className="flex flex-col gap-5 sm:gap-6 lg:gap-8 w-full max-w-7xl mx-auto py-4 lg:h-[calc(100dvh-8rem)]">
       {/* Header */}
-      <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 shrink-0">
+      <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 sm:gap-6 shrink-0">
         <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-4">
-            <h1 className="text-3xl md:text-4xl font-black tracking-tight text-white flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black tracking-tight text-white flex items-center gap-4">
               Signaux de Marche
             </h1>
             <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-[10px] text-indigo-400 font-black uppercase tracking-[0.2em]">
@@ -145,7 +145,7 @@ export default function SignalsPage() {
         </div>
 
         <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative group w-full sm:w-80">
+          <div className="relative group w-full sm:w-64 lg:w-80">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-indigo-400 transition-colors">
                <Search size={18} />
             </span>
@@ -163,11 +163,11 @@ export default function SignalsPage() {
         </div>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 min-h-0">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 lg:gap-8 flex-1 min-h-0">
 
         {/* Main Feed */}
-        <div className="lg:col-span-8 bg-black/40 border border-white/10 rounded-[2.5rem] overflow-hidden flex flex-col shadow-2xl backdrop-blur-xl">
-          <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between bg-white/[0.02] flex-wrap gap-2">
+        <div className="lg:col-span-8 bg-black/40 border border-white/10 rounded-2xl sm:rounded-[2rem] lg:rounded-[2.5rem] overflow-hidden flex flex-col shadow-2xl backdrop-blur-xl">
+          <div className="px-4 py-3 sm:px-6 sm:py-4 border-b border-white/10 flex items-center justify-between bg-white/[0.02] flex-wrap gap-2">
              <div className="flex gap-2 flex-wrap">
                 {[
                   { key: "All", label: "Tous", count: severityCounts.all },
@@ -197,7 +197,7 @@ export default function SignalsPage() {
              </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto p-3 sm:p-4 lg:p-6 space-y-3 sm:space-y-4 custom-scrollbar">
             <AnimatePresence mode="popLayout">
               {filteredSignals.map((signal) => (
                 <motion.div
@@ -206,7 +206,7 @@ export default function SignalsPage() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.98 }}
                   key={signal.id}
-                  className="p-6 rounded-[2rem] bg-white/[0.02] border border-white/10 hover:border-indigo-500/30 transition-all group flex gap-6 items-start relative overflow-hidden active:scale-[0.99]"
+                  className="p-4 sm:p-5 lg:p-6 rounded-xl sm:rounded-2xl lg:rounded-[2rem] bg-white/[0.02] border border-white/10 hover:border-indigo-500/30 transition-all group flex gap-3 sm:gap-4 lg:gap-6 items-start relative overflow-hidden active:scale-[0.99]"
                 >
                   <div className={`absolute top-0 left-0 w-1 h-full
                     ${signal.severity === 'high' ? 'bg-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.5)]' : ''}
@@ -214,8 +214,8 @@ export default function SignalsPage() {
                     ${signal.severity === 'low' ? 'bg-gray-600' : ''}
                   `} />
 
-                  <div className="flex-shrink-0">
-                    <div className={`w-14 h-14 rounded-2xl flex items-center justify-center border transition-all
+                  <div className="flex-shrink-0 hidden sm:block">
+                    <div className={`w-11 h-11 sm:w-12 sm:h-12 lg:w-14 lg:h-14 rounded-xl sm:rounded-2xl flex items-center justify-center border transition-all
                       ${signal.severity === 'high' ? 'bg-rose-500/10 border-rose-500/20 text-rose-400 group-hover:bg-rose-600 group-hover:text-white' : ''}
                       ${signal.severity === 'medium' ? 'bg-amber-500/10 border-amber-500/20 text-amber-400 group-hover:bg-amber-600 group-hover:text-white' : ''}
                       ${signal.severity === 'low' ? 'bg-white/5 border-white/5 text-gray-500' : ''}
@@ -246,7 +246,7 @@ export default function SignalsPage() {
                       </span>
                     </div>
 
-                    <h3 className="text-lg md:text-xl font-black text-white mb-3 group-hover:text-indigo-400 transition-colors tracking-tight leading-tight">
+                    <h3 className="text-base sm:text-lg lg:text-xl font-black text-white mb-2 sm:mb-3 group-hover:text-indigo-400 transition-colors tracking-tight leading-tight">
                       {signal.title}
                     </h3>
 
@@ -297,17 +297,17 @@ export default function SignalsPage() {
                     </div>
                   </div>
 
-                  <div className="flex items-center self-center">
+                  <div className="hidden sm:flex items-center self-center shrink-0">
                     {signal.target_id ? (
                       <Link
                         href={`/targets/${signal.target_id}`}
-                        className="w-12 h-12 rounded-2xl bg-white/5 group-hover:bg-indigo-600 text-gray-600 group-hover:text-white flex items-center justify-center transition-all border border-white/10 group-hover:border-indigo-400 shadow-xl active:scale-90"
+                        className="w-10 h-10 lg:w-12 lg:h-12 rounded-xl lg:rounded-2xl bg-white/5 group-hover:bg-indigo-600 text-gray-600 group-hover:text-white flex items-center justify-center transition-all border border-white/10 group-hover:border-indigo-400 shadow-xl active:scale-90"
                       >
-                        <ArrowUpRight size={24} />
+                        <ArrowUpRight size={20} />
                       </Link>
                     ) : (
-                      <div className="w-12 h-12 rounded-2xl bg-white/5 text-gray-700 flex items-center justify-center border border-white/10">
-                        <ArrowUpRight size={24} />
+                      <div className="w-10 h-10 lg:w-12 lg:h-12 rounded-xl lg:rounded-2xl bg-white/5 text-gray-700 flex items-center justify-center border border-white/10">
+                        <ArrowUpRight size={20} />
                       </div>
                     )}
                   </div>
@@ -316,12 +316,12 @@ export default function SignalsPage() {
             </AnimatePresence>
 
             {filteredSignals.length === 0 && !loading && (
-              <div className="p-20 text-center flex flex-col items-center gap-6">
-                 <div className="w-20 h-20 bg-white/5 rounded-[2rem] flex items-center justify-center border border-white/10">
-                    <ShieldAlert size={40} className="text-gray-700" />
+              <div className="p-10 sm:p-16 lg:p-20 text-center flex flex-col items-center gap-4 sm:gap-6">
+                 <div className="w-16 h-16 sm:w-20 sm:h-20 bg-white/5 rounded-2xl sm:rounded-[2rem] flex items-center justify-center border border-white/10">
+                    <ShieldAlert size={32} className="text-gray-700 sm:hidden" /><ShieldAlert size={40} className="text-gray-700 hidden sm:block" />
                  </div>
                  <div>
-                   <h2 className="text-white font-black text-2xl mb-2 tracking-tighter">Aucun Signal Detecte</h2>
+                   <h2 className="text-white font-black text-xl sm:text-2xl mb-2 tracking-tighter">Aucun Signal Detecte</h2>
                    <p className="text-gray-500 max-w-sm mx-auto font-medium">Aucun signal ne correspond a vos filtres actuels. Modifiez vos criteres de recherche.</p>
                  </div>
               </div>
@@ -340,10 +340,10 @@ export default function SignalsPage() {
         </div>
 
         {/* Sidebar Analytics */}
-        <div className="lg:col-span-4 flex flex-col gap-8 overflow-y-auto custom-scrollbar">
+        <div className="lg:col-span-4 flex flex-col gap-5 sm:gap-6 lg:gap-8 overflow-y-auto custom-scrollbar">
           {/* Sector Heat */}
-          <div className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl backdrop-blur-xl flex-1 flex flex-col">
-            <h3 className="text-[10px] font-black text-gray-500 mb-8 uppercase tracking-[0.2em] flex items-center gap-2">
+          <div className="p-5 sm:p-6 lg:p-8 rounded-2xl sm:rounded-[2rem] lg:rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl backdrop-blur-xl flex-1 flex flex-col">
+            <h3 className="text-[10px] font-black text-gray-500 mb-5 sm:mb-6 lg:mb-8 uppercase tracking-[0.2em] flex items-center gap-2">
                <Globe size={16} className="text-indigo-400" /> Chaleur Sectorielle
             </h3>
             <div className="space-y-6 flex-1">
@@ -373,8 +373,8 @@ export default function SignalsPage() {
           </div>
 
           {/* Distribution par Dimension */}
-          <div className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl backdrop-blur-xl">
-             <div className="flex items-center justify-between mb-8">
+          <div className="p-5 sm:p-6 lg:p-8 rounded-2xl sm:rounded-[2rem] lg:rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl backdrop-blur-xl">
+             <div className="flex items-center justify-between mb-5 sm:mb-6 lg:mb-8">
                 <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] flex items-center gap-2">
                   <TrendingUp size={16} className="text-indigo-400" /> Distribution par Dimension
                 </h3>
@@ -400,7 +400,7 @@ export default function SignalsPage() {
           </div>
 
           {/* Signal Catalog */}
-          <div className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl backdrop-blur-xl">
+          <div className="p-5 sm:p-6 lg:p-8 rounded-2xl sm:rounded-[2rem] lg:rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl backdrop-blur-xl">
             <button
               onClick={() => setCatalogOpen(!catalogOpen)}
               className="w-full flex items-center justify-between"
