@@ -493,22 +493,33 @@ async def get_infogreffe_actes(siren: str, max_results: int = 10) -> list:
 # Copilot with DeepSeek AI
 # ==========================================================================
 
+# Vercel AI Gateway (prioritaire) ou DeepSeek direct (fallback)
+AI_GATEWAY_API_KEY = os.getenv("AI_GATEWAY_API_KEY", "")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 
 
 async def copilot_ai_query(query: str, context: str):
-    if not DEEPSEEK_API_KEY:
+    # Prefer Vercel AI Gateway — single key, cost tracking, cache, multi-model routing
+    if AI_GATEWAY_API_KEY:
+        api_key = AI_GATEWAY_API_KEY
+        base_url = "https://ai-gateway.vercel.sh/v1/chat/completions"
+        model = "deepseek/deepseek-chat"
+    elif DEEPSEEK_API_KEY:
+        api_key = DEEPSEEK_API_KEY
+        base_url = "https://api.deepseek.com/v1/chat/completions"
+        model = "deepseek-chat"
+    else:
         return None  # Fall back to rule-based
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
-                "https://api.deepseek.com/v1/chat/completions",
+                base_url,
                 headers={
-                    "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                    "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": "deepseek-chat",
+                    "model": model,
                     "max_tokens": 1024,
                     "temperature": 0.3,
                     "messages": [
