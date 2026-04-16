@@ -2245,206 +2245,120 @@ async def copilot_query(q: str = Query(...)):
 
 @app.get("/api/graph")
 def get_graph():
-    """Network graph data with EDR team, targets, advisors, and subsidiaries"""
-    nodes = [
-        {
-            "id": "edr-1",
-            "name": "Quentin Moreau",
-            "type": "internal",
-            "role": "Analyste Senior, EDR CF",
-            "color": "#6366f1",
-            "signals_count": 0,
-            "signals": [],
-            "is_holding": False,
-        },
-        {
-            "id": "edr-2",
-            "name": "Manon Lefevre",
-            "type": "internal",
-            "role": "Directrice, EDR CF",
-            "color": "#6366f1",
-            "signals_count": 0,
-            "signals": [],
-            "is_holding": False,
-        },
-        {
-            "id": "edr-3",
-            "name": "Pierre Legrand",
-            "type": "internal",
-            "role": "Banquier Prive, EDR",
-            "color": "#6366f1",
-            "signals_count": 0,
-            "signals": [],
-            "is_holding": False,
-        },
+    """Enhanced network graph: director nodes, cross-mandates, score-based colors, M&A signals."""
+    nodes: list = []
+    links: list = []
+    node_ids: set = set()
+    director_companies: dict = {}  # dir_id -> [company_id, ...]
+
+    edr_team = [
+        {"id": "edr-1", "name": "Quentin Moreau", "role": "Analyste Senior, EDR CF"},
+        {"id": "edr-2", "name": "Manon Lefevre", "role": "Directrice, EDR CF"},
+        {"id": "edr-3", "name": "Pierre Legrand", "role": "Banquier Privé, EDR"},
     ]
-    links = []
-
-    # Add target company nodes (top 8 by score)
-    top_targets = sorted(enriched_targets, key=lambda x: x["globalScore"], reverse=True)[:8]
-    for t in top_targets:
-        main_dirigeant = t["dirigeants"][0] if t["dirigeants"] else {"name": t["name"], "role": "Dirigeant"}
-
-        # Signals from scoring engine
-        top_signals = t.get("topSignals", [])
-        signals_count = len(top_signals)
-        signals_labels = [s.get("label", s.get("id", "")) for s in top_signals[:5]]
-
-        # Group/holding detection — support both Pappers build_target and demo_data fallback
-        groupe = t.get("groupe") or {}
-        group = t.get("group") or {}
-        is_holding = groupe.get("is_holding") or groupe.get("is_group") or group.get("is_group") or False
-        entreprises_liees = groupe.get("entreprises_liees") or group.get("subsidiaries") or []
-
-        nodes.append(
-            {
-                "id": t["id"],
-                "name": main_dirigeant["name"],
-                "type": "target",
-                "role": f"{main_dirigeant['role']}, {t['name']}",
-                "color": "#10b981",
-                "company": t["name"],
-                "score": t["globalScore"],
-                "signals_count": signals_count,
-                "signals": signals_labels,
-                "is_holding": is_holding,
-            }
-        )
-
-        # Subsidiary nodes — up to 3 per target
-        for i, sub in enumerate(entreprises_liees[:3]):
-            if isinstance(sub, str):
-                sub_name = sub or f"Filiale {i+1}"
-            elif isinstance(sub, dict):
-                sub_name = sub.get("denomination") or sub.get("name") or f"Filiale {i+1}"
-            else:
-                sub_name = f"Filiale {i+1}"
-            sub_id = f"{t['id']}-sub-{i}"
-            nodes.append({
-                "id": sub_id,
-                "name": sub_name,
-                "type": "subsidiary",
-                "role": f"Filiale de {t['name']}",
-                "color": "#8b5cf6",
-                "company": t["name"],
-                "score": None,
-                "signals_count": 0,
-                "signals": [],
-                "is_holding": False,
-            })
-            links.append({
-                "source": t["id"],
-                "target": sub_id,
-                "label": "Filiale",
-                "value": 1,
-            })
-
-        # Create relationship links based on edr_banker
-        if t["relationship"]["edr_banker"]:
-            banker_id = next(
-                (
-                    n["id"]
-                    for n in nodes
-                    if t["relationship"]["edr_banker"] in n["name"]
-                ),
-                "edr-1",
-            )
-            links.append(
-                {
-                    "source": banker_id,
-                    "target": t["id"],
-                    "label": t["relationship"]["path"][:50],
-                    "value": max(1, t["relationship"]["strength"] // 25),
-                }
-            )
-        elif t["relationship"]["strength"] > 20:
-            links.append(
-                {
-                    "source": "edr-1",
-                    "target": t["id"],
-                    "label": "Reseau commun",
-                    "value": 2,
-                }
-            )
-
-    # Add advisor nodes
-    advisors = [
-        {
-            "id": "adv-1",
-            "name": "Jean Dupont",
-            "type": "advisor",
-            "role": "Partner, Rothschild & Co",
-            "color": "#f59e0b",
-            "signals_count": 0,
-            "signals": [],
-            "is_holding": False,
-        },
-        {
-            "id": "adv-2",
-            "name": "Marie Leclerc",
-            "type": "advisor",
-            "role": "Associee, Darrois Villey",
-            "color": "#f59e0b",
-            "signals_count": 0,
-            "signals": [],
-            "is_holding": False,
-        },
-        {
-            "id": "adv-3",
-            "name": "Paul Bernard",
-            "type": "advisor",
-            "role": "Partner, PwC Advisory",
-            "color": "#f59e0b",
-            "signals_count": 0,
-            "signals": [],
-            "is_holding": False,
-        },
-        {
-            "id": "adv-4",
-            "name": "Helene Garnier",
-            "type": "advisor",
-            "role": "Directrice, InfraVia Capital",
-            "color": "#f59e0b",
-            "signals_count": 0,
-            "signals": [],
-            "is_holding": False,
-        },
-        {
-            "id": "adv-5",
-            "name": "Nicolas Fabre",
-            "type": "advisor",
-            "role": "Partner, Eurazeo",
-            "color": "#f59e0b",
-            "signals_count": 0,
-            "signals": [],
-            "is_holding": False,
-        },
-    ]
-    nodes.extend(advisors)
-
-    # Internal EDR team links (always valid)
-    links.extend([
-        {"source": "edr-2", "target": "adv-1", "label": "Co-mandats historiques", "value": 3},
-        {"source": "edr-1", "target": "adv-3", "label": "Alumni network", "value": 2},
-        {"source": "edr-1", "target": "adv-4", "label": "Coverage Sponsors", "value": 3},
-        {"source": "edr-2", "target": "adv-5", "label": "Relation Sponsors", "value": 3},
-        {"source": "edr-2", "target": "edr-3", "label": "Equipe EDR CF / Banque Privee", "value": 4},
-        {"source": "edr-1", "target": "edr-2", "label": "Equipe origination", "value": 4},
-    ])
-
-    # Dynamic advisor-to-target links (based on actual current targets)
-    target_ids = [t["id"] for t in top_targets]
-    advisor_ids = [a["id"] for a in advisors]
-    labels = ["Conseil M&A", "Audit en cours", "Conseil juridique", "Coverage sectorielle", "Actionnaire"]
-    for i, tid in enumerate(target_ids[:min(5, len(advisor_ids))]):
-        links.append({
-            "source": advisor_ids[i % len(advisor_ids)],
-            "target": tid,
-            "label": labels[i % len(labels)],
-            "value": max(2, 5 - i),
+    for edr in edr_team:
+        nodes.append({
+            "id": edr["id"], "name": edr["name"], "type": "internal",
+            "role": edr["role"], "color": "#6366f1", "score": None,
+            "signals_count": 0, "signals": [], "is_holding": False,
+            "node_size": 9, "multi_mandats": False,
         })
+        node_ids.add(edr["id"])
 
-    return {"data": {"nodes": nodes, "links": links}}
+    top_targets = sorted(enriched_targets, key=lambda x: x["globalScore"], reverse=True)[:12]
+
+    for t in top_targets:
+        score = t["globalScore"]
+        siren = t.get("siren", "")
+        color = "#10b981" if score >= 65 else "#f59e0b" if score >= 45 else "#6366f1" if score >= 25 else "#64748b"
+        groupe = t.get("groupe") or t.get("group") or {}
+        is_holding = bool(groupe.get("is_holding") or groupe.get("is_group"))
+        subsidiaries = groupe.get("entreprises_liees") or groupe.get("subsidiaries") or []
+        top_signals = t.get("topSignals", [])
+
+        nodes.append({
+            "id": t["id"], "name": t["name"], "type": "company",
+            "role": t.get("sector", ""), "color": color, "score": score,
+            "priority": t.get("priorityLevel", ""),
+            "signals_count": len(top_signals),
+            "signals": [s.get("label", "") for s in top_signals[:5]],
+            "is_holding": is_holding,
+            "sector": t.get("sector", ""), "city": t.get("city", ""),
+            "siren": siren,
+            "ca": (t.get("financials") or {}).get("revenue", "N/A"),
+            "ebitda": (t.get("financials") or {}).get("ebitda", "N/A"),
+            "node_size": max(6, min(14, 5 + score // 10)),
+            "multi_mandats": False,
+        })
+        node_ids.add(t["id"])
+
+        for edr in edr_team:
+            links.append({"source": edr["id"], "target": t["id"], "label": "Suivi", "value": 1, "type": "follow"})
+
+        for d in t.get("dirigeants", [])[:3]:
+            dir_name = (d.get("name") or "").strip()
+            if not dir_name or dir_name == t["name"]:
+                continue
+            dir_age = d.get("age", 0) or 0
+            safe = dir_name.lower().replace(" ", "-").replace("'", "").replace("\u2019", "")
+            dir_id = f"dir-{safe}"
+
+            if dir_id not in node_ids:
+                dir_color = "#ef4444" if dir_age >= 60 else "#f59e0b" if dir_age >= 50 else "#94a3b8"
+                nodes.append({
+                    "id": dir_id, "name": dir_name, "type": "director",
+                    "role": d.get("role", "Dirigeant"), "color": dir_color,
+                    "age": dir_age, "age_signal": dir_age >= 60,
+                    "score": None, "node_size": 5,
+                    "signals_count": 1 if dir_age >= 60 else 0,
+                    "signals": ["Fondateur > 60 ans — Signal succession"] if dir_age >= 60 else [],
+                    "company": t["name"], "multi_mandats": False, "is_holding": False,
+                })
+                node_ids.add(dir_id)
+                director_companies[dir_id] = [t["id"]]
+            else:
+                for prev_cid in director_companies.get(dir_id, []):
+                    links.append({
+                        "source": prev_cid, "target": t["id"],
+                        "label": f"Mandat croisé — {dir_name}",
+                        "value": 3, "type": "cross_mandate", "director": dir_name,
+                    })
+                for n in nodes:
+                    if n["id"] == dir_id:
+                        n["multi_mandats"] = True
+                        n["color"] = "#f97316"
+                        if "Mandat croisé détecté" not in n["signals"]:
+                            n["signals"].append("Mandat croisé détecté")
+                            n["signals_count"] += 1
+                director_companies.setdefault(dir_id, []).append(t["id"])
+
+            links.append({"source": dir_id, "target": t["id"], "label": d.get("role", "Dirige"), "value": 2, "type": "directs"})
+
+        for i, sub in enumerate(subsidiaries[:2]):
+            sub_name = sub if isinstance(sub, str) else (sub.get("denomination") or sub.get("name") or f"Filiale {i+1}")
+            sub_id = f"{t['id']}-sub-{i}"
+            if sub_id not in node_ids:
+                nodes.append({
+                    "id": sub_id, "name": sub_name, "type": "subsidiary",
+                    "role": f"Filiale de {t['name']}", "color": "#8b5cf6",
+                    "score": None, "signals_count": 0, "signals": [],
+                    "is_holding": False, "company": t["name"], "node_size": 4, "multi_mandats": False,
+                })
+                node_ids.add(sub_id)
+                links.append({"source": t["id"], "target": sub_id, "label": "Filiale", "value": 1, "type": "subsidiary"})
+
+    cross_mandates_count = sum(1 for l in links if l.get("type") == "cross_mandate")
+    return {
+        "data": {"nodes": nodes, "links": links},
+        "stats": {
+            "nodes": len(nodes),
+            "links": len(links),
+            "companies": sum(1 for n in nodes if n["type"] == "company"),
+            "directors": sum(1 for n in nodes if n["type"] == "director"),
+            "cross_mandates": cross_mandates_count,
+            "signals": sum(n.get("signals_count", 0) for n in nodes),
+        },
+    }
 
 
 @app.get("/api/sectors")
