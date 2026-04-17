@@ -11,12 +11,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, Any, Optional
 import asyncio
 import copy
 import json
+from datetime import datetime
 import re
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -2509,6 +2510,269 @@ async def admin_load_sector(
         "sector_label": label or naf,
         "companies": [{"name": t["name"], "siren": t["siren"], "score": t.get("globalScore", 0)} for t in new_targets],
     }
+
+
+# =============================================================================
+# Admin helpers
+# =============================================================================
+
+_SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+_SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
+
+
+def _check_admin_secret(secret: str):
+    """Vérifie le secret admin. Passe si CRON_SECRET n'est pas configuré."""
+    cron_secret = os.getenv("CRON_SECRET", "")
+    if cron_secret and secret != cron_secret:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _supabase_headers_main() -> dict:
+    return {
+        "apikey": _SUPABASE_KEY,
+        "Authorization": f"Bearer {_SUPABASE_KEY}",
+        "Content-Type": "application/json",
+    }
+
+
+# =============================================================================
+# /api/admin/index-stats — Stats de sirene_index
+# =============================================================================
+
+@app.get("/api/admin/index-stats")
+async def admin_index_stats(secret: str = Query(default="")):
+    """Stats de la table sirene_index Supabase (index 16M SIRENE)."""
+    _check_admin_secret(secret)
+
+    if not _SUPABASE_URL or not _SUPABASE_KEY:
+        return {"configured": False, "message": "Supabase non configuré (SUPABASE_URL / SUPABASE_KEY)"}
+
+    stats: dict = {"configured": True}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            for label, extra_params in [
+                ("total_indexed",   {}),
+                ("enriched",        {"enriched": "eq.true"}),
+                ("to_enrich",       {"enriched": "eq.false"}),
+                ("bodacc_hot",      {"bodacc_recent": "eq.true"}),
+                ("high_score_60p",  {"ma_score_estimate": "gte.60"}),
+            ]:
+                r = await client.get(
+                    f"{_SUPABASE_URL}/rest/v1/sirene_index",
+                    params={"select": "count", **extra_params},
+                    headers={**_supabase_headers_main(), "Prefer": "count=exact"},
+                )
+                content_range = r.headers.get("content-range", "0/0")
+                stats[label] = int(content_range.split("/")[-1])
+    except Exception as e:
+        stats["error"] = str(e)
+
+    stats["enriched_targets_in_memory"] = len(enriched_targets)
+    return stats
+
+
+# =============================================================================
+# /api/admin/rebuild-index — Lance le pipeline SIRENE
+# =============================================================================
+
+@app.get("/api/admin/rebuild-index")
+async def admin_rebuild_index(
+    background_tasks: BackgroundTasks,
+    mode: str = Query(
+        default="api",
+        description="'api' = sweep paginé Vercel-safe | 'bulk' = dl SIRENE complet (local uniquement)",
+    ),
+    depts: str = Query(
+        default="",
+        description="Départements séparés par virgule, ex: 75,69,13 (mode api uniquement)",
+    ),
+    secret: str = Query(default=""),
+):
+    """Lance le rebuild de sirene_index.
+
+    mode=api  : sweep via API Recherche Entreprises — fonctionne sur Vercel.
+                Couvre les grands départements × 62 codes NAF.
+                Durée estimée : 20-60 min selon le nb de depts.
+
+    mode=bulk : télécharge le fichier SIRENE INSEE complet (~2.5 Go) et filtre
+                localement. Uniquement pour usage local ou VPS (pas Vercel).
+                Durée estimée : 15-25 min. Produit 50 000-80 000 SIRENs.
+    """
+    _check_admin_secret(secret)
+
+    dept_list = [d.strip() for d in depts.split(",") if d.strip()] if depts else []
+
+    if mode == "bulk":
+        try:
+            from sirene_bulk import run_full_rebuild
+            background_tasks.add_task(run_full_rebuild)
+            return {
+                "status": "started",
+                "mode": "bulk",
+                "message": (
+                    "Téléchargement SIRENE complet lancé en background (~20 min). "
+                    "Suivre la progression dans les logs serveur."
+                ),
+            }
+        except ImportError:
+            raise HTTPException(500, "sirene_bulk.py introuvable dans le PATH")
+
+    # mode=api (défaut — Vercel-safe)
+    try:
+        from sirene_bulk import api_mode_sweep
+        background_tasks.add_task(api_mode_sweep, dept_list or None, 25)
+        return {
+            "status": "started",
+            "mode": "api",
+            "depts": dept_list if dept_list else "20 grands départements par défaut",
+            "naf_codes": 62,
+            "message": (
+                "Sweep API lancé en background. "
+                "Vérifier /api/admin/index-stats pour suivre la progression."
+            ),
+        }
+    except ImportError:
+        raise HTTPException(500, "sirene_bulk.py introuvable dans le PATH")
+
+
+# =============================================================================
+# /api/admin/enrich-batch — Enrichit N entreprises depuis sirene_index
+# =============================================================================
+
+@app.get("/api/admin/enrich-batch")
+async def admin_enrich_batch(
+    n: int = Query(default=20, ge=1, le=100, description="Nb d'entreprises à enrichir (max 100)"),
+    priority: str = Query(
+        default="score",
+        description="'score' (ma_score_estimate DESC) | 'bodacc' (BODACC hot en priorité) | 'fifo' (created_at ASC)",
+    ),
+    secret: str = Query(default=""),
+):
+    """Enrichit N entreprises depuis sirene_index (non encore enrichies).
+
+    Chaque enrichissement appelle get_full_company_info() → build_target() → Supabase.
+    Rate-limited à ~5 req/s pour respecter les quotas API gouvernementaux.
+    Les nouvelles cibles sont immédiatement disponibles dans /api/targets.
+    """
+    _check_admin_secret(secret)
+
+    if not _SUPABASE_URL or not _SUPABASE_KEY:
+        raise HTTPException(400, "Supabase non configuré — impossible de lire sirene_index")
+
+    global enriched_targets, raw_targets
+
+    # ── 1. Récupérer les SIRENs candidats depuis sirene_index ────────────
+    order_map = {
+        "score":  "ma_score_estimate.desc",
+        "bodacc": "bodacc_recent.desc,ma_score_estimate.desc",
+        "fifo":   "created_at.asc",
+    }
+    order_clause = order_map.get(priority, "ma_score_estimate.desc")
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                f"{_SUPABASE_URL}/rest/v1/sirene_index",
+                params={
+                    "enriched": "eq.false",
+                    "select": "siren,denomination,naf,dept,ma_score_estimate,bodacc_recent",
+                    "order": order_clause,
+                    "limit": n,
+                },
+                headers=_supabase_headers_main(),
+            )
+            if r.status_code != 200:
+                raise HTTPException(500, f"Supabase error HTTP {r.status_code}")
+            candidates = r.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Erreur lecture sirene_index: {e}")
+
+    if not candidates:
+        return {
+            "enriched": 0,
+            "total_in_memory": len(enriched_targets),
+            "message": "Aucun SIREN à enrichir dans sirene_index (tous déjà enrichis ou index vide).",
+        }
+
+    # ── 2. Enrichissement de chaque candidat ─────────────────────────────
+    existing_sirens = {t.get("siren") for t in raw_targets}
+    results: dict = {"enriched": 0, "skipped": 0, "failed": 0, "new_targets": []}
+
+    for candidate in candidates:
+        siren = candidate["siren"]
+
+        # Skip si déjà en mémoire
+        if siren in existing_sirens:
+            results["skipped"] += 1
+            _mark_enriched_in_index(siren)  # corriger l'index
+            continue
+
+        try:
+            company_info = await _papperclip_get_company(siren)
+            if not company_info:
+                results["failed"] += 1
+                continue
+
+            target = build_target(
+                idx=len(raw_targets) + 1,
+                company_info=company_info,
+                search_info={
+                    "siren": siren,
+                    "nom_entreprise": candidate.get("denomination", ""),
+                    "code_naf": candidate.get("naf", ""),
+                },
+            )
+
+            async with _targets_lock:
+                raw_targets.append(target)
+                enriched = enrich_target(target)
+                enriched_targets.append(enriched)
+                existing_sirens.add(siren)
+
+            results["enriched"] += 1
+            results["new_targets"].append({
+                "name":    target["name"],
+                "siren":   siren,
+                "score":   target.get("globalScore", 0),
+                "signals": len(target.get("active_signals", [])),
+                "dept":    candidate.get("dept", ""),
+                "naf":     candidate.get("naf", ""),
+            })
+
+            # Marquer enrichi dans sirene_index
+            asyncio.create_task(_mark_enriched_in_index(siren))
+
+        except Exception as e:
+            print(f"[enrich-batch] Erreur {siren}: {e}")
+            results["failed"] += 1
+
+        await asyncio.sleep(0.2)  # ~5 req/s
+
+    # ── 3. Sauvegarder les nouvelles cibles en Supabase ─────────────────
+    if results["enriched"] > 0:
+        new_sirens = {t["siren"] for t in results["new_targets"]}
+        new_raw = [t for t in raw_targets if t.get("siren") in new_sirens]
+        await save_to_supabase(new_raw)
+
+    results["total_in_memory"] = len(enriched_targets)
+    return results
+
+
+async def _mark_enriched_in_index(siren: str):
+    """Marque un SIREN comme enrichi dans sirene_index (fire-and-forget)."""
+    if not _SUPABASE_URL or not _SUPABASE_KEY:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            await client.patch(
+                f"{_SUPABASE_URL}/rest/v1/sirene_index?siren=eq.{siren}",
+                json={"enriched": True, "enriched_at": datetime.utcnow().isoformat()},
+                headers={**_supabase_headers_main(), "Prefer": "resolution=merge-duplicates"},
+            )
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
