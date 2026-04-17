@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  eslint: {
+    // ESLint vérifié séparément en CI — ne bloque pas le build Vercel
+    ignoreDuringBuilds: true,
+  },
   async rewrites() {
     if (process.env.NODE_ENV === "production") {
       // In production (Vercel experimentalServices), backend is mounted at /_/backend
