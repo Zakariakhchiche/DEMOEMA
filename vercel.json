@@ -1,15 +1,21 @@
 {
-  "experimentalServices": {
-    "frontend": {
-      "entrypoint": "frontend",
-      "routePrefix": "/",
-      "framework": "nextjs"
+  "version": 2,
+  "builds": [
+    {
+      "src": "backend/main.py",
+      "use": "@vercel/python"
     },
-    "backend": {
-      "entrypoint": "backend",
-      "routePrefix": "/_/backend"
+    {
+      "src": "frontend/package.json",
+      "use": "@vercel/next"
     }
-  },
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "backend/main.py"
+    }
+  ],
   "crons": [
     {
       "path": "/api/cron/refresh",

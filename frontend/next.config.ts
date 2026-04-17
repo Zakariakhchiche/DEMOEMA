@@ -6,14 +6,10 @@ const nextConfig: NextConfig = {
     ignoreDuringBuilds: true,
   },
   async rewrites() {
+    // In production, Vercel routes (vercel.json) intercept /api/* before Next.js
+    // This rewrite only applies in local development
     if (process.env.NODE_ENV === "production") {
-      // In production (Vercel experimentalServices), backend is mounted at /_/backend
-      return [
-        {
-          source: "/api/:path*",
-          destination: "/_/backend/api/:path*",
-        },
-      ];
+      return [];
     }
     return [
       {
