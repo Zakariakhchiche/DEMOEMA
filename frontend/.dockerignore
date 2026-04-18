@@ -1,0 +1,10 @@
+node_modules
+.next
+out
+.vercel
+coverage
+*.log
+lint*.log
+lint*.json
+.env
+.env.*
