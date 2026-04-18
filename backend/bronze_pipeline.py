@@ -210,7 +210,9 @@ def _ensure_database() -> None:
     if not _DUCKDB_OK or not MOTHERDUCK_TOKEN:
         return
     try:
-        con = duckdb.connect(f"md:?motherduck_token={MOTHERDUCK_TOKEN}")
+        # Utilise la variable d'env motherduck_token (lue automatiquement par DuckDB)
+        os.environ["motherduck_token"] = MOTHERDUCK_TOKEN
+        con = duckdb.connect("md:")
         con.execute(f"CREATE DATABASE IF NOT EXISTS {DB_NAME}")
         con.close()
         print(f"[DuckDB] Base '{DB_NAME}' prête sur MotherDuck.")
@@ -220,16 +222,17 @@ def _ensure_database() -> None:
 
 def _get_connection(local_fallback: bool = False):
     """Retourne une connexion DuckDB.
-    - Si MOTHERDUCK_TOKEN défini → connexion MotherDuck cloud
+    - Si MOTHERDUCK_TOKEN défini → connexion MotherDuck cloud via env var
     - Sinon → fichier local edrcf.duckdb (développement)
-    Crée automatiquement la base si elle n'existe pas.
     """
     if not _DUCKDB_OK:
         raise RuntimeError("duckdb non installé. Exécuter : pip install duckdb")
 
     if MOTHERDUCK_TOKEN and not local_fallback:
+        # DuckDB lit motherduck_token depuis l'environnement — évite les pb de JWT en query string
+        os.environ["motherduck_token"] = MOTHERDUCK_TOKEN
         _ensure_database()
-        conn_str = f"md:{DB_NAME}?motherduck_token={MOTHERDUCK_TOKEN}"
+        conn_str = f"md:{DB_NAME}"
         print(f"[DuckDB] Connexion MotherDuck : md:{DB_NAME}")
     else:
         conn_str = "edrcf.duckdb"
