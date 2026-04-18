@@ -172,6 +172,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Admin pipeline router (Bronze/Silver/BODACC/RNE/Pappers)
+from routers.admin import router as _admin_router
+app.include_router(_admin_router)
+
 # Ensure targets are loaded even if lifespan doesn't run (Vercel serverless)
 _load_targets_sync()
 
@@ -2540,69 +2544,8 @@ def _supabase_headers_main() -> dict:
     }
 
 
-# =============================================================================
-# /api/admin/bronze-stats — Stats DuckDB Bronze + Silver (MotherDuck)
-# =============================================================================
-
-@app.get("/api/admin/bronze-stats")
-async def admin_bronze_stats(secret: str = Query(default="")):
-    """Stats des couches Bronze (16M) et Silver (~50-80K) sur MotherDuck."""
-    _check_admin_secret(secret)
-    try:
-        from bronze_pipeline import api_bronze_stats
-        return await api_bronze_stats()
-    except Exception as e:
-        raise HTTPException(500, f"Erreur bronze-stats: {e}")
-
-
-@app.get("/api/admin/load-bronze")
-async def admin_load_bronze(
-    background_tasks: BackgroundTasks,
-    secret: str = Query(default=""),
-):
-    """
-    Lance le pipeline complet Bronze/Silver en arrière-plan :
-    1. Télécharge StockUniteLegale_utf8.csv.gz (~2.5 Go)
-    2. Charge les 16M entités dans DuckDB Bronze (MotherDuck)
-    3. Filtre les PME/ETI M&A-éligibles → Silver (~50-80K)
-    4. Synchronise le top-5000 Silver vers Supabase sirene_index
-    Durée estimée : 20-40 min selon la connexion.
-    """
-    _check_admin_secret(secret)
-
-    async def _run_pipeline():
-        import bronze_pipeline as bp
-        bp._PIPELINE_STATUS.update({
-            "running": True, "step": "setup", "error": None,
-            "started_at": datetime.utcnow().isoformat(), "finished_at": None,
-        })
-        try:
-            print("[ADMIN] Pipeline Bronze démarré…")
-            bp.setup_tables()
-            bp._PIPELINE_STATUS["step"] = "bronze_load"
-            await asyncio.to_thread(bp.load_bronze)
-            bp._PIPELINE_STATUS["step"] = "silver_build"
-            await asyncio.to_thread(bp.build_silver)
-            bp._PIPELINE_STATUS["step"] = "sync_supabase"
-            await bp.sync_silver_to_supabase(top_n=5000, priority="score")
-            bp._PIPELINE_STATUS.update({
-                "running": False, "step": "done",
-                "finished_at": datetime.utcnow().isoformat(),
-            })
-            print("[ADMIN] Pipeline Bronze terminé.")
-        except Exception as e:
-            bp._PIPELINE_STATUS.update({
-                "running": False, "step": "error",
-                "error": str(e), "finished_at": datetime.utcnow().isoformat(),
-            })
-            print(f"[ADMIN] Erreur pipeline Bronze: {e}")
-
-    background_tasks.add_task(_run_pipeline)
-    return {
-        "status": "started",
-        "message": "Pipeline Bronze/Silver lancé en arrière-plan (~20-40 min). "
-                   "Suivre la progression via /api/admin/bronze-stats",
-    }
+# NOTE: /api/admin/bronze-stats, /load-bronze, /load-bodacc, /load-rne,
+#       /load-pappers, /run-all → voir routers/admin.py (inclus ci-dessus)
 
 
 # =============================================================================

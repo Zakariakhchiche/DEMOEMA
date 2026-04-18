@@ -21,11 +21,15 @@ Usage CLI :
 """
 
 import asyncio
+import io
 import os
+import re
 import sys
+import tarfile
 import time
 import urllib.request
-from datetime import datetime
+import xml.etree.ElementTree as ET
+from datetime import datetime, date
 
 import httpx
 from dotenv import load_dotenv
@@ -110,6 +114,60 @@ def get_sirene_urls() -> tuple[str, str]:
     return ul_url, etab_url
 
 UPSERT_BATCH = 500   # lignes par appel Supabase
+
+# ── BODACC ───────────────────────────────────────────────────────────────────
+BODACC_TABLE = "bronze_bodacc"
+
+# Source primaire : archives tar.gz DILA (sans rate-limit, source officielle)
+# Structure réelle du serveur DILA :
+#   FluxHistorique/{year}.tar.gz  → archives annuelles 2022-2025 (~100-500 MB)
+#   FluxAnneeCourante/BILAN_BXC{year}{NNN}.taz  → flux hebdomadaires de l'année en cours
+_DILA_BASE = "https://echanges.dila.gouv.fr/OPENDATA/BODACC"
+_DILA_HISTORIQUE = f"{_DILA_BASE}/FluxHistorique"
+_DILA_COURANTE   = f"{_DILA_BASE}/FluxAnneeCourante"
+
+# Fallback : OpenDataSoft CSV (pratique pour < 1 an)
+_BODACC_ODS_BASE = (
+    "https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets"
+    "/annonces-commerciales/exports/csv"
+    "?delimiter=%3B&timezone=UTC"
+    "&where=familleavis%20IN%20(%27vente%27%2C%27collective%27)"
+)
+
+BODACC_DDL = f"""
+CREATE TABLE IF NOT EXISTS {BODACC_TABLE} (
+    siren           VARCHAR(9),
+    type_annonce    VARCHAR(10),   -- PROCOL | VENTE
+    date_parution   DATE,
+    denomination    TEXT,
+    loaded_at       TIMESTAMP DEFAULT current_timestamp
+);
+"""
+
+# ── Pappers (data.gouv.fr) ────────────────────────────────────────────────────
+PAPPERS_TABLE = "bronze_pappers"
+
+PAPPERS_DDL = f"""
+CREATE TABLE IF NOT EXISTS {PAPPERS_TABLE} (
+    siren              VARCHAR(9)  NOT NULL,
+    denomination       TEXT,
+    forme_juridique    TEXT,
+    code_naf           VARCHAR(6),
+    date_creation      DATE,
+    effectif_min       INTEGER,
+    effectif_max       INTEGER,
+    chiffre_affaires   BIGINT,
+    resultat_net       BIGINT,
+    code_postal        VARCHAR(5),
+    ville              TEXT,
+    loaded_at          TIMESTAMP DEFAULT current_timestamp
+);
+"""
+
+# Pappers publie leur base sur data.gouv.fr — dataset ID stable
+_PAPPERS_DATAGOUV_SEARCH = (
+    "https://www.data.gouv.fr/api/1/datasets/?q=pappers+entreprises&page_size=5"
+)
 
 # =============================================================================
 # Codes NAF et filtres (répliqués de sirene_bulk.py)
@@ -211,6 +269,23 @@ CREATE TABLE IF NOT EXISTS {SILVER_TABLE} (
     categorie_entreprise   VARCHAR(10),
     ma_score               SMALLINT    DEFAULT 0,
     bodacc_recent          BOOLEAN     DEFAULT false,
+    -- Adresse (SIRENE StockEtablissement)
+    adresse                TEXT,
+    code_postal            VARCHAR(5),
+    ville                  TEXT,
+    -- Contact (recherche-entreprises.api.gouv.fr)
+    site_web               TEXT,
+    telephone              VARCHAR(20),
+    linkedin_url           TEXT,
+    email_domaine          TEXT,
+    -- Dirigeant (INPI RNE)
+    nom_dirigeant          TEXT,
+    qualite_dirigeant      TEXT,
+    annee_naissance        SMALLINT,
+    -- Financier (INPI SFTP — à venir)
+    chiffre_affaires       BIGINT,
+    resultat_net           BIGINT,
+    -- Suivi enrichissement
     enriched               BOOLEAN     DEFAULT false,
     enriched_at            TIMESTAMP,
     silver_at              TIMESTAMP   DEFAULT current_timestamp
@@ -219,15 +294,22 @@ CREATE TABLE IF NOT EXISTS {SILVER_TABLE} (
 
 
 def setup_tables() -> None:
-    """Crée les tables Bronze et Silver sur MotherDuck (idempotent)."""
+    """Crée les tables Bronze, Silver, BODACC et Pappers sur MotherDuck (idempotent)."""
     con = _get_connection()
-    print("[DuckDB] Création des tables Bronze + Silver…")
+    print("[DuckDB] Création des tables Bronze + Silver + BODACC + Pappers…")
     con.execute(BRONZE_DDL)
     con.execute(SILVER_DDL)
-    # Index Silver pour les requêtes fréquentes
+    con.execute(BODACC_DDL)
+    con.execute(PAPPERS_DDL)
+    # Index Silver
     con.execute(f"CREATE INDEX IF NOT EXISTS idx_silver_score ON {SILVER_TABLE} (ma_score DESC)")
     con.execute(f"CREATE INDEX IF NOT EXISTS idx_silver_naf   ON {SILVER_TABLE} (naf)")
     con.execute(f"CREATE INDEX IF NOT EXISTS idx_silver_dept  ON {SILVER_TABLE} (dept)")
+    # Index BODACC
+    con.execute(f"CREATE INDEX IF NOT EXISTS idx_bodacc_siren ON {BODACC_TABLE} (siren)")
+    con.execute(f"CREATE INDEX IF NOT EXISTS idx_bodacc_date  ON {BODACC_TABLE} (date_parution)")
+    # Index Pappers
+    con.execute(f"CREATE INDEX IF NOT EXISTS idx_pappers_siren ON {PAPPERS_TABLE} (siren)")
     con.close()
     print("[DuckDB] ✅ Tables prêtes.")
 
@@ -326,17 +408,27 @@ def build_silver(etab_url: str | None = None) -> int:
     con.execute(f"""
         INSERT INTO {SILVER_TABLE}
             (siren, denomination, naf, dept, effectif_tranche,
-             date_creation, categorie_juridique, categorie_entreprise, ma_score)
+             date_creation, categorie_juridique, categorie_entreprise,
+             adresse, code_postal, ville,
+             ma_score)
         SELECT
             b.siren,
             b.denomination,
             b.naf,
-            -- dept : JOIN StockEtablissement uniquement sur ~87K lignes éligibles
+            -- dept + adresse depuis StockEtablissement (même parquet, 0 coût supplémentaire)
             LEFT(COALESCE(e.codeCommuneEtablissement, ''), 2)   AS dept,
             b.effectif_tranche,
             b.date_creation,
             b.categorie_juridique,
             b.categorie_entreprise,
+            -- Adresse complète reconstituée
+            TRIM(
+                COALESCE(e.numeroVoieEtablissement, '') || ' ' ||
+                COALESCE(e.typeVoieEtablissement,   '') || ' ' ||
+                COALESCE(e.libelleVoieEtablissement,'')
+            )                                                    AS adresse,
+            e.codePostalEtablissement                            AS code_postal,
+            e.libelleCommuneEtablissement                        AS ville,
             -- Score M&A 0-100
             LEAST(100,
                 CASE b.effectif_tranche
@@ -377,7 +469,13 @@ def build_silver(etab_url: str | None = None) -> int:
             ) AS ma_score
         FROM {BRONZE_TABLE} AS b
         LEFT JOIN (
-            SELECT siren, codeCommuneEtablissement
+            SELECT siren,
+                   codeCommuneEtablissement,
+                   numeroVoieEtablissement,
+                   typeVoieEtablissement,
+                   libelleVoieEtablissement,
+                   codePostalEtablissement,
+                   libelleCommuneEtablissement
             FROM read_parquet('{etab_url}')
             WHERE etablissementSiege = 'true'
         ) AS e ON b.siren = e.siren
@@ -395,14 +493,438 @@ def build_silver(etab_url: str | None = None) -> int:
 
 
 # =============================================================================
+# BODACC — chargement via DILA (source officielle) + fallback ODS
+# =============================================================================
+
+def _parse_bodacc_xml(xml_bytes: bytes, annonce_type: str) -> list[tuple]:
+    """
+    Parse un fichier XML BODACC DILA et retourne [(siren, annonce_type, date, denom)].
+    Gère BODACC-A (vente) et BODACC-B (procol) avec extraction SIREN robuste.
+    """
+    rows: list[tuple] = []
+    try:
+        root = ET.fromstring(xml_bytes)
+    except ET.ParseError:
+        return rows
+
+    for avis in root.iter("avis"):
+        type_elem = avis.find("typeAnnonce")
+        if type_elem is None:
+            continue
+
+        # Filtre selon le type demandé
+        if annonce_type == "VENTE" and type_elem.find("vente") is None:
+            continue
+        if annonce_type == "PROCOL":
+            # BODACC-B regroupe plusieurs jugements de procédures collectives
+            procol_tags = {
+                "jugementPrononceOuvertureSauvegarde",
+                "jugementPrononceOuvertureRedressementJudiciaire",
+                "jugementPrononceRedressementJudiciaire",
+                "jugementDeclarantFaillitePersonnelle",
+                "jugementOuvrantLiquidationJudiciaire",
+                "jugementArreteOuPrononceLiquidationJudiciaire",
+                "proce",
+            }
+            if not any(type_elem.find(t) is not None for t in procol_tags):
+                continue
+
+        # Date de parution (format YYYYMMDD ou YYYY-MM-DD)
+        date_obj = None
+        date_str = (avis.findtext("dateParution") or "").strip().replace("-", "")
+        if len(date_str) == 8 and date_str.isdigit():
+            try:
+                date_obj = date(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:8]))
+            except ValueError:
+                pass
+
+        # SIREN — cherche <numeroIdentification> (9 chiffres exactement)
+        siren = None
+        for elem in avis.iter("numeroIdentification"):
+            val = (elem.text or "").strip()
+            if len(val) == 9 and val.isdigit():
+                siren = val
+                break
+
+        if not siren:
+            # Fallback regex sur le texte brut de l'avis
+            avis_text = ET.tostring(avis, encoding="unicode")
+            m = re.search(r'\b(\d{9})\b', avis_text)
+            if m:
+                siren = m.group(1)
+
+        # Dénomination sociale
+        denom = ""
+        for tag in ("denominationSociale", "nom", "raisonSociale", "nomEntreprise"):
+            elem = avis.find(f".//{tag}")
+            if elem is not None and elem.text:
+                denom = elem.text.strip()[:200]
+                break
+
+        if siren:
+            rows.append((siren, annonce_type, date_obj, denom))
+
+    return rows
+
+
+def _stream_download(url: str, dest: str) -> bool:
+    """Télécharge url → dest en streaming. Retourne True si succès."""
+    try:
+        downloaded = 0
+        with httpx.Client(timeout=None, follow_redirects=True,
+                          headers={"User-Agent": "EdRCF/6.0"}) as client:
+            with client.stream("GET", url) as resp:
+                resp.raise_for_status()
+                with open(dest, "wb") as fp:
+                    for chunk in resp.iter_bytes(131_072):
+                        fp.write(chunk)
+                        downloaded += len(chunk)
+                        if downloaded % 50_000_000 < 131_072:
+                            print(f"[DILA]   {downloaded/1e6:.0f} MB…")
+        print(f"[DILA] Téléchargé {os.path.getsize(dest)/1e6:.1f} MB → {dest}")
+        return True
+    except Exception as e:
+        print(f"[DILA] Échec {url}: {type(e).__name__}: {e}")
+        return False
+
+
+def _dila_list_courante() -> list[str]:
+    """Retourne les URLs des flux hebdomadaires de l'année courante (FluxAnneeCourante/)."""
+    try:
+        with httpx.Client(timeout=15, follow_redirects=True) as c:
+            r = c.get(_DILA_COURANTE + "/")
+            r.raise_for_status()
+        import re as _re
+        links = _re.findall(r'href="(BILAN_BXC[^"]+\.taz)"', r.text)
+        return [f"{_DILA_COURANTE}/{f}" for f in sorted(links)]
+    except Exception as e:
+        print(f"[DILA] Erreur listing FluxAnneeCourante: {e}")
+        return []
+
+
+def _insert_bodacc_batch(rows: list[tuple]) -> int:
+    """Insert un batch dans bronze_bodacc. Retourne le nb de lignes insérées."""
+    if not rows:
+        return 0
+    con = _get_connection()
+    try:
+        con.executemany(
+            f"INSERT INTO {BODACC_TABLE} (siren, type_annonce, date_parution, denomination)"
+            f" VALUES (?, ?, ?, ?)",
+            rows,
+        )
+        return len(rows)
+    finally:
+        con.close()
+
+
+def _parse_tar_bodacc(tmp_path: str) -> list[tuple]:
+    """
+    Extrait les lignes BODACC d'un archive .tar.gz / .taz.
+    Gère les archives imbriquées : si l'archive contient d'autres .taz/.tar.gz,
+    les extrait récursivement (ex: FluxHistorique/2025.tar.gz → semaines .taz → XML).
+    """
+    rows: list[tuple] = []
+    try:
+        with tarfile.open(tmp_path, "r:*") as tar:
+            for member in tar.getmembers():
+                name = member.name.lower()
+                f = tar.extractfile(member)
+                if not f:
+                    continue
+                if name.endswith(".xml"):
+                    # Détermine le type depuis le nom du fichier
+                    annonce_type = "PROCOL" if "_b_" in name or "bodacc-b" in name else "VENTE"
+                    rows.extend(_parse_bodacc_xml(f.read(), annonce_type))
+                elif name.endswith((".taz", ".tar.gz", ".tgz")):
+                    # Archive imbriquée (ex: semaine dans l'archive annuelle)
+                    inner_tmp = f"/tmp/bodacc_inner_{os.path.basename(name)}"
+                    try:
+                        with open(inner_tmp, "wb") as out:
+                            out.write(f.read())
+                        rows.extend(_parse_tar_bodacc(inner_tmp))
+                    except Exception as e2:
+                        print(f"[DILA] Erreur archive imbriquée {name}: {e2}")
+                    finally:
+                        try:
+                            os.unlink(inner_tmp)
+                        except OSError:
+                            pass
+    except Exception as e:
+        print(f"[DILA] Erreur parse {tmp_path}: {e}")
+    return rows
+
+
+def load_bodacc_dila(since: str = "2023-01-01") -> int:
+    """
+    Charge les annonces BODACC depuis les archives DILA (sans rate-limit).
+    URLs réelles :
+      FluxHistorique/{year}.tar.gz  → années 2022-2025
+      FluxAnneeCourante/BILAN_BXC{year}{NNN}.taz  → semaines de l'année en cours
+    Insert par archive pour limiter la mémoire.
+    """
+    since_year = int(since.split("-")[0])
+    current_year = datetime.now().year
+
+    # Vide la table avant rechargement
+    con = _get_connection()
+    try:
+        con.execute(f"DELETE FROM {BODACC_TABLE}")
+    finally:
+        con.close()
+
+    total_inserted = 0
+
+    # ── Années complètes depuis FluxHistorique ──────────────────────────────
+    for year in range(since_year, current_year):
+        url = f"{_DILA_HISTORIQUE}/{year}.tar.gz"
+        tmp = f"/tmp/bodacc_{year}.tar.gz"
+        print(f"[DILA] Téléchargement {url} …")
+        if not _stream_download(url, tmp):
+            print(f"[DILA] Archive {year} introuvable — ignorée.")
+            continue
+        rows = _parse_tar_bodacc(tmp)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        inserted = _insert_bodacc_batch(rows)
+        total_inserted += inserted
+        print(f"[DILA] {year}: {inserted:,} lignes → cumul {total_inserted:,}")
+
+    # ── Année courante depuis FluxAnneeCourante (flux hebdomadaires) ─────────
+    weekly_urls = _dila_list_courante()
+    print(f"[DILA] FluxAnneeCourante: {len(weekly_urls)} fichiers hebdomadaires")
+    for url in weekly_urls:
+        fname = os.path.basename(url)
+        tmp = f"/tmp/{fname}"
+        if not _stream_download(url, tmp):
+            continue
+        rows = _parse_tar_bodacc(tmp)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        inserted = _insert_bodacc_batch(rows)
+        total_inserted += inserted
+
+    if total_inserted == 0:
+        print("[DILA] Aucune donnée extraite.")
+    else:
+        con = _get_connection()
+        try:
+            for t, n in con.execute(
+                f"SELECT type_annonce, COUNT(*) FROM {BODACC_TABLE} GROUP BY 1"
+            ).fetchall():
+                print(f"[DILA]   {t}: {n:,}")
+            print(f"[DILA] Total {total_inserted:,} annonces chargées.")
+        finally:
+            con.close()
+    return total_inserted
+
+
+def _load_bodacc_ods(since: str = "2023-01-01") -> int:
+    """Fallback OpenDataSoft CSV : stream → /tmp → DuckDB bulk-load."""
+    since_enc = since.replace("-", "%2D")
+    csv_url = (
+        f"{_BODACC_ODS_BASE}"
+        f"%20AND%20dateparution%20%3E%3D%20%27{since_enc}%27"
+    )
+    tmp_path = "/tmp/bodacc_ods.csv"
+    print(f"[BODACC ODS] Téléchargement CSV (≥{since})…")
+    try:
+        downloaded = 0
+        with httpx.Client(timeout=None, follow_redirects=True,
+                          headers={"User-Agent": "EdRCF/6.0"}) as client:
+            with client.stream("GET", csv_url) as resp:
+                resp.raise_for_status()
+                with open(tmp_path, "wb") as fp:
+                    for chunk in resp.iter_bytes(131_072):
+                        fp.write(chunk)
+                        downloaded += len(chunk)
+                        if downloaded % 20_000_000 < 131_072:
+                            print(f"[BODACC ODS] {downloaded/1e6:.0f} MB…")
+        print(f"[BODACC ODS] {os.path.getsize(tmp_path)/1e6:.1f} MB téléchargés")
+    except Exception as e:
+        print(f"[BODACC ODS] ERREUR download: {e}")
+        _PIPELINE_STATUS["error"] = f"BODACC ODS: {str(e)[:200]}"
+        return 0
+
+    total = 0
+    con = _get_connection()
+    try:
+        con.execute(f"DELETE FROM {BODACC_TABLE}")
+        con.execute(f"""
+            INSERT INTO {BODACC_TABLE} (siren, type_annonce, date_parution, denomination)
+            SELECT
+                REGEXP_EXTRACT(
+                    REGEXP_REPLACE(COALESCE(registre, ''), '[^0-9,]', ''),
+                    '(\\d{{9}})', 1
+                )                                          AS siren,
+                CASE familleavis
+                    WHEN 'vente'      THEN 'VENTE'
+                    WHEN 'collective' THEN 'PROCOL'
+                    ELSE                   'AUTRE'
+                END                                        AS type_annonce,
+                TRY_CAST(dateparution AS DATE)             AS date_parution,
+                COALESCE(commercant, '')                   AS denomination
+            FROM read_csv_auto('{tmp_path}', delim=';', header=true,
+                               ignore_errors=true, nullstr='')
+            WHERE REGEXP_EXTRACT(
+                      REGEXP_REPLACE(COALESCE(registre, ''), '[^0-9,]', ''),
+                      '(\\d{{9}})', 1
+                  ) != ''
+        """)
+        total = con.execute(f"SELECT COUNT(*) FROM {BODACC_TABLE}").fetchone()[0]
+        print(f"[BODACC ODS] ✅ {total:,} annonces chargées depuis {since}.")
+    except Exception as e:
+        print(f"[BODACC ODS] ERREUR bulk-load: {e}")
+        _PIPELINE_STATUS["error"] = f"BODACC ODS bulk-load: {str(e)[:200]}"
+    finally:
+        con.close()
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+    return total
+
+
+def load_bodacc(since: str = "2023-01-01") -> int:
+    """
+    Charge les annonces BODACC : essaie DILA (archives annuelles tar.gz) en premier,
+    puis fallback OpenDataSoft CSV si DILA échoue.
+    """
+    print(f"[BODACC] Chargement depuis DILA (primaire) puis ODS (fallback)…")
+    total = load_bodacc_dila(since=since)
+    if total == 0:
+        print("[BODACC] DILA n'a rien retourné — fallback OpenDataSoft…")
+        total = _load_bodacc_ods(since=since)
+    return total
+
+
+def flag_bodacc_silver(months: int = 24) -> int:
+    """
+    Met à jour bodacc_recent=true dans Silver pour les SIRENs
+    ayant une annonce BODACC dans les `months` derniers mois.
+    Ajoute +15 au ma_score (capped à 100) pour les signaux VENTE/PROCOL.
+    Retourne le nombre de lignes mises à jour.
+    """
+    con = _get_connection()
+    print(f"[BODACC] Flagging Silver (bodacc_recent) sur {months} mois…")
+
+    con.execute(f"""
+        UPDATE {SILVER_TABLE}
+        SET bodacc_recent = true,
+            ma_score      = LEAST(100, ma_score + 15)
+        WHERE siren IN (
+            SELECT DISTINCT siren
+            FROM {BODACC_TABLE}
+            WHERE date_parution >= CURRENT_DATE - INTERVAL ('{months} months')
+              AND type_annonce IN ('VENTE', 'PROCOL')
+              AND siren IS NOT NULL
+        )
+    """)
+
+    updated = con.execute(
+        f"SELECT COUNT(*) FROM {SILVER_TABLE} WHERE bodacc_recent = true"
+    ).fetchone()[0]
+    con.close()
+    print(f"[BODACC] ✅ {updated:,} entreprises Silver flaggées bodacc_recent=true.")
+    return updated
+
+
+# =============================================================================
+# PAPPERS — data.gouv.fr (base Pappers open data)
+# =============================================================================
+
+def load_pappers_bronze() -> int:
+    """
+    STATUT : NON DISPONIBLE — le pseudo-dataset "Pappers" sur data.gouv.fr est un
+    micro-extrait <1 Mo figé en juillet 2021 publié par un portail Pays Basque, sans rapport
+    avec la base Pappers réelle. L'API Pappers interdit explicitement la redistribution dans un
+    SaaS tiers (CGU §usage commercial) sauf contrat "Redistribution" négocié.
+
+    ALTERNATIVES SOUVERAINES À IMPLÉMENTER :
+    - INPI RNE SFTP : comptes annuels + dirigeants + actes pour 10 M entreprises
+      → inscription gratuite sur data.inpi.fr (délai ~1-4 semaines)
+    - Annuaire Entreprises Etalab (github.com/annuaire-entreprises-data-gouv-fr)
+      → licence MIT, forkable, maintenu par la DINUM
+
+    Retourne 0 jusqu'à intégration d'une vraie source financière.
+    """
+    print("[PAPPERS] Dataset Pappers data.gouv.fr indisponible (cf. audit juridique).")
+    print("[PAPPERS] Pour les données financières, utiliser INPI RNE SFTP après inscription.")
+    return 0
+
+
+def enrich_silver_pappers() -> int:
+    """Sera opérationnel quand bronze_pappers sera alimenté (INPI SFTP ou source souveraine)."""
+    con = _get_connection()
+    try:
+        count = con.execute(f"SELECT COUNT(*) FROM {PAPPERS_TABLE}").fetchone()[0]
+    except Exception:
+        count = 0
+    finally:
+        con.close()
+    if count == 0:
+        print("[PAPPERS] bronze_pappers vide — enrich ignoré.")
+        return 0
+    # Bonus financiers (actif une fois INPI SFTP chargé)
+    con = _get_connection()
+    try:
+        con.execute(f"""
+            UPDATE {SILVER_TABLE} SET ma_score = LEAST(100, ma_score + 8)
+            WHERE siren IN (SELECT siren FROM {PAPPERS_TABLE} WHERE chiffre_affaires >= 5000000)
+        """)
+        con.execute(f"""
+            UPDATE {SILVER_TABLE} SET ma_score = LEAST(100, ma_score + 5)
+            WHERE siren IN (SELECT siren FROM {PAPPERS_TABLE}
+                WHERE chiffre_affaires >= 1000000 AND chiffre_affaires < 5000000)
+        """)
+        con.execute(f"""
+            UPDATE {SILVER_TABLE} SET ma_score = LEAST(100, ma_score + 5)
+            WHERE siren IN (SELECT siren FROM {PAPPERS_TABLE} WHERE resultat_net > 0)
+        """)
+        updated = con.execute(f"""
+            SELECT COUNT(*) FROM {SILVER_TABLE}
+            WHERE siren IN (SELECT DISTINCT siren FROM {PAPPERS_TABLE})
+        """).fetchone()[0]
+        print(f"[PAPPERS] {updated:,} entreprises Silver enrichies.")
+        return updated
+    except Exception as e:
+        print(f"[PAPPERS] Erreur enrich_silver_pappers: {e}")
+        return 0
+    finally:
+        con.close()
+
+
+# =============================================================================
 # SYNC → Supabase (sirene_index)
 # =============================================================================
+
+async def _get_supabase_columns(client: httpx.AsyncClient, headers: dict) -> set:
+    """Discovers existing columns in sirene_index by fetching one row."""
+    try:
+        r = await client.get(
+            f"{SUPABASE_URL}/rest/v1/sirene_index",
+            params={"limit": "1"},
+            headers={**headers, "Prefer": ""},
+        )
+        if r.status_code == 200:
+            data = r.json()
+            if data:
+                return set(data[0].keys())
+    except Exception:
+        pass
+    return set()
+
 
 async def sync_silver_to_supabase(top_n: int = 5000, priority: str = "score") -> int:
     """
     Pousse les top_n entreprises Silver vers Supabase sirene_index.
     priority = 'score'   → tri par ma_score DESC
     priority = 'bodacc'  → bodacc_recent DESC, ma_score DESC
+    Auto-détecte les colonnes existantes pour résister aux migrations incomplètes.
     Retourne le nombre de lignes upsertées.
     """
     if not SUPABASE_URL or not SUPABASE_KEY:
@@ -412,31 +934,78 @@ async def sync_silver_to_supabase(top_n: int = 5000, priority: str = "score") ->
     con = _get_connection()
 
     order = "bodacc_recent DESC, ma_score DESC" if priority == "bodacc" else "ma_score DESC"
-    rows_df = con.execute(f"""
-        SELECT siren, denomination, naf, dept, effectif_tranche,
-               date_creation::TEXT AS date_creation,
-               categorie_juridique, categorie_entreprise,
-               ma_score AS ma_score_estimate,
-               bodacc_recent, enriched
-        FROM {SILVER_TABLE}
-        ORDER BY {order}
-        LIMIT {top_n}
-    """).fetchall()
-    cols = ["siren","denomination","naf","dept","effectif_tranche","date_creation",
-            "categorie_juridique","categorie_entreprise","ma_score_estimate",
-            "bodacc_recent","enriched"]
-    records = [dict(zip(cols, r)) for r in rows_df]
+
+    # All columns we want to send — subset will be filtered by what exists in Supabase
+    all_cols = [
+        "siren", "denomination", "naf", "dept", "effectif_tranche", "date_creation",
+        "categorie_juridique", "categorie_entreprise", "ma_score_estimate",
+        "bodacc_recent", "enriched",
+        "adresse", "code_postal", "ville",
+        "site_web", "telephone", "linkedin_url", "email_domaine",
+        "nom_dirigeant", "qualite_dirigeant", "annee_naissance",
+        "chiffre_affaires", "resultat_net",
+    ]
+
+    # Silver columns (some aliased differently)
+    silver_select = """
+        siren, denomination, naf, dept, effectif_tranche,
+        date_creation::TEXT AS date_creation,
+        categorie_juridique, categorie_entreprise,
+        ma_score AS ma_score_estimate,
+        bodacc_recent, enriched,
+        adresse, code_postal, ville,
+        site_web, telephone, linkedin_url, email_domaine,
+        nom_dirigeant, qualite_dirigeant, annee_naissance,
+        chiffre_affaires, resultat_net
+    """
+
+    # Gracefully handle missing columns in Silver (e.g. not yet migrated)
+    try:
+        rows_df = con.execute(f"""
+            SELECT {silver_select}
+            FROM {SILVER_TABLE}
+            ORDER BY {order}
+            LIMIT {top_n}
+        """).fetchall()
+    except Exception as e:
+        print(f"[SYNC] Erreur lecture Silver (colonnes manquantes ?) : {e}")
+        # Fallback: only send base columns
+        rows_df = con.execute(f"""
+            SELECT siren, denomination, naf, dept, effectif_tranche,
+                   date_creation::TEXT AS date_creation,
+                   categorie_juridique, categorie_entreprise,
+                   ma_score AS ma_score_estimate,
+                   bodacc_recent, enriched
+            FROM {SILVER_TABLE}
+            ORDER BY {order}
+            LIMIT {top_n}
+        """).fetchall()
+        all_cols = ["siren","denomination","naf","dept","effectif_tranche","date_creation",
+                    "categorie_juridique","categorie_entreprise","ma_score_estimate",
+                    "bodacc_recent","enriched"]
+
+    records = [dict(zip(all_cols, r)) for r in rows_df]
     con.close()
 
-    print(f"[SYNC] Envoi de {len(records)} lignes vers Supabase sirene_index…")
     headers = {
         "apikey":        SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
         "Content-Type":  "application/json",
         "Prefer":        "resolution=merge-duplicates",
     }
-    total = 0
+
     async with httpx.AsyncClient(timeout=30) as client:
+        # Discover which columns actually exist in Supabase
+        existing_cols = await _get_supabase_columns(client, headers)
+        if existing_cols:
+            # Filter records to only include known columns
+            missing = set(all_cols) - existing_cols
+            if missing:
+                print(f"[SYNC] Colonnes absentes de sirene_index (migration requise) : {sorted(missing)}")
+                records = [{k: v for k, v in rec.items() if k in existing_cols} for rec in records]
+
+        print(f"[SYNC] Envoi de {len(records)} lignes vers Supabase sirene_index…")
+        total = 0
         for i in range(0, len(records), UPSERT_BATCH):
             batch = records[i : i + UPSERT_BATCH]
             r = await client.post(
@@ -449,7 +1018,7 @@ async def sync_silver_to_supabase(top_n: int = 5000, priority: str = "score") ->
             else:
                 print(f"  [SYNC] Erreur batch {i//UPSERT_BATCH}: HTTP {r.status_code} — {r.text[:200]}")
 
-    print(f"[SYNC] ✅ {total} lignes synchronisées vers Supabase.")
+    print(f"[SYNC] {total} lignes synchronisées vers Supabase.")
     return total
 
 
@@ -518,12 +1087,29 @@ async def api_bronze_stats() -> dict:
         avg_score = con.execute(
             f"SELECT ROUND(AVG(ma_score)) FROM {SILVER_TABLE}"
         ).fetchone()[0]
+        bodacc_total = 0
+        bodacc_recent_flagged = 0
+        pappers_total = 0
+        try:
+            bodacc_total = con.execute(f"SELECT COUNT(*) FROM {BODACC_TABLE}").fetchone()[0]
+            bodacc_recent_flagged = con.execute(
+                f"SELECT COUNT(*) FROM {SILVER_TABLE} WHERE bodacc_recent = true"
+            ).fetchone()[0]
+        except Exception:
+            pass
+        try:
+            pappers_total = con.execute(f"SELECT COUNT(*) FROM {PAPPERS_TABLE}").fetchone()[0]
+        except Exception:
+            pass
         con.close()
         return {
             "bronze_total": bronze,
             "silver_eligible": silver,
             "silver_enriched": enriched,
             "silver_avg_score": avg_score,
+            "bodacc_total": bodacc_total,
+            "bodacc_flagged_silver": bodacc_recent_flagged,
+            "pappers_total": pappers_total,
             "pipeline": _PIPELINE_STATUS,
         }
     except Exception as e:
@@ -547,6 +1133,13 @@ async def _run_async(cmd: str, args: list[str]) -> None:
     elif cmd == "build-silver":
         build_silver()
 
+    elif cmd == "load-bodacc":
+        since = args[0] if args else "2023-01-01"
+        load_bodacc(since=since)
+
+    elif cmd == "flag-bodacc":
+        flag_bodacc_silver()
+
     elif cmd == "stats":
         print_stats()
 
@@ -555,11 +1148,21 @@ async def _run_async(cmd: str, args: list[str]) -> None:
         prio  = args[1] if len(args) > 1 else "score"
         await sync_silver_to_supabase(top_n=top_n, priority=prio)
 
+    elif cmd == "load-pappers":
+        load_pappers_bronze()
+
+    elif cmd == "enrich-pappers":
+        enrich_silver_pappers()
+
     elif cmd == "full":
         setup_tables()
         load_bronze()
         build_silver()
-        await sync_silver_to_supabase(top_n=5000)
+        load_bodacc()
+        flag_bodacc_silver()
+        load_pappers_bronze()
+        enrich_silver_pappers()
+        await sync_silver_to_supabase(top_n=5000, priority="bodacc")
 
     else:
         print(__doc__)
