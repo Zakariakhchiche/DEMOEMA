@@ -1,0 +1,88 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: demoema-backend
+    restart: unless-stopped
+    env_file: .env
+    expose:
+      - "8000"
+    networks:
+      - web
+    # Limites taillees pour IONOS VPS L (4 vCPU / 8 GB RAM).
+    # Adapter dans docker-compose.override.yml si VPS plus gros.
+    deploy:
+      resources:
+        limits:
+          cpus: "2.5"
+          memory: 4G
+        reservations:
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: demoema-frontend
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      # Le rewrite Next.js proxifie /api/* vers ce backend interne Docker.
+      - NEXT_PUBLIC_BACKEND_URL=http://backend:8000
+    expose:
+      - "3000"
+    depends_on:
+      - backend
+    networks:
+      - web
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: demoema-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file: .env
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - web
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+networks:
+  web:
+
+volumes:
+  caddy_data:
+  caddy_config:

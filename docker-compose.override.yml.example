@@ -1,0 +1,56 @@
+# Copier vers docker-compose.override.yml pour ajuster les limites selon
+# la taille du VPS. Le fichier override.yml est auto-mergé par Docker Compose
+# et surcharge les valeurs du docker-compose.yml principal.
+#
+# EXEMPLES par plateforme :
+#
+#   - IONOS VPS L (4 vCPU / 8 GB)  -> utilisez les valeurs du compose par defaut
+#   - IONOS VPS XL (6 vCPU / 16 GB) -> doublez les limites backend
+#   - Hetzner CCX33 (8 vCPU / 32 GB) -> tirez parti de toute la RAM
+#
+# Pour activer :
+#   cp docker-compose.override.yml.example docker-compose.override.yml
+#   # puis editer
+
+services:
+  backend:
+    deploy:
+      resources:
+        limits:
+          cpus: "6.0"      # VPS avec 8 vCPU
+          memory: 16G      # VPS avec 32 GB RAM
+        reservations:
+          memory: 4G
+    environment:
+      # Exemple : tuner uvicorn workers selon CPU
+      - UVICORN_WORKERS=4
+
+  frontend:
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+
+  # Exemple : ajouter un Postgres local si vous ne voulez plus Supabase
+  # (decommentez + ajoutez DATABASE_URL=postgresql://demoema:password@postgres:5432/demoema dans .env)
+  #
+  # postgres:
+  #   image: postgres:16-alpine
+  #   container_name: demoema-postgres
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_USER: demoema
+  #     POSTGRES_PASSWORD: change_me_strong
+  #     POSTGRES_DB: demoema
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   networks:
+  #     - web
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 8G
+  #
+  # volumes:
+  #   postgres_data:
