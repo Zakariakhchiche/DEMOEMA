@@ -305,6 +305,18 @@ def setup_tables() -> None:
     con.execute(SILVER_DDL)
     con.execute(BODACC_DDL)
     con.execute(PAPPERS_DDL)
+    # Migrations : colonnes ajoutées après création initiale
+    _migrate_cols = [
+        ("adresse", "TEXT"), ("code_postal", "VARCHAR(5)"), ("ville", "TEXT"),
+        ("nom_dirigeant", "TEXT"), ("qualite_dirigeant", "TEXT"),
+        ("annee_naissance", "SMALLINT"), ("chiffre_affaires", "BIGINT"),
+        ("resultat_net", "BIGINT"),
+    ]
+    for col, typ in _migrate_cols:
+        try:
+            con.execute(f"ALTER TABLE {SILVER_TABLE} ADD COLUMN IF NOT EXISTS {col} {typ}")
+        except Exception:
+            pass
     # Index Silver
     con.execute(f"CREATE INDEX IF NOT EXISTS idx_silver_score ON {SILVER_TABLE} (ma_score DESC)")
     con.execute(f"CREATE INDEX IF NOT EXISTS idx_silver_naf   ON {SILVER_TABLE} (naf)")
