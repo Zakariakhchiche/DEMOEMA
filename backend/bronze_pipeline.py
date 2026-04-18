@@ -743,18 +743,14 @@ _ODS_JSON_BASE = (
     "/annonces-commerciales/records"
 )
 _ODS_PAGE_SIZE = 100   # max autorisé par l'API ODS v2.1
-_ODS_CONCURRENT = 10   # requêtes parallèles
-_ODS_COMMIT_EVERY = 2_000  # lignes avant commit MotherDuck
+_ODS_COMMIT_EVERY = 1_000  # lignes avant commit MotherDuck
 
 
 async def _load_bodacc_ods(since: str = "2023-01-01") -> int:
-    """Chargement BODACC via API JSON paginée ODS (robuste, pas de gros fichier)."""
+    """Chargement BODACC via API JSON paginée ODS — séquentiel, robuste."""
     import re as _re
 
-    where = (
-        f"familleavis IN ('vente','collective')"
-        f" AND dateparution >= '{since}'"
-    )
+    where = f"familleavis IN ('vente','collective') AND dateparution >= '{since}'"
     params_base = {
         "limit": _ODS_PAGE_SIZE,
         "where": where,
@@ -762,7 +758,6 @@ async def _load_bodacc_ods(since: str = "2023-01-01") -> int:
         "timezone": "UTC",
     }
 
-    # 1. Récupère le total
     async with httpx.AsyncClient(timeout=30, follow_redirects=True,
                                   headers={"User-Agent": "EdRCF/6.0"}) as client:
         r = await client.get(_ODS_JSON_BASE, params={**params_base, "limit": 1})
@@ -773,65 +768,64 @@ async def _load_bodacc_ods(since: str = "2023-01-01") -> int:
     if total_count == 0:
         return 0
 
-    offsets = range(0, total_count, _ODS_PAGE_SIZE)
     total_inserted = 0
     buffer: list[tuple] = []
-    semaphore = asyncio.Semaphore(_ODS_CONCURRENT)
 
     def _flush(rows: list[tuple]) -> int:
         if not rows:
             return 0
         con = _get_connection()
         try:
-            con.executemany(
-                f"INSERT OR IGNORE INTO {BODACC_TABLE} "
-                f"(siren, type_annonce, date_parution, denomination) VALUES (?,?,?,?)",
-                rows,
+            placeholders = ",".join(["(?,?,?,?)"] * len(rows))
+            flat = [v for row in rows for v in row]
+            con.execute(
+                f"INSERT INTO {BODACC_TABLE} (siren, type_annonce, date_parution, denomination)"
+                f" VALUES {placeholders}",
+                flat,
             )
             return len(rows)
+        except Exception as e:
+            print(f"[BODACC ODS] Flush error: {e}")
+            return 0
         finally:
             con.close()
 
-    async def _fetch_page(offset: int) -> list[tuple]:
-        async with semaphore:
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True,
+                                  headers={"User-Agent": "EdRCF/6.0"}) as client:
+        offset = 0
+        page_num = 0
+        while offset < total_count:
             for attempt in range(3):
                 try:
-                    async with httpx.AsyncClient(
-                        timeout=30, follow_redirects=True,
-                        headers={"User-Agent": "EdRCF/6.0"},
-                    ) as c:
-                        r = await c.get(_ODS_JSON_BASE, params={**params_base, "offset": offset})
-                        r.raise_for_status()
-                        rows = []
-                        for rec in r.json().get("results", []):
-                            registre = rec.get("registre") or []
-                            siren = next(
-                                (s for s in registre if _re.fullmatch(r"\d{9}", s)),
-                                None,
-                            )
-                            if not siren:
-                                continue
-                            type_av = "VENTE" if rec.get("familleavis") == "vente" else "PROCOL"
-                            date_p = rec.get("dateparution")
-                            denom = (rec.get("commercant") or "")[:200]
-                            rows.append((siren, type_av, date_p, denom))
-                        return rows
+                    r = await client.get(_ODS_JSON_BASE,
+                                         params={**params_base, "offset": offset})
+                    r.raise_for_status()
+                    break
                 except Exception as e:
                     if attempt == 2:
-                        print(f"[BODACC ODS] Offset {offset} échoué: {e}")
+                        print(f"[BODACC ODS] Page {page_num} échouée: {e}")
+                        offset += _ODS_PAGE_SIZE
+                        continue
                     await asyncio.sleep(2 ** attempt)
-        return []
 
-    tasks = [_fetch_page(off) for off in offsets]
-    done = 0
-    for coro in asyncio.as_completed(tasks):
-        rows = await coro
-        buffer.extend(rows)
-        done += 1
-        if len(buffer) >= _ODS_COMMIT_EVERY:
-            total_inserted += _flush(buffer)
-            buffer.clear()
-            print(f"[BODACC ODS] {total_inserted:,} / ~{total_count:,} ({done}/{len(tasks)} pages)")
+            for rec in r.json().get("results", []):
+                registre = rec.get("registre") or []
+                siren = next(
+                    (s for s in registre if _re.fullmatch(r"\d{9}", s)), None
+                )
+                if not siren:
+                    continue
+                type_av = "VENTE" if rec.get("familleavis") == "vente" else "PROCOL"
+                buffer.append((siren, type_av, rec.get("dateparution"), (rec.get("commercant") or "")[:200]))
+
+            offset += _ODS_PAGE_SIZE
+            page_num += 1
+
+            if len(buffer) >= _ODS_COMMIT_EVERY:
+                n = _flush(buffer)
+                total_inserted += n
+                buffer.clear()
+                print(f"[BODACC ODS] {total_inserted:,} / ~{total_count:,} insérés…")
 
     if buffer:
         total_inserted += _flush(buffer)
