@@ -9,6 +9,20 @@ services:
       - "8000"
     networks:
       - web
+    # Limites taillees pour IONOS VPS L (4 vCPU / 8 GB RAM).
+    # Adapter dans docker-compose.override.yml si VPS plus gros.
+    deploy:
+      resources:
+        limits:
+          cpus: "2.5"
+          memory: 4G
+        reservations:
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   frontend:
     build:
@@ -25,6 +39,18 @@ services:
       - backend
     networks:
       - web
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   caddy:
     image: caddy:2.8-alpine
@@ -43,6 +69,16 @@ services:
       - backend
     networks:
       - web
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
 
 networks:
   web:
