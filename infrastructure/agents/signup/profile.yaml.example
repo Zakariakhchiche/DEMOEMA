@@ -36,7 +36,7 @@ project_phone: ""
 sources_to_signup:
   - insee_sirene
   - inpi_rne
-  - piste  # Judilibre + Légifrance
+  - piste_gouv        # Judilibre + Légifrance
   - france_travail
   - epo_ops
 

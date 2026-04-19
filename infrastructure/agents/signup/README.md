@@ -1,6 +1,13 @@
-# DEMOEMA Signup Automator
+# DEMOEMA Manual Actions Agent (ex "Signup Automator")
 
-Container isolé VPS qui automatise la création de comptes API sur portails publics FR gratuits pour débloquer les sources bloquées par auth.
+Container isolé VPS qui automatise **toutes les actions manuelles** dont l'agent-platform a besoin pendant ses développements :
+
+1. **Signups API** (scope initial) — création comptes sur portails publics FR gratuits pour débloquer sources auth
+2. **DNS panel IONOS** — ajouter enregistrements A/MX/TXT/CNAME sans se connecter manuellement
+3. **Forms corporate** — tout portail web avec form simple (non-2FA, non-CAPTCHA)
+4. **GitHub UI** (à implémenter) — opérations PR/merge/resolve-conflicts pas faisables en CLI
+
+Chaque "action manuelle" = 1 fichier Python dans `signup_agent/flows/<action>.py`, orchestré par `main.py` via `sources_to_signup` (ou `actions_to_run` — même mécanique).
 
 ## Isolation sécuritaire (non négociable)
 
@@ -11,17 +18,18 @@ Container isolé VPS qui automatise la création de comptes API sur portails pub
 - **Aucun accès** : Gmail perso, banking, filesystem host, secrets des autres services
 - Audit trail complet (screenshots par étape, chiffrés pour le password)
 
-## Services supportés
+## Flows disponibles
 
-| Source | Flow | Automatisable | Note |
+| Flow | Type | Statut | Note |
 |---|---|---|---|
-| INSEE SIRENE V3 | ✅ MVP | Oui (form simple) | Priorité 1 |
-| INPI RNE | À implémenter | Oui | Priorité 2 |
-| PISTE (Judilibre + Légifrance) | À implémenter | Oui (gouv FR) | Priorité 2 |
-| France Travail | À implémenter | Oui | Priorité 3 |
-| EPO OPS | À implémenter | Oui | Priorité 4 |
-| GitHub | ❌ Manual | Non (ToS + 2FA) | À faire manuellement |
-| Companies House UK | ❌ Manual | Non (reCAPTCHA + vérif postale) | À faire manuellement |
+| `insee_sirene` | signup | ✅ MVP | Priorité 1, form simple |
+| `dns_ionos` | DNS panel | ✅ MVP | Ajout records A/MX/TXT/CNAME, STOP si 2FA |
+| `piste_gouv` | signup | ✅ MVP | Judilibre + Légifrance (OAuth2 client_credentials) |
+| `france_travail` | signup | ✅ MVP | API Offres d'emploi v2, ROME 4.0 |
+| `inpi_rne` | signup | À implémenter | Priorité 2 |
+| `epo_ops` | signup | À implémenter | Brevets européens |
+| `github_ui` | ops | À implémenter | Merge PR, resolve conflicts (ToS OK si compte propre) |
+| Companies House UK | signup | ❌ Manual | reCAPTCHA + vérif postale |
 
 ## Setup initial (1 fois, ~15 min)
 
@@ -37,11 +45,22 @@ Container isolé VPS qui automatise la création de comptes API sur portails pub
 - L'agent ne peut PAS lire — tu copies manuellement les liens de vérif
 - Mode "semi-auto"
 
-**Option C — Postfix VPS** (30 min setup, 100% isolé)
-- Install postfix + dovecot sur VPS
-- MX record DNS pour `demoema.fr`
-- Boîte `signups@demoema.fr` lisible depuis container via `imap://localhost:143`
-- Voir `docs/POSTFIX_SETUP.md` pour guide détaillé
+**Option C — Postfix VPS** (30 min setup, 100% isolé, recommandée)
+- Script clé en main : `setup-postfix.sh` (Postfix + Dovecot + OpenDKIM)
+- Boîte `signups@demoema.fr` lisible depuis container via `imap://127.0.0.1:143`
+- Setup (sur VPS, en root) :
+  ```bash
+  export MAIL_PASSWORD=$(openssl rand -base64 24)
+  echo "Password généré (à garder) : $MAIL_PASSWORD"
+  bash /root/DEMOEMA/infrastructure/agents/signup/setup-postfix.sh
+  ```
+- **DNS IONOS requis** (à faire AVANT) :
+  - `A  mail.demoema.fr → 82.165.242.205`
+  - `MX demoema.fr priorité 10 → mail.demoema.fr`
+  - `TXT demoema.fr : v=spf1 ip4:82.165.242.205 -all`
+  - `TXT mail._domainkey.demoema.fr : <DKIM publique générée par opendkim-genkey>`
+  - `PTR 82.165.242.205 → mail.demoema.fr` (ticket support IONOS)
+- Après setup : exporter `POSTFIX_IMAP_PASSWORD=$MAIL_PASSWORD` dans `.env.signups`
 
 ### 2. Compléter profile.yaml
 

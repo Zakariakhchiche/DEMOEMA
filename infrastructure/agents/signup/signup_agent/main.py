@@ -51,6 +51,8 @@ class Profile(BaseModel):
     project_phone: str = ""
     sources_to_signup: list[str] = Field(default_factory=list)
     sources_blocked_manual: list[str] = Field(default_factory=list)
+    # Per-flow parameters, e.g. {"dns_ionos": {"record_params": {...}}}
+    flow_params: dict[str, dict] = Field(default_factory=dict)
 
 
 def load_profile() -> Profile:
@@ -106,8 +108,14 @@ async def run_source_flow(source: str, profile: Profile) -> dict:
     audit_subdir.mkdir(parents=True, exist_ok=True)
 
     log.info("Démarrage flow %s (audit: %s)", source, audit_subdir)
+    extra = profile.flow_params.get(source, {})
     try:
-        result = await mod.run(profile=profile, audit_dir=audit_subdir, write_credential=write_credential)
+        result = await mod.run(
+            profile=profile,
+            audit_dir=audit_subdir,
+            write_credential=write_credential,
+            **extra,
+        )
         await notify_slack(f"✅ {source} : {result.get('status', 'done')}")
         return {"source": source, **result}
     except Exception as e:
