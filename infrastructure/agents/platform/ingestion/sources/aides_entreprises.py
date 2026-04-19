@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 
 AIDES_ENDPOINT = "https://aides-entreprises.fr/api/aides"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 100  # ~10 000 aides par run (sécurité quota)
-BACKFILL_DAYS_FIRST_RUN = 30
+MAX_PAGES_PER_RUN = 1000  # ~10 000 aides par run (sécurité quota)
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 48
 
 

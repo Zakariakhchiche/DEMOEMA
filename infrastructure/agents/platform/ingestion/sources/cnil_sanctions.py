@@ -21,9 +21,9 @@ log = logging.getLogger(__name__)
 
 CNIL_ENDPOINT = "https://www.cnil.fr/fr/la-cnil-sanctionne/json"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 500
+MAX_PAGES_PER_RUN = 1000
 # FULL historique par pagination (API ne fournit pas de bulk export)
-BACKFILL_DAYS_FIRST_RUN = 365
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 168  # 1 semaine (refresh_trigger=168h)
 BULK_BATCH_SIZE = 1000
 

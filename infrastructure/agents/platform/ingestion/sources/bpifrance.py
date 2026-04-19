@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 
 BPIFRANCE_ENDPOINT = "https://data.bpifrance.fr/api/records/1.0/search"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 30
-BACKFILL_DAYS_FIRST_RUN = 180
+MAX_PAGES_PER_RUN = 1000
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 168  # 168h = 7 jours (hebdomadaire)
 
 

@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 
 CONSEIL_ETAT_ENDPOINT = "https://www.conseil-etat.fr/api/arianeweb/v1/search"
 PAGE_SIZE = 50
-MAX_PAGES_PER_RUN = 10
-BACKFILL_DAYS_FIRST_RUN = 30
+MAX_PAGES_PER_RUN = 1000
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 48
 
 

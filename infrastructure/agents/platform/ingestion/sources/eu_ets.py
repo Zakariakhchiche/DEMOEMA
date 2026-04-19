@@ -21,8 +21,8 @@ log = logging.getLogger(__name__)
 
 EU_ETS_ENDPOINT = "https://www.eea.europa.eu/data-and-maps/data/european-union-emissions-trading-scheme-17/eu-ets-data-download-latest-version.json"
 PAGE_SIZE = 1000
-MAX_PAGES_PER_RUN = 100
-BACKFILL_DAYS_FIRST_RUN = 365
+MAX_PAGES_PER_RUN = 1000
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 720  # 30 jours → couvre cycle de mise à jour EUTL (mensuel + corrections)
 
 

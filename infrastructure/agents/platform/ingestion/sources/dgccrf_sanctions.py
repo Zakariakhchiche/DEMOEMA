@@ -22,8 +22,8 @@ log = logging.getLogger(__name__)
 
 DGCCRF_ENDPOINT = "https://www.economie.gouv.fr/dgccrf/api/sanctions"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 500
-BACKFILL_DAYS_FIRST_RUN = 365
+MAX_PAGES_PER_RUN = 1000
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 48
 BULK_BATCH_SIZE = 1000
 

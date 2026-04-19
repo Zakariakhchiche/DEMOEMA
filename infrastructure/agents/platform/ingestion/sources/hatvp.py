@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 
 HATVP_ENDPOINT = "https://www.hatvp.fr/open-data/ri/representants-interets.json"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 50  # ~5000 représentants max par run (sécurité quota)
-BACKFILL_DAYS_FIRST_RUN = 365  # Premier run : couvrir l'année complète (données historiques)
+MAX_PAGES_PER_RUN = 1000  # ~5000 représentants max par run (sécurité quota)
+BACKFILL_DAYS_FIRST_RUN = 3650  # Premier run : couvrir l'année complète (données historiques)
 INCREMENTAL_HOURS = 720  # 30 jours (refresh_trigger=720h → on couvre avec marge)
 
 

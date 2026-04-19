@@ -21,8 +21,8 @@ log = logging.getLogger(__name__)
 
 AMF_BDIF_ENDPOINT = "https://bdif.amf-france.org/api/v1/declarations"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 500  # ~50k déclarations par run
-BACKFILL_DAYS_FIRST_RUN = 365
+MAX_PAGES_PER_RUN = 1000  # ~50k déclarations par run
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 48
 
 

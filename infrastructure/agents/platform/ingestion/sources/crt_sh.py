@@ -23,9 +23,9 @@ log = logging.getLogger(__name__)
 
 CRT_SH_ENDPOINT = "https://crt.sh/"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 10  # ~1000 certificats par run (sécurité quota + bannissement)
+MAX_PAGES_PER_RUN = 1000  # ~1000 certificats par run (sécurité quota + bannissement)
 # Fenêtre de backfill initial large (crt.sh conserve ~2 ans, mais données récentes prioritaires)
-BACKFILL_DAYS_FIRST_RUN = 30
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 24
 
 

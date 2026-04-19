@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 
 BAN_ENDPOINT = "https://api-adresse.data.gouv.fr/search/"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 100  # ~10k adresses par run — suffisant pour delta quotidien
-BACKFILL_DAYS_FIRST_RUN = 30
+MAX_PAGES_PER_RUN = 1000  # ~10k adresses par run — suffisant pour delta quotidien
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 24
 
 

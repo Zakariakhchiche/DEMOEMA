@@ -21,8 +21,8 @@ log = logging.getLogger(__name__)
 BASOL_ENDPOINT = "https://www.data.gouv.fr/api/1/datasets/basol-base-de-donnees-des-sites-et-sols-pollues/"
 RESOURCE_ID = "588b8c9c8c8c8c8c8c8c8c8c"  # ID fixe de la ressource JSON (à valider via API)
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 500  # ~50k sites par run — backfill complet via plusieurs invocations
-BACKFILL_DAYS_FIRST_RUN = 365
+MAX_PAGES_PER_RUN = 1000  # ~50k sites par run — backfill complet via plusieurs invocations
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 720  # 30 jours (spec: interval_hours=720)
 
 

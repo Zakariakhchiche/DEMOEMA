@@ -20,9 +20,9 @@ log = logging.getLogger(__name__)
 
 WORLD_BANK_ENDPOINT = "https://api.worldbank.org/v2/country/all/indicator/NY.GDP.MKTP.CD"
 PAGE_SIZE = 500
-MAX_PAGES_PER_RUN = 10
+MAX_PAGES_PER_RUN = 1000
 # Fenêtre backfill initiale large (données mondiales stables, pas de délai de publication)
-BACKFILL_DAYS_FIRST_RUN = 365
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_DAYS = 30
 
 

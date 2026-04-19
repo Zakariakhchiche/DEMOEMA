@@ -21,8 +21,8 @@ log = logging.getLogger(__name__)
 
 CGSCOP_ENDPOINT = "https://les-scop.coop/api/v1/annuaire"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 500
-BACKFILL_DAYS_FIRST_RUN = 365
+MAX_PAGES_PER_RUN = 1000
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 48
 
 

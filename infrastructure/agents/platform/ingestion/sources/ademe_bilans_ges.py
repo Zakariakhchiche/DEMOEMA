@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 
 ADEME_ENDPOINT = "https://bilans-ges.ademe.fr/api/v1/bilans-ges"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 20
-BACKFILL_DAYS_FIRST_RUN = 365
+MAX_PAGES_PER_RUN = 1000
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 720  # 30 jours → aligné sur spec interval_hours=720
 
 

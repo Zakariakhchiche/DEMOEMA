@@ -20,9 +20,9 @@ log = logging.getLogger(__name__)
 
 JUDILIBRE_ENDPOINT = "https://api.piste.gouv.fr/cassation/judilibre/v1.0/search"
 PAGE_SIZE = 50
-MAX_PAGES_PER_RUN = 20  # ~1000 décisions par run (sécurité quota)
+MAX_PAGES_PER_RUN = 1000  # ~1000 décisions par run (sécurité quota)
 # Fenêtre de backfill initial large (JudiLibre publie avec 1-3j de délai typique)
-BACKFILL_DAYS_FIRST_RUN = 7
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 48
 
 

@@ -21,9 +21,9 @@ log = logging.getLogger(__name__)
 
 RECHERCHE_ENDPOINT = "https://recherche-entreprises.api.gouv.fr/search"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 500  # ~50k lignes max par run (sécurité quota journalier)
+MAX_PAGES_PER_RUN = 1000  # ~50k lignes max par run (sécurité quota journalier)
 # Fenêtre de backfill initial large (données statiques, mais besoin de couvrir les nouvelles créations)
-BACKFILL_DAYS_FIRST_RUN = 365
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 24
 
 

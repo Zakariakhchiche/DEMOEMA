@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 
 WEBSTAT_ENDPOINT = "https://api.webstat.banque-france.fr/webstat-fr/v1/data"
 PAGE_SIZE = 1000
-MAX_PAGES_PER_RUN = 100  # ~100k séries par run — couvre l'ensemble des séries actives
-BACKFILL_DAYS_FIRST_RUN = 365  # backfill 1 an pour couvrir les séries historiques
+MAX_PAGES_PER_RUN = 1000  # ~100k séries par run — couvre l'ensemble des séries actives
+BACKFILL_DAYS_FIRST_RUN = 3650  # backfill 1 an pour couvrir les séries historiques
 INCREMENTAL_HOURS = 720  # 30 jours (720h) pour couvrir les mises à jour mensuelles
 
 

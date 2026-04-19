@@ -21,8 +21,8 @@ log = logging.getLogger(__name__)
 
 SEC_ENDPOINT = "https://data.sec.gov/submissions/"
 PAGE_SIZE = 100  # SEC ne fournit pas de pagination explicite, on simule via offset
-MAX_PAGES_PER_RUN = 10  # ~1000 filings max par run — suffisant pour delta quotidien
-BACKFILL_DAYS_FIRST_RUN = 365
+MAX_PAGES_PER_RUN = 1000  # ~1000 filings max par run — suffisant pour delta quotidien
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 24
 
 

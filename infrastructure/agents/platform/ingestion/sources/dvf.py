@@ -21,10 +21,10 @@ log = logging.getLogger(__name__)
 
 DVF_ENDPOINT = "https://api.cquest.org/dvf"
 PAGE_SIZE = 1000
-MAX_PAGES_PER_RUN = 200
+MAX_PAGES_PER_RUN = 1000
 # FULL historique par bulk export non disponible → pagination offset limitée à 10K
 # → backfill étendu sur 365 jours pour première ingestion
-BACKFILL_DAYS_FIRST_RUN = 365
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 720  # 30 jours (spec: interval_hours=720)
 BULK_BATCH_SIZE = 1000
 

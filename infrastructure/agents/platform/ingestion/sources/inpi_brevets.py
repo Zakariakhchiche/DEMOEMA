@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 
 INPI_BREVETS_ENDPOINT = "https://data.inpi.fr/api/brevets/search"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 30
-BACKFILL_DAYS_FIRST_RUN = 90
+MAX_PAGES_PER_RUN = 1000
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 200
 
 

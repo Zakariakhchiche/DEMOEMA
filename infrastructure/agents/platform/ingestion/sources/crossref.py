@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 
 CROSSREF_ENDPOINT = "https://api.crossref.org/works"
 PAGE_SIZE = 1000
-MAX_PAGES_PER_RUN = 10
+MAX_PAGES_PER_RUN = 1000
 # FULL historique non implémenté ici (trop volumineux : >100M DOI)
 # → on se concentre sur les DOIs récents (delta)
 INCREMENTAL_HOURS = 168  # 1 semaine (7×24h) pour couvrir la fréquence de rafraîchissement

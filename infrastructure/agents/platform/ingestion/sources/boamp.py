@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 
 BOAMP_ENDPOINT = "https://boamp-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/boamp/records"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 500  # ~3000 avis par run (sécurité quota)
-BACKFILL_DAYS_FIRST_RUN = 730
+MAX_PAGES_PER_RUN = 1000  # ~3000 avis par run (sécurité quota)
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 48
 
 

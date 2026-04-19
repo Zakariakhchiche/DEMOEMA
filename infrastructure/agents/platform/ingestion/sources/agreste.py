@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 
 AGRESTE_ENDPOINT = "https://agreste.agriculture.gouv.fr/api/v1/series"
 PAGE_SIZE = 1000
-MAX_PAGES_PER_RUN = 100  # ~100k lignes max par run — suffisant pour delta hebdo
-BACKFILL_DAYS_FIRST_RUN = 365  # backfill 1 an si table vide
+MAX_PAGES_PER_RUN = 1000  # ~100k lignes max par run — suffisant pour delta hebdo
+BACKFILL_DAYS_FIRST_RUN = 3650  # backfill 1 an si table vide
 INCREMENTAL_HOURS = 720  # 30 jours (720h) pour couvrir delta mensuel
 
 

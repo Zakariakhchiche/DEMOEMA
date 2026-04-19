@@ -21,9 +21,9 @@ log = logging.getLogger(__name__)
 BODACC_ENDPOINT = "https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/annonces-commerciales/records"
 BODACC_EXPORT_URL = "https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/annonces-commerciales/exports/csv?delimiter=%3B&quote=%22"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 500
+MAX_PAGES_PER_RUN = 1000
 # FULL historique par bulk export streamé (48M annonces possible mais long)
-BACKFILL_DAYS_FIRST_RUN = 365
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 48
 BULK_BATCH_SIZE = 1000  # commit tous les 1000 rows
 

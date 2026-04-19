@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 
 BASIAS_ENDPOINT = "https://www.data.gouv.fr/api/1/datasets/basias-sites-industriels/records/"
 PAGE_SIZE = 1000
-MAX_PAGES_PER_RUN = 10  # ~10k enregistrements max par run (source ~80k totaux)
-BACKFILL_DAYS_FIRST_RUN = 365  # backfill complet si table vide
+MAX_PAGES_PER_RUN = 1000  # ~10k enregistrements max par run (source ~80k totaux)
+BACKFILL_DAYS_FIRST_RUN = 3650  # backfill complet si table vide
 INCREMENTAL_HOURS = 24  # delta quotidien
 
 
