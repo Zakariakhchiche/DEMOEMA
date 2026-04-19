@@ -1,23 +1,23 @@
 """
 EdRCF 6.0 — bronze_pipeline.py
-Pipeline Bronze / Silver avec DuckDB + MotherDuck.
+Architecture Medallion : Bronze → Silver → Gold.
 
-Architecture :
-  Bronze  → DuckDB (MotherDuck) — 16M entités SIRENE brutes (tous secteurs)
-  Silver  → DuckDB (MotherDuck) — ~50-80K PME/ETI M&A-éligibles filtrées + scorées
-  Gold    → Supabase             — ~5-10K cibles enrichies (existant)
-
-Prérequis :
-  pip install duckdb
-  Env : MOTHERDUCK_TOKEN=<token>  (depuis app.motherduck.com → Settings → Tokens)
+  Bronze  → DuckDB — 29M+ entités SIRENE brutes (tous secteurs, tous statuts)
+  Silver  → DuckDB — ~10-15M entreprises ACTIVES, nettoyées, normalisées (pas de score)
+  Gold    → DuckDB — ~200K cibles M&A scorées + enrichies (adresse, BODACC, score)
+            + vues KPI pré-agrégées (secteur, région, structure, distribution score)
+  Supabase → top-N Gold pour le frontend (léger, rapide)
 
 Usage CLI :
-  python bronze_pipeline.py setup           → crée les tables sur MotherDuck
-  python bronze_pipeline.py load-bronze     → charge les 16M depuis SIRENE CSV.gz
-  python bronze_pipeline.py build-silver    → filtre Bronze → Silver (~50-80K)
-  python bronze_pipeline.py stats           → stats Bronze + Silver
-  python bronze_pipeline.py sync-supabase   → pousse Silver top-N vers sirene_index
-  python bronze_pipeline.py full            → setup + load-bronze + build-silver
+  python bronze_pipeline.py setup           → crée toutes les tables
+  python bronze_pipeline.py load-bronze     → charge SIRENE UL dans Bronze
+  python bronze_pipeline.py build-silver    → Bronze → Silver (toutes actives)
+  python bronze_pipeline.py build-gold      → Silver → Gold (scoring + enrichissement)
+  python bronze_pipeline.py load-bodacc     → charge BODACC
+  python bronze_pipeline.py flag-bodacc     → met à jour bodacc_recent dans Gold
+  python bronze_pipeline.py stats           → stats Bronze / Silver / Gold
+  python bronze_pipeline.py sync-supabase   → pousse Gold top-N vers Supabase
+  python bronze_pipeline.py full            → pipeline complet end-to-end
 """
 
 import asyncio
@@ -59,9 +59,11 @@ _PIPELINE_STATUS: dict = {
     "started_at": None,
     "finished_at": None,
 }
-DB_NAME          = "edrcf"          # base MotherDuck
-BRONZE_TABLE     = "bronze_sirene"  # 16M entités brutes
-SILVER_TABLE     = "silver_ma"      # ~50-80K PME/ETI éligibles
+DB_NAME             = "edrcf"
+BRONZE_TABLE        = "bronze_sirene"   # 29M+ entités brutes
+SILVER_TABLE        = "silver_ma"       # 10-15M entreprises actives (nettoyées)
+GOLD_TARGETS_TABLE  = "gold_targets"    # ~200K cibles M&A scorées + enrichies
+GOLD_KPIS_TABLE     = "gold_kpis"       # KPIs pré-agrégés (lecture frontend)
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
@@ -266,6 +268,20 @@ CREATE TABLE IF NOT EXISTS {SILVER_TABLE} (
     siren                  VARCHAR(9)  PRIMARY KEY,
     denomination           TEXT,
     naf                    VARCHAR(6),
+    effectif_tranche       VARCHAR(4),
+    date_creation          DATE,
+    categorie_juridique    VARCHAR(6),
+    categorie_entreprise   VARCHAR(10),   -- PME / ETI / GE / null
+    etat_administratif     VARCHAR(1),    -- A = active (toutes dans Silver)
+    silver_at              TIMESTAMP   DEFAULT current_timestamp
+);
+"""
+
+GOLD_TARGETS_DDL = f"""
+CREATE TABLE IF NOT EXISTS {GOLD_TARGETS_TABLE} (
+    siren                  VARCHAR(9)  PRIMARY KEY,
+    denomination           TEXT,
+    naf                    VARCHAR(6),
     dept                   VARCHAR(3),
     effectif_tranche       VARCHAR(4),
     date_creation          DATE,
@@ -273,11 +289,11 @@ CREATE TABLE IF NOT EXISTS {SILVER_TABLE} (
     categorie_entreprise   VARCHAR(10),
     ma_score               SMALLINT    DEFAULT 0,
     bodacc_recent          BOOLEAN     DEFAULT false,
-    -- Adresse (SIRENE StockEtablissement)
+    -- Adresse (StockEtablissement)
     adresse                TEXT,
     code_postal            VARCHAR(5),
     ville                  TEXT,
-    -- Contact (recherche-entreprises.api.gouv.fr)
+    -- Contact
     site_web               TEXT,
     telephone              VARCHAR(20),
     linkedin_url           TEXT,
@@ -286,41 +302,60 @@ CREATE TABLE IF NOT EXISTS {SILVER_TABLE} (
     nom_dirigeant          TEXT,
     qualite_dirigeant      TEXT,
     annee_naissance        SMALLINT,
-    -- Financier (INPI SFTP — à venir)
+    -- Financier (INPI SFTP)
     chiffre_affaires       BIGINT,
     resultat_net           BIGINT,
-    -- Suivi enrichissement
+    -- Suivi
     enriched               BOOLEAN     DEFAULT false,
     enriched_at            TIMESTAMP,
-    silver_at              TIMESTAMP   DEFAULT current_timestamp
+    gold_at                TIMESTAMP   DEFAULT current_timestamp
+);
+"""
+
+GOLD_KPIS_DDL = f"""
+CREATE TABLE IF NOT EXISTS {GOLD_KPIS_TABLE} (
+    dimension              VARCHAR(30) NOT NULL,
+    valeur                 TEXT        NOT NULL,
+    count_total            INTEGER     DEFAULT 0,
+    count_ma               INTEGER     DEFAULT 0,
+    avg_score              FLOAT,
+    count_bodacc           INTEGER     DEFAULT 0,
+    kpi_at                 TIMESTAMP   DEFAULT current_timestamp,
+    PRIMARY KEY (dimension, valeur)
 );
 """
 
 
 def setup_tables() -> None:
-    """Crée les tables Bronze, Silver, BODACC et Pappers sur MotherDuck (idempotent)."""
+    """Crée Bronze / Silver / Gold / BODACC / Pappers (idempotent)."""
     con = _get_connection()
-    print("[DuckDB] Création des tables Bronze + Silver + BODACC + Pappers…")
+    print("[DuckDB] Création des tables Bronze + Silver + Gold + BODACC + Pappers…")
     con.execute(BRONZE_DDL)
     con.execute(SILVER_DDL)
+    con.execute(GOLD_TARGETS_DDL)
+    con.execute(GOLD_KPIS_DDL)
     con.execute(BODACC_DDL)
     con.execute(PAPPERS_DDL)
-    # Migrations : colonnes ajoutées après création initiale
-    _migrate_cols = [
+    # Migrations Gold (colonnes ajoutées après création initiale)
+    _gold_migrate = [
         ("adresse", "TEXT"), ("code_postal", "VARCHAR(5)"), ("ville", "TEXT"),
         ("nom_dirigeant", "TEXT"), ("qualite_dirigeant", "TEXT"),
         ("annee_naissance", "SMALLINT"), ("chiffre_affaires", "BIGINT"),
         ("resultat_net", "BIGINT"),
     ]
-    for col, typ in _migrate_cols:
+    for col, typ in _gold_migrate:
         try:
-            con.execute(f"ALTER TABLE {SILVER_TABLE} ADD COLUMN IF NOT EXISTS {col} {typ}")
+            con.execute(f"ALTER TABLE {GOLD_TARGETS_TABLE} ADD COLUMN IF NOT EXISTS {col} {typ}")
         except Exception:
             pass
     # Index Silver
-    con.execute(f"CREATE INDEX IF NOT EXISTS idx_silver_score ON {SILVER_TABLE} (ma_score DESC)")
-    con.execute(f"CREATE INDEX IF NOT EXISTS idx_silver_naf   ON {SILVER_TABLE} (naf)")
-    con.execute(f"CREATE INDEX IF NOT EXISTS idx_silver_dept  ON {SILVER_TABLE} (dept)")
+    con.execute(f"CREATE INDEX IF NOT EXISTS idx_silver_naf  ON {SILVER_TABLE} (naf)")
+    con.execute(f"CREATE INDEX IF NOT EXISTS idx_silver_cj   ON {SILVER_TABLE} (categorie_juridique)")
+    con.execute(f"CREATE INDEX IF NOT EXISTS idx_silver_cat  ON {SILVER_TABLE} (categorie_entreprise)")
+    # Index Gold
+    con.execute(f"CREATE INDEX IF NOT EXISTS idx_gold_score  ON {GOLD_TARGETS_TABLE} (ma_score DESC)")
+    con.execute(f"CREATE INDEX IF NOT EXISTS idx_gold_naf    ON {GOLD_TARGETS_TABLE} (naf)")
+    con.execute(f"CREATE INDEX IF NOT EXISTS idx_gold_dept   ON {GOLD_TARGETS_TABLE} (dept)")
     # Index BODACC
     con.execute(f"CREATE INDEX IF NOT EXISTS idx_bodacc_siren ON {BODACC_TABLE} (siren)")
     con.execute(f"CREATE INDEX IF NOT EXISTS idx_bodacc_date  ON {BODACC_TABLE} (date_parution)")
@@ -404,18 +439,15 @@ def _high_ma_naf_sql() -> str:
     return ", ".join(f"'{c}'" for c in sorted(HIGH))
 
 
-def build_silver(etab_url: str | None = None) -> int:
+def build_silver() -> int:
     """
-    Filtre Bronze → Silver avec les critères M&A et calcule le score.
-    Enrichit dept via JOIN StockEtablissement sur les ~87K lignes éligibles
-    (bien plus rapide qu'un JOIN sur les 29M lignes Bronze).
+    Bronze → Silver : toutes les entreprises ACTIVES de France, nettoyées.
+    Pas de filtre secteur/taille — France entière (~10-15M entités).
+    Pas de score (celui-ci va dans Gold), pas d'adresse (trop coûteux sur 10-15M).
     Retourne le nombre de lignes dans Silver.
     """
-    _, resolved_etab = get_sirene_urls()
-    etab_url = etab_url or resolved_etab
-
     con = _get_connection()
-    print("[SILVER] Construction de la couche Silver…")
+    print("[SILVER] Construction Silver — toutes entreprises actives…")
     t0 = time.time()
 
     con.execute(f"DELETE FROM {SILVER_TABLE}")
@@ -423,49 +455,88 @@ def build_silver(etab_url: str | None = None) -> int:
 
     con.execute(f"""
         INSERT INTO {SILVER_TABLE}
+            (siren, denomination, naf, effectif_tranche,
+             date_creation, categorie_juridique, categorie_entreprise,
+             etat_administratif)
+        SELECT
+            siren,
+            denomination,
+            naf,
+            effectif_tranche,
+            date_creation,
+            categorie_juridique,
+            categorie_entreprise,
+            etat_administratif
+        FROM {BRONZE_TABLE}
+        WHERE etat_administratif = 'A'
+    """)
+
+    count = con.execute(f"SELECT COUNT(*) FROM {SILVER_TABLE}").fetchone()[0]
+    elapsed = time.time() - t0
+    con.close()
+    print(f"[SILVER] ✅ {count:,} entreprises actives en {elapsed:.1f}s.")
+    return count
+
+
+def build_gold(etab_url: str | None = None) -> int:
+    """
+    Silver → Gold : filtre M&A (PME/ETI + NAF cibles + taille), score, enrichit adresse.
+    Résultat : ~200K cibles M&A scorées avec adresse, dept, score.
+    Retourne le nombre de lignes dans gold_targets.
+    """
+    _, resolved_etab = get_sirene_urls()
+    etab_url = etab_url or resolved_etab
+
+    con = _get_connection()
+    print("[GOLD] Construction Gold — cibles M&A scorées…")
+    t0 = time.time()
+
+    con.execute(f"DELETE FROM {GOLD_TARGETS_TABLE}")
+    con.execute("INSTALL httpfs; LOAD httpfs;")
+
+    con.execute(f"""
+        INSERT INTO {GOLD_TARGETS_TABLE}
             (siren, denomination, naf, dept, effectif_tranche,
              date_creation, categorie_juridique, categorie_entreprise,
              adresse, code_postal, ville,
              ma_score)
         SELECT
-            b.siren,
-            b.denomination,
-            b.naf,
-            -- dept + adresse depuis StockEtablissement (même parquet, 0 coût supplémentaire)
-            LEFT(COALESCE(e.codeCommuneEtablissement, ''), 2)   AS dept,
-            b.effectif_tranche,
-            b.date_creation,
-            b.categorie_juridique,
-            b.categorie_entreprise,
-            -- Adresse complète reconstituée
+            s.siren,
+            s.denomination,
+            s.naf,
+            LEFT(COALESCE(e.codeCommuneEtablissement, ''), 2)  AS dept,
+            s.effectif_tranche,
+            s.date_creation,
+            s.categorie_juridique,
+            s.categorie_entreprise,
             TRIM(
                 COALESCE(e.numeroVoieEtablissement, '') || ' ' ||
                 COALESCE(e.typeVoieEtablissement,   '') || ' ' ||
                 COALESCE(e.libelleVoieEtablissement,'')
-            )                                                    AS adresse,
-            e.codePostalEtablissement                            AS code_postal,
-            e.libelleCommuneEtablissement                        AS ville,
+            )                                                   AS adresse,
+            e.codePostalEtablissement                           AS code_postal,
+            e.libelleCommuneEtablissement                       AS ville,
             -- Score M&A 0-100
             LEAST(100,
-                CASE b.effectif_tranche
+                CASE s.effectif_tranche
                     WHEN '11' THEN 15  WHEN '12' THEN 20
                     WHEN '21' THEN 25  WHEN '22' THEN 25
                     WHEN '31' THEN 20  WHEN '32' THEN 18
                     WHEN '41' THEN 12  WHEN '42' THEN 8
                     WHEN '51' THEN 5   WHEN '52' THEN 3  WHEN '53' THEN 2
-                    ELSE 0
+                    ELSE 5
                 END
                 +
                 CASE
-                    WHEN b.date_creation IS NULL                               THEN 0
-                    WHEN YEAR(CURRENT_DATE) - YEAR(b.date_creation) BETWEEN 3  AND 4  THEN 8
-                    WHEN YEAR(CURRENT_DATE) - YEAR(b.date_creation) BETWEEN 5  AND 9  THEN 15
-                    WHEN YEAR(CURRENT_DATE) - YEAR(b.date_creation) BETWEEN 10 AND 25 THEN 20
-                    WHEN YEAR(CURRENT_DATE) - YEAR(b.date_creation) > 25              THEN 12
+                    WHEN s.date_creation IS NULL                                THEN 0
+                    WHEN YEAR(CURRENT_DATE)-YEAR(s.date_creation) BETWEEN 3  AND 4  THEN 8
+                    WHEN YEAR(CURRENT_DATE)-YEAR(s.date_creation) BETWEEN 5  AND 9  THEN 15
+                    WHEN YEAR(CURRENT_DATE)-YEAR(s.date_creation) BETWEEN 10 AND 25 THEN 20
+                    WHEN YEAR(CURRENT_DATE)-YEAR(s.date_creation) > 25              THEN 12
                     ELSE 0
                 END
                 +
-                CASE b.categorie_juridique
+                CASE s.categorie_juridique
                     WHEN '5498' THEN 15  WHEN '5499' THEN 15
                     WHEN '5710' THEN 15  WHEN '5720' THEN 15
                     WHEN '5410' THEN 14  WHEN '5422' THEN 14
@@ -475,15 +546,15 @@ def build_silver(etab_url: str | None = None) -> int:
                     ELSE 0
                 END
                 +
-                CASE b.categorie_entreprise
+                CASE s.categorie_entreprise
                     WHEN 'ETI' THEN 15
                     WHEN 'PME' THEN 10
                     ELSE 0
                 END
                 +
-                CASE WHEN b.naf IN ({_high_ma_naf_sql()}) THEN 5 ELSE 0 END
+                CASE WHEN s.naf IN ({_high_ma_naf_sql()}) THEN 5 ELSE 0 END
             ) AS ma_score
-        FROM {BRONZE_TABLE} AS b
+        FROM {SILVER_TABLE} AS s
         LEFT JOIN (
             SELECT siren,
                    codeCommuneEtablissement,
@@ -494,18 +565,75 @@ def build_silver(etab_url: str | None = None) -> int:
                    libelleCommuneEtablissement
             FROM read_parquet('{etab_url}')
             WHERE etablissementSiege = 'true'
-        ) AS e ON b.siren = e.siren
-        WHERE b.etat_administratif = 'A'
-          AND b.categorie_entreprise IN ('PME', 'ETI')
-          AND b.naf IN ({_naf_list_sql()})
-          AND b.effectif_tranche IN ({_effectif_list_sql()})
+        ) AS e ON s.siren = e.siren
+        WHERE s.categorie_entreprise IN ('PME', 'ETI')
+          AND s.naf IN ({_naf_list_sql()})
+          AND s.effectif_tranche IN ({_effectif_list_sql()})
     """)
 
-    count = con.execute(f"SELECT COUNT(*) FROM {SILVER_TABLE}").fetchone()[0]
+    gold_count = con.execute(f"SELECT COUNT(*) FROM {GOLD_TARGETS_TABLE}").fetchone()[0]
+    print(f"[GOLD] {gold_count:,} cibles M&A insérées — construction KPIs…")
+
+    # ── Gold KPIs pré-agrégés ────────────────────────────────────────────────
+    con.execute(f"DELETE FROM {GOLD_KPIS_TABLE}")
+
+    # KPI par secteur (NAF)
+    con.execute(f"""
+        INSERT INTO {GOLD_KPIS_TABLE} (dimension, valeur, count_ma, avg_score, count_bodacc)
+        SELECT 'naf', naf,
+               COUNT(*)                                        AS count_ma,
+               ROUND(AVG(ma_score), 1)                        AS avg_score,
+               SUM(CASE WHEN bodacc_recent THEN 1 ELSE 0 END) AS count_bodacc
+        FROM {GOLD_TARGETS_TABLE}
+        GROUP BY naf
+    """)
+
+    # KPI par département
+    con.execute(f"""
+        INSERT INTO {GOLD_KPIS_TABLE} (dimension, valeur, count_ma, avg_score, count_bodacc)
+        SELECT 'dept', COALESCE(dept,'??'),
+               COUNT(*),
+               ROUND(AVG(ma_score), 1),
+               SUM(CASE WHEN bodacc_recent THEN 1 ELSE 0 END)
+        FROM {GOLD_TARGETS_TABLE}
+        GROUP BY dept
+    """)
+
+    # KPI par catégorie entreprise (PME/ETI)
+    con.execute(f"""
+        INSERT INTO {GOLD_KPIS_TABLE} (dimension, valeur, count_ma, avg_score, count_bodacc)
+        SELECT 'categorie', COALESCE(categorie_entreprise,'Autre'),
+               COUNT(*),
+               ROUND(AVG(ma_score), 1),
+               SUM(CASE WHEN bodacc_recent THEN 1 ELSE 0 END)
+        FROM {GOLD_TARGETS_TABLE}
+        GROUP BY categorie_entreprise
+    """)
+
+    # KPI par tranche d'effectif
+    con.execute(f"""
+        INSERT INTO {GOLD_KPIS_TABLE} (dimension, valeur, count_ma, avg_score, count_bodacc)
+        SELECT 'effectif', COALESCE(effectif_tranche,'NN'),
+               COUNT(*),
+               ROUND(AVG(ma_score), 1),
+               SUM(CASE WHEN bodacc_recent THEN 1 ELSE 0 END)
+        FROM {GOLD_TARGETS_TABLE}
+        GROUP BY effectif_tranche
+    """)
+
+    # KPI Silver global : répartition par secteur de toute la France
+    con.execute(f"""
+        INSERT INTO {GOLD_KPIS_TABLE} (dimension, valeur, count_total)
+        SELECT 'silver_naf', COALESCE(naf,'?'), COUNT(*)
+        FROM {SILVER_TABLE}
+        GROUP BY naf
+    """)
+
+    kpi_count = con.execute(f"SELECT COUNT(*) FROM {GOLD_KPIS_TABLE}").fetchone()[0]
     elapsed = time.time() - t0
     con.close()
-    print(f"[SILVER] ✅ {count:,} PME/ETI M&A-éligibles en {elapsed:.1f}s.")
-    return count
+    print(f"[GOLD] ✅ {gold_count:,} cibles + {kpi_count:,} KPIs en {elapsed:.1f}s.")
+    return gold_count
 
 
 # =============================================================================
@@ -859,32 +987,49 @@ def load_bodacc(since: str = "2023-01-01") -> int:
 
 def flag_bodacc_silver(months: int = 24) -> int:
     """
-    Met à jour bodacc_recent=true dans Silver pour les SIRENs
+    Met à jour bodacc_recent=true dans Gold pour les SIRENs
     ayant une annonce BODACC dans les `months` derniers mois.
     Ajoute +15 au ma_score (capped à 100) pour les signaux VENTE/PROCOL.
     Retourne le nombre de lignes mises à jour.
     """
     con = _get_connection()
-    print(f"[BODACC] Flagging Silver (bodacc_recent) sur {months} mois…")
+    print(f"[BODACC] Flagging Gold (bodacc_recent) sur {months} mois…")
 
+    bodacc_sirens_query = f"""
+        SELECT DISTINCT siren FROM {BODACC_TABLE}
+        WHERE date_parution >= CURRENT_DATE - INTERVAL ('{months} months')
+          AND type_annonce IN ('VENTE', 'PROCOL')
+          AND siren IS NOT NULL
+    """
+
+    # Flag Gold
     con.execute(f"""
-        UPDATE {SILVER_TABLE}
+        UPDATE {GOLD_TARGETS_TABLE}
         SET bodacc_recent = true,
             ma_score      = LEAST(100, ma_score + 15)
-        WHERE siren IN (
-            SELECT DISTINCT siren
-            FROM {BODACC_TABLE}
-            WHERE date_parution >= CURRENT_DATE - INTERVAL ('{months} months')
-              AND type_annonce IN ('VENTE', 'PROCOL')
-              AND siren IS NOT NULL
+        WHERE siren IN ({bodacc_sirens_query})
+    """)
+    updated = con.execute(
+        f"SELECT COUNT(*) FROM {GOLD_TARGETS_TABLE} WHERE bodacc_recent = true"
+    ).fetchone()[0]
+
+    # Rafraîchir les KPIs BODACC dans gold_kpis
+    con.execute(f"""
+        UPDATE {GOLD_KPIS_TABLE} g
+        SET count_bodacc = (
+            SELECT COUNT(*) FROM {GOLD_TARGETS_TABLE}
+            WHERE bodacc_recent = true
+            AND (
+                (g.dimension = 'naf'       AND naf = g.valeur) OR
+                (g.dimension = 'dept'      AND COALESCE(dept,'??') = g.valeur) OR
+                (g.dimension = 'categorie' AND COALESCE(categorie_entreprise,'Autre') = g.valeur)
+            )
         )
+        WHERE g.dimension IN ('naf','dept','categorie')
     """)
 
-    updated = con.execute(
-        f"SELECT COUNT(*) FROM {SILVER_TABLE} WHERE bodacc_recent = true"
-    ).fetchone()[0]
     con.close()
-    print(f"[BODACC] ✅ {updated:,} entreprises Silver flaggées bodacc_recent=true.")
+    print(f"[BODACC] ✅ {updated:,} cibles Gold flaggées bodacc_recent=true.")
     return updated
 
 
@@ -976,10 +1121,10 @@ async def _get_supabase_columns(client: httpx.AsyncClient, headers: dict) -> set
 
 async def sync_silver_to_supabase(top_n: int = 5000, priority: str = "score") -> int:
     """
-    Pousse les top_n entreprises Silver vers Supabase sirene_index.
+    Pousse les top_n cibles Gold vers Supabase sirene_index.
     priority = 'score'   → tri par ma_score DESC
     priority = 'bodacc'  → bodacc_recent DESC, ma_score DESC
-    Auto-détecte les colonnes existantes pour résister aux migrations incomplètes.
+    Auto-détecte les colonnes existantes.
     Retourne le nombre de lignes upsertées.
     """
     if not SUPABASE_URL or not SUPABASE_KEY:
@@ -987,10 +1132,8 @@ async def sync_silver_to_supabase(top_n: int = 5000, priority: str = "score") ->
         return 0
 
     con = _get_connection()
-
     order = "bodacc_recent DESC, ma_score DESC" if priority == "bodacc" else "ma_score DESC"
 
-    # All columns we want to send — subset will be filtered by what exists in Supabase
     all_cols = [
         "siren", "denomination", "naf", "dept", "effectif_tranche", "date_creation",
         "categorie_juridique", "categorie_entreprise", "ma_score_estimate",
@@ -1001,8 +1144,7 @@ async def sync_silver_to_supabase(top_n: int = 5000, priority: str = "score") ->
         "chiffre_affaires", "resultat_net",
     ]
 
-    # Silver columns (some aliased differently)
-    silver_select = """
+    gold_select = """
         siren, denomination, naf, dept, effectif_tranche,
         date_creation::TEXT AS date_creation,
         categorie_juridique, categorie_entreprise,
@@ -1014,27 +1156,28 @@ async def sync_silver_to_supabase(top_n: int = 5000, priority: str = "score") ->
         chiffre_affaires, resultat_net
     """
 
-    # Gracefully handle missing columns in Silver (e.g. not yet migrated)
     try:
         rows_df = con.execute(f"""
-            SELECT {silver_select}
-            FROM {SILVER_TABLE}
+            SELECT {gold_select}
+            FROM {GOLD_TARGETS_TABLE}
             ORDER BY {order}
             LIMIT {top_n}
         """).fetchall()
     except Exception as e:
-        print(f"[SYNC] Erreur lecture Silver (colonnes manquantes ?) : {e}")
-        # Fallback: only send base columns
-        rows_df = con.execute(f"""
-            SELECT siren, denomination, naf, dept, effectif_tranche,
-                   date_creation::TEXT AS date_creation,
-                   categorie_juridique, categorie_entreprise,
-                   ma_score AS ma_score_estimate,
-                   bodacc_recent, enriched
-            FROM {SILVER_TABLE}
-            ORDER BY {order}
-            LIMIT {top_n}
-        """).fetchall()
+        print(f"[SYNC] Erreur lecture Gold : {e} — fallback Silver")
+        try:
+            rows_df = con.execute(f"""
+                SELECT siren, denomination, naf, dept, effectif_tranche,
+                       date_creation::TEXT AS date_creation,
+                       categorie_juridique, categorie_entreprise,
+                       ma_score AS ma_score_estimate,
+                       bodacc_recent, enriched
+                FROM {GOLD_TARGETS_TABLE}
+                ORDER BY {order}
+                LIMIT {top_n}
+            """).fetchall()
+        except Exception:
+            con.close(); return 0
         all_cols = ["siren","denomination","naf","dept","effectif_tranche","date_creation",
                     "categorie_juridique","categorie_entreprise","ma_score_estimate",
                     "bodacc_recent","enriched"]
@@ -1099,27 +1242,31 @@ def print_stats() -> None:
 
     try:
         silver_count = con.execute(f"SELECT COUNT(*) FROM {SILVER_TABLE}").fetchone()[0]
-        enriched = con.execute(
-            f"SELECT COUNT(*) FROM {SILVER_TABLE} WHERE enriched = true"
-        ).fetchone()[0]
-        avg_score = con.execute(
-            f"SELECT ROUND(AVG(ma_score)) FROM {SILVER_TABLE}"
-        ).fetchone()[0]
+        print(f"\n  SILVER — {SILVER_TABLE}")
+        print(f"  Entreprises actives : {silver_count:>10,}")
+    except Exception:
+        print("[STATS] Table Silver vide ou inexistante.")
+
+    try:
+        gold_count = con.execute(f"SELECT COUNT(*) FROM {GOLD_TARGETS_TABLE}").fetchone()[0]
+        enriched   = con.execute(f"SELECT COUNT(*) FROM {GOLD_TARGETS_TABLE} WHERE enriched = true").fetchone()[0]
+        avg_score  = con.execute(f"SELECT ROUND(AVG(ma_score)) FROM {GOLD_TARGETS_TABLE}").fetchone()[0]
+        bodacc_flag = con.execute(f"SELECT COUNT(*) FROM {GOLD_TARGETS_TABLE} WHERE bodacc_recent = true").fetchone()[0]
         top_nafs = con.execute(f"""
-            SELECT naf, COUNT(*) AS n
-            FROM {SILVER_TABLE}
+            SELECT naf, COUNT(*) AS n FROM {GOLD_TARGETS_TABLE}
             GROUP BY naf ORDER BY n DESC LIMIT 5
         """).fetchall()
-        print(f"\n  SILVER — {SILVER_TABLE}")
-        print(f"  PME/ETI éligibles : {silver_count:>10,}")
-        print(f"  Enrichies (Gold)  : {enriched:>10,}")
-        print(f"  Score moyen       : {avg_score:>10}")
-        print(f"  Top 5 NAF         :")
+        print(f"\n  GOLD — {GOLD_TARGETS_TABLE}")
+        print(f"  Cibles M&A scorées  : {gold_count:>10,}")
+        print(f"  Enrichies           : {enriched:>10,}")
+        print(f"  Score moyen         : {avg_score:>10}")
+        print(f"  BODACC flaggées     : {bodacc_flag:>10,}")
+        print(f"  Top 5 NAF           :")
         for naf, n in top_nafs:
             print(f"    {naf} : {n:,}")
         print(f"{'='*50}\n")
     except Exception:
-        print("[STATS] Table Silver vide ou inexistante.")
+        print("[STATS] Table Gold vide ou inexistante.")
 
     con.close()
 
@@ -1142,14 +1289,19 @@ def _pg_stats() -> dict | None:
         cur = conn.cursor()
         def q(sql):
             cur.execute(sql); return cur.fetchone()[0]
-        bronze   = q(f"SELECT COUNT(*) FROM {BRONZE_TABLE}")
-        silver   = q(f"SELECT COUNT(*) FROM {SILVER_TABLE}")
-        enriched = q(f"SELECT COUNT(*) FROM {SILVER_TABLE} WHERE enriched = true")
-        avg_score = q(f"SELECT ROUND(AVG(ma_score)::numeric, 1) FROM {SILVER_TABLE}")
-        bodacc_total = bodacc_flagged = pappers_total = 0
+        bronze  = q(f"SELECT COUNT(*) FROM {BRONZE_TABLE}")
+        silver  = q(f"SELECT COUNT(*) FROM {SILVER_TABLE}")
+        gold = enriched = avg_score = bodacc_flagged = 0
+        try:
+            gold       = q(f"SELECT COUNT(*) FROM {GOLD_TARGETS_TABLE}")
+            enriched   = q(f"SELECT COUNT(*) FROM {GOLD_TARGETS_TABLE} WHERE enriched = true")
+            avg_score  = q(f"SELECT ROUND(AVG(ma_score)::numeric, 1) FROM {GOLD_TARGETS_TABLE}")
+            bodacc_flagged = q(f"SELECT COUNT(*) FROM {GOLD_TARGETS_TABLE} WHERE bodacc_recent = true")
+        except Exception:
+            pass
+        bodacc_total = pappers_total = 0
         try:
             bodacc_total  = q(f"SELECT COUNT(*) FROM {BODACC_TABLE}")
-            bodacc_flagged = q(f"SELECT COUNT(*) FROM {SILVER_TABLE} WHERE bodacc_recent = true")
         except Exception:
             pass
         try:
@@ -1158,9 +1310,14 @@ def _pg_stats() -> dict | None:
             pass
         cur.close(); conn.close()
         return {
-            "bronze_total": bronze, "silver_eligible": silver,
-            "silver_enriched": enriched, "silver_avg_score": avg_score,
-            "bodacc_total": bodacc_total, "bodacc_flagged_silver": bodacc_flagged,
+            "bronze_total": bronze,
+            "silver_total": silver,
+            "silver_eligible": gold,        # compat API existante
+            "silver_enriched": enriched,
+            "silver_avg_score": avg_score,
+            "gold_targets": gold,
+            "bodacc_total": bodacc_total,
+            "bodacc_flagged_silver": bodacc_flagged,
             "pappers_total": pappers_total,
         }
     except Exception as e:
@@ -1180,14 +1337,19 @@ async def api_bronze_stats() -> dict:
         return {"error": "duckdb non installé", "pipeline": _PIPELINE_STATUS}
     try:
         con = _get_connection()
-        bronze   = con.execute(f"SELECT COUNT(*) FROM {BRONZE_TABLE}").fetchone()[0]
-        silver   = con.execute(f"SELECT COUNT(*) FROM {SILVER_TABLE}").fetchone()[0]
-        enriched = con.execute(f"SELECT COUNT(*) FROM {SILVER_TABLE} WHERE enriched = true").fetchone()[0]
-        avg_score = con.execute(f"SELECT ROUND(AVG(ma_score)) FROM {SILVER_TABLE}").fetchone()[0]
-        bodacc_total = bodacc_flagged = pappers_total = 0
+        bronze = con.execute(f"SELECT COUNT(*) FROM {BRONZE_TABLE}").fetchone()[0]
+        silver = con.execute(f"SELECT COUNT(*) FROM {SILVER_TABLE}").fetchone()[0]
+        gold = enriched = avg_score = bodacc_flagged = 0
+        try:
+            gold      = con.execute(f"SELECT COUNT(*) FROM {GOLD_TARGETS_TABLE}").fetchone()[0]
+            enriched  = con.execute(f"SELECT COUNT(*) FROM {GOLD_TARGETS_TABLE} WHERE enriched = true").fetchone()[0]
+            avg_score = con.execute(f"SELECT ROUND(AVG(ma_score)) FROM {GOLD_TARGETS_TABLE}").fetchone()[0]
+            bodacc_flagged = con.execute(f"SELECT COUNT(*) FROM {GOLD_TARGETS_TABLE} WHERE bodacc_recent = true").fetchone()[0]
+        except Exception:
+            pass
+        bodacc_total = pappers_total = 0
         try:
             bodacc_total  = con.execute(f"SELECT COUNT(*) FROM {BODACC_TABLE}").fetchone()[0]
-            bodacc_flagged = con.execute(f"SELECT COUNT(*) FROM {SILVER_TABLE} WHERE bodacc_recent = true").fetchone()[0]
         except Exception:
             pass
         try:
@@ -1196,10 +1358,16 @@ async def api_bronze_stats() -> dict:
             pass
         con.close()
         return {
-            "bronze_total": bronze, "silver_eligible": silver,
-            "silver_enriched": enriched, "silver_avg_score": avg_score,
-            "bodacc_total": bodacc_total, "bodacc_flagged_silver": bodacc_flagged,
-            "pappers_total": pappers_total, "pipeline": _PIPELINE_STATUS,
+            "bronze_total": bronze,
+            "silver_total": silver,
+            "silver_eligible": gold,      # compat API existante
+            "silver_enriched": enriched,
+            "silver_avg_score": avg_score,
+            "gold_targets": gold,
+            "bodacc_total": bodacc_total,
+            "bodacc_flagged_silver": bodacc_flagged,
+            "pappers_total": pappers_total,
+            "pipeline": _PIPELINE_STATUS,
         }
     except Exception as e:
         return {"error": str(e), "pipeline": _PIPELINE_STATUS}
@@ -1218,6 +1386,9 @@ async def _run_async(cmd: str, args: list[str]) -> None:
 
     elif cmd == "build-silver":
         build_silver()
+
+    elif cmd == "build-gold":
+        build_gold()
 
     elif cmd == "load-bodacc":
         since = args[0] if args else "2023-01-01"
@@ -1243,7 +1414,8 @@ async def _run_async(cmd: str, args: list[str]) -> None:
     elif cmd == "full":
         setup_tables()
         load_bronze()
-        build_silver()
+        build_silver()    # France entière ~10-15M actives
+        build_gold()      # M&A scoring ~200K + KPIs
         load_bodacc()
         flag_bodacc_silver()
         load_pappers_bronze()
