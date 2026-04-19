@@ -5,8 +5,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Target, Network, Layers, Activity,
-  Search, Sparkles, Zap, ShieldCheck, Settings, LogOut,
-  ChevronRight, Fingerprint, Bell, BellOff, Download,
+  Search, Sparkles, Zap, ShieldCheck, Settings,
+  ChevronRight, Fingerprint, Bell, BellOff, Download, Map,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -42,6 +42,7 @@ export default function Sidebar({
     { label: "Graphe Réseau", icon: Network, href: "/graph", badge: null },
     { label: "Pipeline M&A", icon: Layers, href: "/pipeline", badge: null },
     { label: "Signaux Marché", icon: Activity, href: "/signals", badge: signalCount > 0 ? signalCount : null },
+    { label: "Carte Opportunités", icon: Map, href: "/map", badge: null },
   ];
 
   const notifGranted = notifPermission === "granted";

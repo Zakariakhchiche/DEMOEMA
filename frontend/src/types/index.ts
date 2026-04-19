@@ -103,6 +103,9 @@ export interface Target {
   analysis?: TargetAnalysis;
   activation?: Activation;
   risks?: Risks;
+  bodacc_recent?: boolean;
+  dept?: string;
+  ma_score?: number;
 }
 
 // ── Filter Options (returned by API) ───────────────────────────────

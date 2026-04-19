@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { Target as TargetType } from "@/types";
+import ScoreRadar from "@/components/ScoreRadar";
+import EventTimeline from "@/components/EventTimeline";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -324,6 +326,19 @@ export default function TargetDetail() {
             </div>
           </div>
 
+          {/* Score Radar */}
+          <ScoreRadar
+            globalScore={targetData.globalScore ?? 0}
+            scores={{
+              effectif: Math.min(100, ((targetData.scoring_details as Record<string,{score?:number}>)?.effectif?.score ?? 0) * 5),
+              anciennete: Math.min(100, ((targetData.scoring_details as Record<string,{score?:number}>)?.anciennete?.score ?? 0) * 5),
+              secteur: targetData.sector ? 70 : 20,
+              bodacc: targetData.bodacc_recent ? 90 : 10,
+              gouvernance: Math.min(100, ((targetData.scoring_details as Record<string,{score?:number}>)?.gouvernance?.score ?? 0) * 5),
+              financier: Math.min(100, ((targetData.scoring_details as Record<string,{score?:number}>)?.financier?.score ?? 0) * 5),
+            }}
+          />
+
           {/* Company Identity */}
           <div className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl backdrop-blur-xl">
             <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] flex items-center gap-2 mb-8">
@@ -578,38 +593,17 @@ export default function TargetDetail() {
               )}
            </section>
 
-           {/* Infogreffe Actes Section */}
-           <section className="p-5 sm:p-7 lg:p-10 rounded-2xl sm:rounded-[2rem] lg:rounded-[3rem] bg-white/[0.02] border border-white/10 space-y-4 sm:space-y-6">
-              <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-500 flex items-center gap-3 sm:gap-4">
-                 <span className="hidden sm:block w-10 h-px bg-white/10" />
-                 <ScrollText size={16} className="text-amber-400" /> Actes RCS — Infogreffe
-              </h2>
-              {actesLoading ? (
-                <div className="flex items-center gap-3 text-gray-600 text-[10px] font-black uppercase tracking-widest">
-                  <div className="w-4 h-4 border-2 border-gray-700 border-t-amber-500 rounded-full animate-spin" />
-                  Chargement actes...
-                </div>
-              ) : actes.length === 0 ? (
-                <p className="text-gray-600 text-xs font-medium">Aucun acte récent disponible en open data pour cette société.</p>
-              ) : (
-                <div className="space-y-3">
-                  {actes.map((acte, i) => (
-                    <div key={i} className="flex items-start gap-4 p-4 rounded-2xl bg-white/[0.03] border border-white/5 hover:border-amber-500/20 transition-all">
-                      <div className="w-2 h-2 rounded-full bg-amber-500 shrink-0 mt-2" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-black text-gray-200 uppercase tracking-tight">{acte.type}</p>
-                        {acte.description && (
-                          <p className="text-xs text-gray-500 mt-1 leading-snug line-clamp-2">{acte.description}</p>
-                        )}
-                        {acte.date && (
-                          <span className="text-[9px] font-black text-amber-500/60 uppercase tracking-widest mt-2 block">{acte.date}</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-           </section>
+           {/* Timeline événements */}
+           <EventTimeline
+             loading={actesLoading}
+             events={actes.map((a, i) => ({
+               id: String(i),
+               date: a.date || "",
+               type: (["VENTE","PROCOL","DEPOT","CREATION","MODIFICATION"].includes(a.type) ? a.type : "DEPOT") as "VENTE"|"PROCOL"|"DEPOT"|"CREATION"|"MODIFICATION",
+               title: a.type,
+               description: a.description,
+             }))}
+           />
 
            {/* Bottom Bar */}
            <div className="mt-6 sm:mt-8 lg:mt-10 pt-6 sm:pt-8 lg:pt-10 border-t border-white/5 flex flex-col sm:flex-row justify-between items-center gap-5 sm:gap-8">
