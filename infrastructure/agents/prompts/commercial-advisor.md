@@ -1,6 +1,6 @@
 ---
 name: commercial-advisor
-model: ministral-3:14b
+model: gemma4:31b
 temperature: 0.3
 num_ctx: 32768
 description: 30 interviews Mom Test, LOI, templates re-contact, InMail LinkedIn, sourcing 100 prospects ICP, BPI Bourse French Tech, pricing validation via terrain.

@@ -1,6 +1,6 @@
 ---
 name: ma-product-designer
-model: ministral-3:14b
+model: gemma4:31b
 temperature: 0.3
 num_ctx: 32768
 description: Killer features M&A (alertes pré-cession, who advises whom), scoring 103 signaux 12 dimensions, persona Pierre, UX flows, integrations Affinity, exports Excel templates M&A.

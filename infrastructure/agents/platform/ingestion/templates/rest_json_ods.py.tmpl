@@ -1,0 +1,113 @@
+"""{title} — fetcher auto-généré (template rest_json_ods).
+
+Source : {source_id}
+Endpoint OpenDataSoft v2.1 : {endpoint}
+Licence : {license}
+Auth : none
+Auto-généré par codegen template-first.
+"""
+from __future__ import annotations
+
+import hashlib
+import json as _json
+import logging
+from datetime import datetime, timedelta, timezone
+
+import httpx
+import psycopg
+from psycopg.types.json import Jsonb
+
+from config import settings
+
+log = logging.getLogger(__name__)
+
+ENDPOINT = "{endpoint}"
+PAGE_SIZE = {page_size}
+MAX_PAGES = {max_pages}
+BACKFILL_DAYS = {backfill_days}
+INCREMENTAL_HOURS = {incremental_hours}
+
+
+async def count_upstream() -> int | None:
+    """Total count amont via OpenDataSoft ?limit=0 → total_count."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.get(ENDPOINT, params={{"limit": 0}})
+            if r.status_code != 200:
+                return None
+            v = r.json().get("total_count")
+            return int(v) if isinstance(v, int) and v >= 0 else None
+    except Exception:
+        return None
+
+
+async def fetch_{source_id}_delta() -> dict:
+    """Fetch delta ODS v2.1 — paginated with offset+limit."""
+    if not settings.database_url:
+        return {{"source": "{source_id}", "rows": 0, "error": "no DB"}}
+
+    # Check table vide → backfill, sinon delta
+    async with await psycopg.AsyncConnection.connect(settings.database_url) as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT count(*) FROM {table}")
+            existing = (await cur.fetchone())[0]
+
+    window = timedelta(days=BACKFILL_DAYS) if existing == 0 else timedelta(hours=INCREMENTAL_HOURS)
+    since = (datetime.now(tz=timezone.utc) - window).strftime("%Y-%m-%d")
+
+    total_fetched = 0
+    total_inserted = 0
+    total_skipped = 0
+
+    async with httpx.AsyncClient(timeout=30, headers={{"User-Agent": "DEMOEMA-Agents/0.1"}}) as client:
+        async with await psycopg.AsyncConnection.connect(settings.database_url) as conn:
+            async with conn.cursor() as cur:
+                for page in range(MAX_PAGES):
+                    offset = page * PAGE_SIZE
+                    params = {{"limit": PAGE_SIZE, "offset": offset}}
+                    r = await client.get(ENDPOINT, params=params)
+                    if r.status_code != 200:
+                        log.warning("{source_id} HTTP %s: %s", r.status_code, r.text[:200])
+                        break
+                    data = r.json()
+                    records = data.get("results", [])
+                    if not records:
+                        break
+                    total_fetched += len(records)
+
+                    for rec in records:
+                        # Cascade clé : key_field → id → hash payload
+                        key_val = rec.get("{key_field}") or rec.get("id")
+                        if not key_val:
+                            key_val = hashlib.sha1(
+                                _json.dumps(rec, sort_keys=True, default=str).encode()
+                            ).hexdigest()[:32]
+                        key_str = str(key_val)[:128]
+                        try:
+                            await cur.execute(
+                                """
+                                INSERT INTO {table} ({key_field}, payload, ingested_at)
+                                VALUES (%s, %s, now())
+                                ON CONFLICT ({key_field}) DO NOTHING
+                                """,
+                                (key_str, Jsonb(rec)),
+                            )
+                            if cur.rowcount > 0:
+                                total_inserted += 1
+                            else:
+                                total_skipped += 1
+                        except Exception as e:
+                            log.warning("skip %s: %s", key_str[:30], e)
+                            total_skipped += 1
+
+                    await conn.commit()
+                    if len(records) < PAGE_SIZE:
+                        break
+
+    return {{
+        "source": "{source_id}",
+        "rows": total_inserted,
+        "fetched": total_fetched,
+        "skipped_existing": total_skipped,
+        "since": since,
+    }}

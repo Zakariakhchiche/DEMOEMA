@@ -1,6 +1,6 @@
 ---
 name: bug-hunter
-model: ministral-3:14b
+model: gemma4:31b
 temperature: 0.2
 num_ctx: 32768
 description: Détection bugs en prod, analyse logs Docker/Caddy/FastAPI/Sentry/Loki, triage par severity, création Jira bugs avec repro steps + logs + environment, escalade P0/P1, post-mortem.

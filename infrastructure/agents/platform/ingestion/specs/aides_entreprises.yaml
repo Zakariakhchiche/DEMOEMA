@@ -4,7 +4,7 @@ layer: 15
 couche: "Subventions & aides publiques"
 name: "aides-entreprises.fr — catalogue aides FR"
 description: "Catalogue aides publiques disponibles aux entreprises FR. Signal budget public sectoriel + pipeline France 2030."
-endpoint: "https://aides-entreprises.fr/api/aides"
+endpoint: https://static.data.gouv.fr/resources/subventions-organisation-gip-les-entreprises-sengagent/20250319-105221/data.csv
 auth: none
 pattern: rest_json_public
 refresh_trigger: "interval_hours=168"
@@ -24,3 +24,13 @@ bronze_fields:
   - {name: date_debut, type: "DATE", source_path: "dateDebut", parser: "date"}
   - {name: date_fin, type: "DATE", source_path: "dateFin", parser: "date"}
 conflict_strategy: "ON CONFLICT (aide_id) DO UPDATE SET payload = EXCLUDED.payload, ingested_at = now()"
+format: csv
+
+endpoint: https://static.data.gouv.fr/resources/catalogue-des-dispositifs-daides-a-la-transition-ecologique-pour-les-entreprises/20260309-150122/data-gouv-export.csv
+
+endpoint: https://static.data.gouv.fr/resources/catalogue-des-dispositifs-daides-a-la-transition-ecologique-pour-les-entreprises/20260309-150122/data-gouv-export.csv
+
+template_vars:
+  key_field: aide_id
+  batch_size: 500
+  max_rows: 100000

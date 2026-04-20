@@ -1,6 +1,6 @@
 ---
 name: rgpd-ai-act-reviewer
-model: qwen3.5:397b
+model: gemma4:31b
 temperature: 0.1
 num_ctx: 65536
 description: Audit conformité RGPD + AI Act (Règlement UE 2024/1689) sur features, endpoints, sources data. LIA, DPIA, CGU clauses, statut déployeur, classification risque IA, droits voisins presse.

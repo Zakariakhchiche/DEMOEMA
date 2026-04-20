@@ -40,10 +40,35 @@ SPECS_DIR = Path(__file__).parent / "specs"
 SOURCES_DIR = Path(__file__).parent / "sources"
 REFERENCE_FETCHER = SOURCES_DIR / "bodacc.py"
 
+# Références par format — chaque format pointe vers un fetcher existant à mimer.
+# Si absent → fallback sur bodacc.py (REST JSON delta + bulk CSV section).
+REFERENCE_BY_FORMAT = {
+    "rest_json": SOURCES_DIR / "bodacc.py",              # pattern delta REST + pagination
+    "csv":       SOURCES_DIR / "bodacc.py",              # pattern bodacc_full (stream CSV)
+    "csv_gz":    SOURCES_DIR / "bodacc.py",              # CSV gzippé
+    "zip":       SOURCES_DIR / "_zip_csv_ref.py",        # ZIP-of-CSV dédié (DVF, BAN, SIRENE stock)
+    "jsonl":     SOURCES_DIR / "opensanctions.py",       # JSON Lines streaming
+    "geojson":   SOURCES_DIR / "bodacc.py",              # générique (LLM adapte)
+    "parquet":   SOURCES_DIR / "bodacc.py",              # LLM adapte (pyarrow)
+    "xml":       SOURCES_DIR / "bodacc.py",              # LLM adapte (lxml streaming)
+}
+
+FORMAT_HINTS = {
+    "rest_json": "REST API JSON paginée. Utilise le pattern bodacc.fetch_bodacc_delta : loop de pages avec offset+limit, insert par page.",
+    "csv":       "CSV à streamer (dump file ou API avec format CSV). Utilise le pattern bodacc.fetch_bodacc_full : client.stream('GET', url), aiter_text(1MB chunks), csv.reader par ligne, batch 1000 → executemany.",
+    "zip":       "ZIP contenant un ou plusieurs CSV/JSON. Télécharge avec streaming, utilise zipfile.ZipFile pour extraire, puis traite chaque membre comme CSV.",
+    "jsonl":     "JSON Lines (1 objet JSON par ligne). Stream le fichier, split par '\\n', json.loads par ligne, batch insert.",
+    "geojson":   "GeoJSON FeatureCollection. Récupère .features[], chaque feature a .properties + .geometry. Stocke payload JSONB complet + extract coords si utile.",
+    "parquet":   "Parquet binary. Utilise pyarrow.parquet.ParquetFile avec iter_batches(batch_size=1000). Si grosses tables, streamer colonne-à-colonne.",
+    "xml":       "XML. Utilise lxml.etree.iterparse(source) pour streaming events. Parse element par element, extraire les champs clés.",
+}
+
 ALLOWED_IMPORTS = {
     "__future__",
     "asyncio", "datetime", "json", "logging", "re", "os", "typing", "time", "hashlib", "collections",
+    "csv", "io", "zipfile", "gzip", "shutil", "tempfile",
     "httpx", "psycopg", "lxml", "feedparser", "yaml",
+    "pyarrow", "pyarrow.parquet",
     "config", "psycopg.types.json", "psycopg.types",
 }
 
@@ -73,9 +98,16 @@ def list_specs() -> list[dict]:
 
 
 def _build_prompt(spec: dict, feedback: str | None = None) -> str:
-    ref_code = REFERENCE_FETCHER.read_text(encoding="utf-8") if REFERENCE_FETCHER.exists() else ""
+    # Choix de la référence selon spec.format
+    source_format = (spec.get("format") or "rest_json").lower().strip()
+    ref_path = REFERENCE_BY_FORMAT.get(source_format, REFERENCE_FETCHER)
+    ref_code = ref_path.read_text(encoding="utf-8") if ref_path.exists() else ""
+    format_hint = FORMAT_HINTS.get(source_format, "")
     fb_block = f"\n\n## FEEDBACK ITÉRATION PRÉCÉDENTE (CORRIGE CES PROBLÈMES)\n{feedback}\n" if feedback else ""
     return f"""Tu es lead-data-engineer DEMOEMA. Ta mission : GÉNÉRER le code Python complet d'un fetcher pour une source data publique, à partir de la spec YAML fournie.
+
+## FORMAT DE LA SOURCE : `{source_format}`
+{format_hint}
 {fb_block}
 
 ## SPEC YAML de la source à implémenter
@@ -83,7 +115,7 @@ def _build_prompt(spec: dict, feedback: str | None = None) -> str:
 {yaml.safe_dump(spec, allow_unicode=True, sort_keys=False)}
 ```
 
-## CODE DE RÉFÉRENCE (bodacc.py, pattern REST JSON) — copier la structure, adapter à la spec
+## CODE DE RÉFÉRENCE ({ref_path.name}, pattern {source_format}) — copier la structure, adapter à la spec
 ```python
 {ref_code}
 ```
@@ -151,13 +183,215 @@ def _validate_code(code: str) -> tuple[bool, str]:
     return True, "OK"
 
 
+TEMPLATES_DIR = Path(__file__).parent / "templates"
+TEMPLATE_BY_FORMAT = {
+    "rest_json": "rest_json_ods.py.tmpl",
+    "csv":       "csv_dump.py.tmpl",
+    "csv_gz":    "csv_dump.py.tmpl",   # gunzip auto-detect
+    "zip":       "zip_csv.py.tmpl",
+}
+
+# Vars avec valeurs par défaut : si la spec YAML ne les fournit pas, on utilise ces defaults
+TEMPLATE_DEFAULTS = {
+    "title":              "",       # repris du spec.name
+    "license":            "Etalab 2.0",
+    "page_size":          100,
+    "max_pages":          100,
+    "backfill_days":      3650,
+    "incremental_hours":  48,
+    "batch_size":         1000,
+    "max_rows":           500000,
+    "max_members":        10,
+    "key_field":          "record_id",
+}
+
+
+async def _discover_table_schema(source_id: str) -> tuple[str, str] | None:
+    """Introspecte la DB pour trouver la vraie table bronze + sa clé primaire.
+    Retourne (schema.table, key_column) ou None. Cherche par match de source_id."""
+    if not settings.database_url:
+        return None
+    try:
+        import psycopg as _pg
+        async with await _pg.AsyncConnection.connect(settings.database_url) as conn:
+            async with conn.cursor() as cur:
+                # Stratégie : trouver une table bronze.* dont le nom contient source_id
+                await cur.execute(
+                    """
+                    SELECT tablename FROM pg_tables
+                    WHERE schemaname = 'bronze'
+                      AND (tablename = %s OR tablename LIKE %s OR tablename LIKE %s)
+                    ORDER BY LENGTH(tablename) ASC
+                    LIMIT 1
+                    """,
+                    (f"{source_id}_raw", f"{source_id}\\_%\\_raw", f"{source_id}%raw"),
+                )
+                row = await cur.fetchone()
+                if not row:
+                    return None
+                tbl = row[0]
+
+                # PK column : préférer une colonne VARCHAR qui finit par _id (ex: annonce_id, aide_id)
+                await cur.execute(
+                    """
+                    SELECT column_name, data_type
+                    FROM information_schema.columns
+                    WHERE table_schema = 'bronze' AND table_name = %s
+                      AND is_nullable = 'NO'
+                      AND data_type IN ('character varying', 'character', 'text')
+                      AND column_name NOT IN ('payload','ingested_at')
+                    ORDER BY
+                      CASE WHEN column_name LIKE '%%_id' THEN 0 ELSE 1 END,
+                      ordinal_position
+                    LIMIT 1
+                    """,
+                    (tbl,),
+                )
+                col_row = await cur.fetchone()
+                key_field = col_row[0] if col_row else "id"
+
+                return (f"bronze.{tbl}", key_field)
+    except Exception as e:
+        log.warning("discover_table_schema crashed for %s: %s", source_id, e)
+        return None
+
+
+async def _render_template(spec: dict) -> str | None:
+    """Essaie de rendre un template correspondant au format de la spec.
+    Async car on fait de l'introspection DB pour les variables table + key_field.
+    Retourne le code Python rendu, ou None si format non supporté / vars manquantes."""
+    fmt = (spec.get("format") or "").lower().strip()
+    tmpl_name = TEMPLATE_BY_FORMAT.get(fmt)
+    if not tmpl_name:
+        return None
+    tmpl_path = TEMPLATES_DIR / tmpl_name
+    if not tmpl_path.exists():
+        return None
+
+    endpoint = spec.get("endpoint", "")
+    if not endpoint:
+        return None
+
+    source_id = spec.get("source_id", "")
+
+    # Variables pour substitution
+    vars = dict(TEMPLATE_DEFAULTS)
+    vars.update({
+        "source_id": source_id,
+        "endpoint": endpoint,
+        "table": f"bronze.{source_id}_raw",  # fallback
+        "title": spec.get("name") or source_id,
+        "license": spec.get("licence") or spec.get("license") or "Etalab 2.0",
+    })
+
+    # DB introspection : override table + key_field avec les vraies valeurs du schéma
+    schema_info = await _discover_table_schema(source_id)
+    if schema_info:
+        vars["table"], vars["key_field"] = schema_info
+        log.info("[codegen schema] %s table=%s key=%s", source_id, vars["table"], vars["key_field"])
+
+    # spec.table override explicite si présent
+    if spec.get("table"):
+        vars["table"] = spec["table"]
+    # spec.template_vars écrase (dernier mot)
+    for k, v in (spec.get("template_vars") or {}).items():
+        vars[k] = v
+
+    try:
+        tmpl = tmpl_path.read_text(encoding="utf-8")
+        rendered = tmpl.format(**vars)
+        # Sanity check : doit contenir fetch_{source_id}_delta
+        if f"fetch_{source_id}_delta" not in rendered:
+            log.warning("template %s missing fetch_%s_delta", tmpl_name, source_id)
+            return None
+        return rendered
+    except KeyError as e:
+        log.warning("template %s needs var %s (not in spec + defaults)", tmpl_name, e)
+        return None
+    except Exception as e:
+        log.exception("template render error: %s", e)
+        return None
+
+
 async def generate_fetcher(source_id: str, feedback: str | None = None) -> dict:
-    """Pipeline génération : spec → prompt → LLM → validate → write → register.
-    Optional feedback permet retry avec contexte erreur."""
+    """Pipeline génération : spec → [template render OU LLM prompt] → validate → write → register.
+
+    Priorité au template (déterministe, rapide, gratuit). Fallback LLM si template indispo
+    ou si feedback fourni (retry d'itération nécessite souvent du nuancé).
+    """
     spec = load_spec(source_id)
     if not spec:
         return {"error": f"Spec introuvable : specs/{source_id}.yaml"}
 
+    # ──────────── AUTO-DETECT FORMAT (sécurité) ────────────
+    # Si spec.format absent, on détecte automatiquement depuis l'URL + HEAD + magic bytes.
+    # Évite de dépendre du LLM hunter pour mettre `format:` proprement.
+    if not spec.get("format") and spec.get("endpoint"):
+        try:
+            from tools.format_detect import detect_format
+            detected = await detect_format(spec["endpoint"])
+            fmt = detected.get("format")
+            if fmt and fmt != "unknown":
+                spec["format"] = fmt
+                log.info("[codegen auto-detect] %s format=%s signal=%s",
+                         source_id, fmt, detected.get("signal"))
+                # Persister dans le YAML (pour run_fetcher ultérieur)
+                try:
+                    import re as _re
+                    spec_path = SPECS_DIR / f"{source_id}.yaml"
+                    src = spec_path.read_text(encoding="utf-8")
+                    if _re.search(r"(?m)^format:\s*.*$", src):
+                        src = _re.sub(r"(?m)^format:\s*.*$", f"format: {fmt}", src, count=1)
+                    else:
+                        src = src.rstrip() + f"\nformat: {fmt}\n"
+                    spec_path.write_text(src, encoding="utf-8")
+                except Exception:
+                    log.exception("auto-detect: persist format failed")
+        except Exception as e:
+            log.warning("auto-detect format failed for %s: %s", source_id, e)
+
+    # ──────────── TEMPLATE-FIRST PATH ────────────
+    # Si on a un format reconnu + pas de feedback → render template déterministe, pas de LLM
+    if not feedback:
+        rendered = await _render_template(spec)
+        if rendered is not None:
+            ok, msg = _validate_code(rendered)
+            if ok:
+                target = SOURCES_DIR / f"{source_id}.py"
+                target.write_text(rendered, encoding="utf-8")
+                result = {"source_id": source_id, "file": str(target.name),
+                          "bytes": len(rendered), "mode": "template",
+                          "template": TEMPLATE_BY_FORMAT.get((spec.get("format") or "").lower())}
+                # Hot-reload via import
+                try:
+                    import importlib
+                    from ingestion import engine
+                    importlib.invalidate_caches()
+                    module_path = f"ingestion.sources.{source_id}"
+                    if module_path in list(importlib.sys.modules):
+                        importlib.reload(importlib.sys.modules[module_path])
+                    else:
+                        importlib.import_module(module_path)
+                    mod = importlib.import_module(module_path)
+                    fetcher = getattr(mod, f"fetch_{source_id}_delta", None) or getattr(mod, f"fetch_{source_id}_full", None)
+                    if fetcher:
+                        trigger = _build_trigger(spec.get("refresh_trigger", "interval_hours=24"))
+                        engine.SOURCES[source_id] = {
+                            "fetcher": fetcher, "trigger": trigger,
+                            "sla_minutes": spec.get("sla_minutes", 1440),
+                            "description": spec.get("name", source_id),
+                        }
+                        result["registered"] = True
+                    log.info("[codegen template] %s rendered via %s (%d bytes)",
+                             source_id, result["template"], len(rendered))
+                except Exception as e:
+                    result["warn_register"] = str(e)
+                return result
+            else:
+                log.info("[codegen template] %s rendered but INVALID: %s → fallback LLM", source_id, msg)
+        # sinon fallback LLM ci-dessous
+
+    # ──────────── LLM PATH (fallback) ────────────
     agent = get_agent("lead-data-engineer")
     if not agent:
         return {"error": "Agent lead-data-engineer non chargé"}
@@ -166,16 +400,22 @@ async def generate_fetcher(source_id: str, feedback: str | None = None) -> dict:
 
     # Appel Ollama Cloud (stream=False pour avoir la réponse complète)
     client = OllamaClient()
+    response = None
     try:
-        response = await client.chat(
-            model=agent.model,
-            messages=[
-                {"role": "system", "content": agent.system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-            options=agent.to_ollama_options(),
-            stream=False,
-        )
+        try:
+            response = await client.chat(
+                model=agent.model,
+                messages=[
+                    {"role": "system", "content": agent.system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                options=agent.to_ollama_options(),
+                stream=False,
+            )
+        except Exception as e:
+            log.warning("Ollama chat failed for %s: %s", source_id, e)
+            return {"error": f"LLM call failed: {type(e).__name__}: {e}",
+                    "source_id": source_id}
     finally:
         await client.close()
 

@@ -1,6 +1,6 @@
 ---
 name: qa-engineer
-model: qwen3-coder-next
+model: gemma4:31b
 temperature: 0.1
 num_ctx: 32768
 description: Stratégie test DEMOEMA, Playwright E2E, pytest, TDD, smoke tests quotidiens prod, test data, coverage pipelines data, regression testing.
