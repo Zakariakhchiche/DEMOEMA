@@ -39,12 +39,17 @@ services:
     environment:
       PROMPTS_DIR: /app/prompts
       DOCS_DIR: /app/docs
+      OPENCLAW_VAULT_DIR: /app/.secrets
     volumes:
       - ./prompts:/app/prompts:ro
       - ./docs:/app/docs:ro
       # Hot-reload : fetchers générés par agent persistés sur host
       - ./platform/ingestion/sources:/app/ingestion/sources:rw
-      - ./platform/ingestion/specs:/app/ingestion/specs:ro
+      - ./platform/ingestion/specs:/app/ingestion/specs:rw
+      # Credentials store Fernet + vault key — persistés hors container
+      - ./secrets:/app/.secrets:rw
+      # Screenshots openclaw accessibles depuis host
+      - ./screenshots:/tmp/openclaw_screenshots:rw
     expose:
       - "8100"
     networks:

@@ -32,9 +32,10 @@ async def read_spec(source_id: str) -> str:
 
 
 async def patch_endpoint(source_id: str, new_url: str,
-                         count_endpoint: str | None = None) -> str:
-    """Remplace le champ `endpoint:` du YAML. Ajoute `count_endpoint:` si fourni.
-    Fait un backup .bak avant modification."""
+                         count_endpoint: str | None = None,
+                         source_format: str | None = None) -> str:
+    """Remplace `endpoint:` + optionnel `count_endpoint:` + optionnel `format:` du YAML.
+    Backup .bak au 1er patch. format= csv|rest_json|jsonl|zip|parquet|geojson|xml — dirige codegen."""
     p = SPECS_DIR / f"{source_id}.yaml"
     if not p.exists():
         return f"ERR spec {source_id}.yaml introuvable"
@@ -42,44 +43,55 @@ async def patch_endpoint(source_id: str, new_url: str,
         return f"ERR invalid URL (doit commencer par http/https): {new_url!r}"
     try:
         original = p.read_text(encoding="utf-8")
-        # Backup .bak (pour restore manuel si besoin)
         bak = p.with_suffix(".yaml.bak")
         if not bak.exists():
             bak.write_text(original, encoding="utf-8")
-        # Remplacer ligne "endpoint: ..." (premier match)
-        new = re.sub(
-            r"(?m)^endpoint:\s*.*$",
-            f"endpoint: {new_url}",
-            original,
-            count=1,
-        )
+
+        new = re.sub(r"(?m)^endpoint:\s*.*$", f"endpoint: {new_url}", original, count=1)
         if new == original:
-            # Pas de ligne endpoint existante → on l'ajoute après la 1ère ligne
             new = new + f"\nendpoint: {new_url}\n"
 
-        # Ajouter/remplacer count_endpoint si fourni
         if count_endpoint:
             if re.search(r"(?m)^count_endpoint:\s*.*$", new):
-                new = re.sub(
-                    r"(?m)^count_endpoint:\s*.*$",
-                    f"count_endpoint: {count_endpoint}",
-                    new,
-                    count=1,
-                )
+                new = re.sub(r"(?m)^count_endpoint:\s*.*$",
+                             f"count_endpoint: {count_endpoint}", new, count=1)
             else:
                 new = new.rstrip() + f"\ncount_endpoint: {count_endpoint}\n"
 
-        # Validation YAML
+        if source_format:
+            if re.search(r"(?m)^format:\s*.*$", new):
+                new = re.sub(r"(?m)^format:\s*.*$",
+                             f"format: {source_format}", new, count=1)
+            else:
+                new = new.rstrip() + f"\nformat: {source_format}\n"
+
         try:
             yaml.safe_load(new)
         except Exception as e:
             return f"ERR invalid YAML after patch: {e}"
         p.write_text(new, encoding="utf-8")
-        return f"OK patched {p.name} : endpoint → {new_url}" + (
-            f" + count_endpoint → {count_endpoint}" if count_endpoint else ""
-        )
+        suffix = ""
+        if count_endpoint: suffix += f" + count_endpoint → {count_endpoint}"
+        if source_format:  suffix += f" + format → {source_format}"
+        return f"OK patched {p.name} : endpoint → {new_url}" + suffix
     except Exception as e:
         return f"ERR patch: {type(e).__name__}: {e}"
+
+
+async def regenerate_fetcher(source_id: str) -> str:
+    """Régénère le code Python du fetcher à partir du spec YAML (patché par patch_endpoint).
+    Nécessaire après patch_endpoint : sans régénération, le .py garde l'ancienne URL hardcodée."""
+    try:
+        from ingestion.codegen import generate_fetcher
+    except ImportError as e:
+        return f"ERR codegen indisponible: {e}"
+    try:
+        r = await generate_fetcher(source_id)
+        if r.get("file"):
+            return f"OK regen {source_id} → {r.get('bytes')} bytes ({r.get('file')})"
+        return f"ERR regen {source_id}: {r.get('error', 'no file produced')}"
+    except Exception as e:
+        return f"ERR regen crash: {type(e).__name__}: {e}"
 
 
 async def run_fetcher(source_id: str) -> str:
@@ -125,13 +137,14 @@ SPECSRW_TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "patch_endpoint",
-            "description": "Update the endpoint URL in a spec YAML. Optionally set count_endpoint for completeness tracking.",
+            "description": "Update spec YAML: endpoint URL + optional count_endpoint + source_format (csv|rest_json|jsonl|zip|parquet|geojson|xml). The format field drives which fetcher template codegen produces.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "source_id": {"type": "string"},
                     "new_url": {"type": "string"},
                     "count_endpoint": {"type": "string"},
+                    "source_format": {"type": "string", "description": "Data format, e.g. csv, rest_json, jsonl, zip, parquet, geojson"},
                 },
                 "required": ["source_id", "new_url"],
             },
@@ -140,8 +153,20 @@ SPECSRW_TOOLS_SCHEMA = [
     {
         "type": "function",
         "function": {
+            "name": "regenerate_fetcher",
+            "description": "REQUIRED after patch_endpoint. Regenerates the Python fetcher code from the updated spec YAML so it uses the new URL and proper parsing logic. Without this, the old fetcher .py still uses the hardcoded old URL.",
+            "parameters": {
+                "type": "object",
+                "properties": {"source_id": {"type": "string"}},
+                "required": ["source_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_fetcher",
-            "description": "Execute the fetcher of a source (after patching endpoint) to test if data loads.",
+            "description": "Execute the fetcher of a source to test if data loads. Call AFTER regenerate_fetcher.",
             "parameters": {
                 "type": "object",
                 "properties": {"source_id": {"type": "string"}},
@@ -154,5 +179,6 @@ SPECSRW_TOOLS_SCHEMA = [
 SPECSRW_DISPATCH = {
     "read_spec": read_spec,
     "patch_endpoint": patch_endpoint,
+    "regenerate_fetcher": regenerate_fetcher,
     "run_fetcher": run_fetcher,
 }

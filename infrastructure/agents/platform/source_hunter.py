@@ -24,7 +24,7 @@ import psycopg
 
 from config import settings
 from deepseek_client import DeepSeekClient
-from tools import data_gouv, specs_rw
+from tools import data_gouv, specs_rw, format_detect
 
 log = logging.getLogger("demoema.source_hunter")
 
@@ -48,16 +48,28 @@ async def hunt_source(source_id: str, max_steps: int = DEFAULT_MAX_STEPS) -> dic
     log.info("[hunter %s] source=%s", task_id, source_id)
 
     user_task = (
-        f"Trouve une URL fonctionnelle pour la source `{source_id}` via data.gouv.fr "
-        f"et patche son spec YAML. Procédure :\n"
-        f"1. read_spec({source_id!r}) — regarde le nom, description, endpoint actuel.\n"
-        f"2. dg_search avec des mots-clés tirés du nom (ex: 'SIRENE INSEE', 'DVF valeurs foncières').\n"
-        f"3. Pour le dataset le plus pertinent, dg_get(slug) — récupère la liste des resources.\n"
-        f"4. Identifie la resource API JSON/CSV la plus à jour (format=json préféré, sinon csv).\n"
-        f"5. dg_probe sur l'URL candidate — doit retourner status=200 ET idéalement total_count>0 si OpenDataSoft.\n"
-        f"6. patch_endpoint({source_id!r}, new_url=...). Ajoute count_endpoint si OpenDataSoft.\n"
-        f"7. run_fetcher({source_id!r}) — si rows>0, SUCCESS. Sinon, reviens à étape 2 avec d'autres keywords.\n"
-        f"Réponds avec JSON {{status: success|partial|failed, source_id, new_url, rows_loaded, reasoning}}."
+        f"Trouve une URL fonctionnelle pour la source `{source_id}` (tout format : "
+        f"REST JSON, CSV dump, ZIP, JSONL, Parquet, GeoJSON, XML). Procédure :\n\n"
+        f"1. `read_spec({source_id!r})` — nom, description, endpoint actuel.\n"
+        f"2. `dg_search` avec mots-clés pertinents (du champ name/description).\n"
+        f"3. `dg_get(slug)` sur le meilleur candidat → liste des resources avec format+url+filesize.\n"
+        f"4. Pour CHAQUE resource candidate (priorité : API > CSV > ZIP > Parquet) :\n"
+        f"   → `detect_format(url, metadata_format=<format de resource>)` "
+        f"→ le retour donne {{format, signal, size_bytes}}.\n"
+        f"   → `dg_probe(url)` pour vérifier qu'elle est accessible.\n"
+        f"5. Choisis la MEILLEURE resource (priorité : plus petite taille, plus récente).\n"
+        f"6. `patch_endpoint({source_id!r}, new_url=..., source_format=<format_détecté>)`. "
+        f"Si format=rest_json OpenDataSoft, mets aussi count_endpoint=même URL.\n"
+        f"7. `regenerate_fetcher({source_id!r})` — OBLIGATOIRE, régénère le .py avec le bon "
+        f"template selon format_détecté (CSV stream / ZIP-CSV / REST JSON / etc.).\n"
+        f"8. `run_fetcher({source_id!r})` — valide. Si rows=0, analyse puis retry étape 2 "
+        f"avec d'autres keywords OU accepte un autre format.\n\n"
+        f"Réponds TOUJOURS (même en cas d'échec) avec JSON strict :\n"
+        f"```json\n"
+        f"{{\"status\": \"success|partial|failed\", \"source_id\": \"{source_id}\", "
+        f"\"format\": \"csv|rest_json|...\", \"new_url\": \"...\", "
+        f"\"rows_loaded\": N, \"reasoning\": \"1 phrase\"}}\n"
+        f"```"
     )
 
     messages: list[dict[str, Any]] = [
@@ -65,8 +77,12 @@ async def hunt_source(source_id: str, max_steps: int = DEFAULT_MAX_STEPS) -> dic
         {"role": "user", "content": user_task},
     ]
 
-    all_tools = data_gouv.DATAGOUV_TOOLS_SCHEMA + specs_rw.SPECSRW_TOOLS_SCHEMA
-    all_dispatch = {**data_gouv.DATAGOUV_DISPATCH, **specs_rw.SPECSRW_DISPATCH}
+    all_tools = (data_gouv.DATAGOUV_TOOLS_SCHEMA
+                 + specs_rw.SPECSRW_TOOLS_SCHEMA
+                 + format_detect.DETECT_TOOLS_SCHEMA)
+    all_dispatch = {**data_gouv.DATAGOUV_DISPATCH,
+                    **specs_rw.SPECSRW_DISPATCH,
+                    **format_detect.DETECT_DISPATCH}
 
     transcript = []
     t0 = time.time()
@@ -115,6 +131,12 @@ async def hunt_source(source_id: str, max_steps: int = DEFAULT_MAX_STEPS) -> dic
                     observation = await fn(**args)
                 except Exception as e:
                     observation = f"ERR {fn_name}: {type(e).__name__}: {e}"
+            # Normaliser en str (certains tools retournent dict)
+            if not isinstance(observation, str):
+                try:
+                    observation = json.dumps(observation, ensure_ascii=False, default=str)
+                except Exception:
+                    observation = str(observation)
             if len(observation) > 4000:
                 observation = observation[:4000] + "...[truncated]"
             messages.append({

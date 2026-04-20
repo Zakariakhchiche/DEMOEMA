@@ -20,6 +20,8 @@ import httpx
 log = logging.getLogger("demoema.data_gouv")
 
 DG_BASE = "https://www.data.gouv.fr/api/1"
+ODS_BASE = "https://data.opendatasoft.com/api/explore/v2.1"       # Fédération ODS publique
+EUROPA_BASE = "https://data.europa.eu/api/hub/search"               # EU open data portal
 DEFAULT_TIMEOUT = 20
 MAX_RESULTS = 10
 
@@ -79,6 +81,65 @@ async def get_dataset(slug_or_id: str) -> str:
         f"homepage={data.get('page', '')}\n"
         f"resources ({len(resources)}) :\n" + "\n".join(res_lines)
     )
+
+
+async def ods_search(q: str, limit: int = 5) -> str:
+    """Search OpenDataSoft federated catalog (public.opendatasoft.com + instances partenaires).
+    Renvoie datasets hébergés sur Paris, Grand Paris, ADEME, SNCF, etc. — tous avec API REST fixe."""
+    async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as c:
+        try:
+            # L'endpoint fédéré ODS : /catalog/datasets
+            r = await c.get(
+                f"{ODS_BASE}/catalog/datasets",
+                params={"where": f'search("{q}")', "limit": limit, "select": "dataset_id,publisher,title,metas.default.publisher"},
+            )
+            if r.status_code != 200:
+                return f"ERR ods_search: HTTP {r.status_code}"
+            data = r.json()
+            items = data.get("results") or []
+            if not items:
+                return f"(aucun résultat ODS pour q={q!r})"
+            lines = [f"FOUND {len(items)} ODS datasets for q={q!r}:"]
+            for d in items:
+                did = d.get("dataset_id")
+                pub = (d.get("metas") or {}).get("default", {}).get("publisher") or "?"
+                title = d.get("title") or "?"
+                lines.append(f"- dataset_id={did!r} title={title!r} publisher={pub!r}")
+                # URL records standard ODS v2.1
+                lines.append(f"  records_url=https://data.opendatasoft.com/api/explore/v2.1/catalog/datasets/{did}/records")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"ERR ods_search: {type(e).__name__}: {e}"
+
+
+async def europa_search(q: str, limit: int = 5) -> str:
+    """Search EU Open Data Portal (data.europa.eu). Datasets Eurostat, Commission, agencies UE."""
+    async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as c:
+        try:
+            r = await c.post(
+                f"{EUROPA_BASE}/datasets",
+                json={"q": q, "limit": limit, "facets": []},
+                headers={"Content-Type": "application/json"},
+            )
+            if r.status_code != 200:
+                return f"ERR europa_search: HTTP {r.status_code}"
+            data = r.json()
+            items = (data.get("result") or {}).get("results") or []
+            if not items:
+                return f"(aucun résultat EU pour q={q!r})"
+            lines = [f"FOUND {len(items)} EU datasets for q={q!r}:"]
+            for d in items[:limit]:
+                title = (d.get("title") or {}).get("en") or (d.get("title") or {}).get("fr") or "?"
+                distros = [
+                    f"fmt={(dist.get('format') or {}).get('resource','?')} url={dist.get('access_url',[''])[0] if isinstance(dist.get('access_url'), list) else dist.get('access_url','')}"
+                    for dist in (d.get("distributions") or [])[:3]
+                ]
+                lines.append(f"- title={title!r}")
+                for dist in distros:
+                    lines.append(f"  {dist}")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"ERR europa_search: {type(e).__name__}: {e}"
 
 
 async def probe_url(url: str) -> str:
@@ -163,8 +224,37 @@ DATAGOUV_TOOLS_SCHEMA = [
     },
 ]
 
+DATAGOUV_TOOLS_SCHEMA.extend([
+    {
+        "type": "function",
+        "function": {
+            "name": "ods_search",
+            "description": "Search OpenDataSoft federated catalog (public.opendatasoft.com + Paris, ADEME, SNCF, etc). Returns dataset_id with stable records_url REST API.",
+            "parameters": {
+                "type": "object",
+                "properties": {"q": {"type": "string"}, "limit": {"type": "integer", "default": 5}},
+                "required": ["q"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "europa_search",
+            "description": "Search EU Open Data Portal (data.europa.eu). Good for Eurostat, EU Commission, EEA, agencies UE.",
+            "parameters": {
+                "type": "object",
+                "properties": {"q": {"type": "string"}, "limit": {"type": "integer", "default": 5}},
+                "required": ["q"],
+            },
+        },
+    },
+])
+
 DATAGOUV_DISPATCH = {
     "dg_search": search_datasets,
     "dg_get": get_dataset,
     "dg_probe": probe_url,
+    "ods_search": ods_search,
+    "europa_search": europa_search,
 }

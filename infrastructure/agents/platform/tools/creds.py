@@ -40,7 +40,9 @@ from cryptography.fernet import Fernet
 
 log = logging.getLogger("demoema.creds")
 
-VAULT_DIR = Path("/root/DEMOEMA-agents/.secrets")
+# Path DANS le container, mappé sur host via volume docker-compose (./secrets:/app/.secrets).
+# Le volume garantit que les credentials survivent aux rebuilds.
+VAULT_DIR = Path(os.environ.get("OPENCLAW_VAULT_DIR", "/app/.secrets"))
 VAULT_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
 STORE_PATH = VAULT_DIR / "credentials.enc"
 KEY_PATH = VAULT_DIR / "vault.key"

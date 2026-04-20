@@ -5,8 +5,8 @@ couche: Identification
 name: INSEE SIRENE V3 API — deltas quotidiens
 description: 'Source #2 ARCHITECTURE_DATA_V2. Bronze ingestion raw — traité ensuite
   par silver/gold/mart.'
-endpoint: https://api.insee.fr/entreprises/sirene/V3.11/siret
-auth: oauth2_client_credentials
+endpoint: https://ccphva.opendatasoft.com/api/explore/v2.1/catalog/datasets/sirene-v3-consolidee-france/records
+auth: none
 pattern: rest_oauth2_client_credentials
 refresh_trigger: interval_hours=24
 sla_minutes: 1500
@@ -39,3 +39,8 @@ bronze_fields:
   primary_key: false
 conflict_strategy: ON CONFLICT (siret) DO UPDATE SET payload = EXCLUDED.payload, ingested_at
   = now()
+format: rest_json
+table: bronze.insee_sirene_siret_raw
+
+template_vars:
+  key_field: siret

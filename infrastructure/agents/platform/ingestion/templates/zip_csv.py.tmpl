@@ -1,0 +1,132 @@
+"""{title} — fetcher auto-généré (template zip_csv).
+
+Source : {source_id}
+URL ZIP : {endpoint}
+Licence : {license}
+Télécharge un ZIP contenant des CSV et les streame dans bronze.
+Auto-généré par codegen template-first.
+"""
+from __future__ import annotations
+
+import csv
+import hashlib
+import io
+import json
+import logging
+import zipfile
+from datetime import datetime, timezone
+
+import httpx
+import psycopg
+from psycopg.types.json import Jsonb
+
+from config import settings
+
+log = logging.getLogger(__name__)
+
+ENDPOINT = "{endpoint}"
+BATCH_SIZE = {batch_size}
+MAX_MEMBERS = {max_members}
+MAX_ROWS = {max_rows}
+
+
+async def fetch_{source_id}_delta() -> dict:
+    """Download ZIP + itère CSV members + batch INSERT."""
+    if not settings.database_url:
+        return {{"source": "{source_id}", "rows": 0, "error": "no DB"}}
+
+    total_inserted = 0
+    total_processed = 0
+    errors = 0
+    members_done = 0
+
+    async with httpx.AsyncClient(timeout=3600, follow_redirects=True,
+                                  headers={{"User-Agent": "DEMOEMA-Agents/0.1"}}) as client:
+        r = await client.get(ENDPOINT)
+        if r.status_code != 200:
+            return {{"source": "{source_id}", "rows": 0, "error": f"HTTP {{r.status_code}}"}}
+        zip_bytes = r.content
+
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    except zipfile.BadZipFile as e:
+        return {{"source": "{source_id}", "rows": 0, "error": f"BadZip: {{e}}"}}
+
+    csv_members = [n for n in zf.namelist() if n.lower().endswith((".csv", ".txt"))][:MAX_MEMBERS]
+    log.info("{source_id} : %d CSV members to process", len(csv_members))
+
+    async with await psycopg.AsyncConnection.connect(settings.database_url) as conn:
+        async with conn.cursor() as cur:
+            for member in csv_members:
+                if total_processed >= MAX_ROWS:
+                    break
+                try:
+                    with zf.open(member) as fh:
+                        raw = fh.read()
+                        try:
+                            text = raw.decode("utf-8")
+                        except UnicodeDecodeError:
+                            text = raw.decode("latin-1", errors="replace")
+                        sample = text[:4096]
+                        try:
+                            delim = csv.Sniffer().sniff(sample, delimiters=",;|\t").delimiter
+                        except Exception:
+                            delim = ","
+                        reader = csv.DictReader(io.StringIO(text), delimiter=delim)
+                        batch = []
+                        for row in reader:
+                            total_processed += 1
+                            if total_processed >= MAX_ROWS:
+                                break
+                            # Cascade clé : key_field → id → 1re col → SHA1 payload
+                            key_val = (row.get("{key_field}") or row.get("id")
+                                       or next((v for v in row.values() if v and str(v).strip()), None))
+                            if not key_val:
+                                key_val = hashlib.sha1(
+                                    json.dumps(row, sort_keys=True, default=str).encode()
+                                ).hexdigest()[:32]
+                            key_str = str(key_val)[:128]
+                            batch.append((key_str, Jsonb(row), datetime.now(tz=timezone.utc)))
+                            if len(batch) >= BATCH_SIZE:
+                                try:
+                                    await cur.executemany(
+                                        """
+                                        INSERT INTO {table} ({key_field}, payload, ingested_at)
+                                        VALUES (%s, %s, %s)
+                                        ON CONFLICT ({key_field}) DO NOTHING
+                                        """,
+                                        batch,
+                                    )
+                                    total_inserted += cur.rowcount or 0
+                                    await conn.commit()
+                                except Exception as e:
+                                    log.warning("batch fail %s: %s", member, e)
+                                    errors += len(batch)
+                                batch.clear()
+                        if batch:
+                            try:
+                                await cur.executemany(
+                                    """
+                                    INSERT INTO {table} ({key_field}, payload, ingested_at)
+                                    VALUES (%s, %s, %s)
+                                    ON CONFLICT ({key_field}) DO NOTHING
+                                    """,
+                                    batch,
+                                )
+                                total_inserted += cur.rowcount or 0
+                                await conn.commit()
+                            except Exception as e:
+                                errors += len(batch)
+                    members_done += 1
+                except Exception as e:
+                    log.warning("member %s fail: %s", member, e)
+                    errors += 1
+
+    return {{
+        "source": "{source_id}",
+        "rows": total_inserted,
+        "fetched": total_processed,
+        "errors": errors,
+        "members_done": members_done,
+        "mode": "zip_of_csv",
+    }}

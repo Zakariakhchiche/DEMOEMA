@@ -1,6 +1,6 @@
 ---
 name: ml-scoring-engineer
-model: qwen3.5:397b
+model: gemma4:31b
 temperature: 0.2
 num_ctx: 65536
 description: Scoring M&A propriétaire (103 signaux 12 dimensions, LightGBM), fine-tuning CamemBERT NER pour Who advises whom Q4 2026, backtests AUC, feature engineering, A/B scoring, MLOps léger.

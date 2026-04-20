@@ -30,6 +30,8 @@ MAX_TEXT_OBS = 4000  # tronquer les textes renvoyés au LLM
 
 
 async def _ensure_browser():
+    """Initialise Chromium headless avec patches stealth (bypass bot-detection simple).
+    Masque navigator.webdriver, WebGL vendor, plugins fake, etc."""
     global _browser, _context, _page
     if _page is not None:
         return
@@ -37,15 +39,79 @@ async def _ensure_browser():
     pw = await async_playwright().start()
     _browser = await pw.chromium.launch(
         headless=True,
-        args=["--no-sandbox", "--disable-dev-shm-usage"],
+        args=[
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-blink-features=AutomationControlled",
+            "--disable-features=IsolateOrigins,site-per-process",
+            "--disable-web-security",
+        ],
     )
     _context = await _browser.new_context(
         user_agent=("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                     "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"),
         viewport={"width": 1280, "height": 800},
         locale="fr-FR",
+        timezone_id="Europe/Paris",
+        extra_http_headers={
+            "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+            "Sec-Ch-Ua": '"Chromium";v="130", "Google Chrome";v="130"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Linux"',
+        },
     )
     _page = await _context.new_page()
+
+    # Stealth patches manuels (survit si tf-playwright-stealth indispo)
+    await _page.add_init_script("""
+        // Masquer navigator.webdriver
+        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+
+        // Plugins fake list
+        Object.defineProperty(navigator, 'plugins', {
+            get: () => [
+                {name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer'},
+                {name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai'},
+                {name: 'Native Client', filename: 'internal-nacl-plugin'},
+            ],
+        });
+
+        // Languages
+        Object.defineProperty(navigator, 'languages', {get: () => ['fr-FR', 'fr', 'en']});
+
+        // chrome.runtime existant
+        window.chrome = {runtime: {}, loadTimes: function() {}, csi: function() {}};
+
+        // Permissions query (Notification)
+        const origQuery = window.navigator.permissions && window.navigator.permissions.query;
+        if (origQuery) {
+            window.navigator.permissions.query = (params) => (
+                params.name === 'notifications'
+                    ? Promise.resolve({state: Notification.permission})
+                    : origQuery(params)
+            );
+        }
+
+        // WebGL vendor spoofing
+        try {
+            const getParameter = WebGLRenderingContext.prototype.getParameter;
+            WebGLRenderingContext.prototype.getParameter = function(p) {
+                if (p === 37445) return 'Intel Inc.';
+                if (p === 37446) return 'Intel Iris OpenGL Engine';
+                return getParameter.apply(this, arguments);
+            };
+        } catch(e){}
+    """)
+
+    # tf-playwright-stealth fait aussi le travail si dispo (complémentaire)
+    try:
+        from playwright_stealth import stealth_async
+        await stealth_async(_page)
+        log.info("tf-playwright-stealth appliqué sur la page")
+    except ImportError:
+        log.debug("tf-playwright-stealth non installé — patches manuels seulement")
+    except Exception as e:
+        log.warning("stealth_async failed: %s", e)
 
 
 async def close_browser() -> None:

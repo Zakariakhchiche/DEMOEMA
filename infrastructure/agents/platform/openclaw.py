@@ -26,6 +26,7 @@ from config import settings
 from deepseek_client import DeepSeekClient
 from tools import browser
 from tools import mailbox
+from tools import captcha
 import tools.creds as creds_store
 
 log = logging.getLogger("demoema.openclaw")
@@ -60,9 +61,13 @@ async def run_openclaw(task: str, source_id: str | None = None,
     transcript: list[dict[str, Any]] = []
     t0 = time.time()
 
-    # Tool registry fusionnée : browser + mailbox
-    all_tools = browser.TOOLS_SCHEMA + mailbox.MAILBOX_TOOLS_SCHEMA
-    all_dispatch = {**browser.TOOLS_DISPATCH, **mailbox.MAILBOX_DISPATCH}
+    # Tool registry fusionnée : browser + mailbox + captcha
+    all_tools = (browser.TOOLS_SCHEMA
+                 + mailbox.MAILBOX_TOOLS_SCHEMA
+                 + captcha.CAPTCHA_TOOLS_SCHEMA)
+    all_dispatch = {**browser.TOOLS_DISPATCH,
+                    **mailbox.MAILBOX_DISPATCH,
+                    **captcha.CAPTCHA_DISPATCH}
 
     for step in range(1, max_steps + 1):
         try:

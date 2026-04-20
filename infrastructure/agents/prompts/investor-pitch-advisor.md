@@ -1,6 +1,6 @@
 ---
 name: investor-pitch-advisor
-model: qwen3.5:397b
+model: gemma4:31b
 temperature: 0.3
 num_ctx: 65536
 description: Pitch deck 15 slides pré-amorçage 600k€, data room, 10 Q&A VC, benchmarks valorisation, cap table, sourcing BA + VC seed FR (Frst/Kima/Elaia/Newfund/Educapital/Ovni).

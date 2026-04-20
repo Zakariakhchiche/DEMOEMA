@@ -1,6 +1,6 @@
 ---
 name: devops-sre
-model: qwen3-coder-next
+model: gemma4:31b
 temperature: 0.1
 num_ctx: 16384
 description: VPS IONOS ops, Docker Compose, Caddy, Supabase self-hosted, backups, monitoring, sécurité, CI/CD, incident response.
