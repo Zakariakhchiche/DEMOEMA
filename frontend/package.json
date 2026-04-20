@@ -7,30 +7,22 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run",
-    "cf:build": "opennextjs-cloudflare build",
-    "cf:preview": "opennextjs-cloudflare preview",
-    "cf:deploy": "opennextjs-cloudflare deploy"
+    "test": "vitest run"
   },
   "dependencies": {
-    "@antv/g6": "^5.1.0",
     "@hello-pangea/dnd": "^18.0.1",
-    "@tanstack/query-sync-storage-persister": "^5.99.0",
-    "@tanstack/react-query": "^5.99.0",
-    "@tanstack/react-query-persist-client": "^5.99.0",
-    "@tanstack/react-virtual": "^3.13.23",
+    "d3-force": "^3.0.0",
     "framer-motion": "^12.37.0",
+    "lottie-react": "^2.4.0",
     "lucide-react": "^0.577.0",
     "next": "^15.2.3",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "react-force-graph-2d": "^1.29.1",
+    "react-simple-maps": "^3.0.0",
+    "recharts": "^3.8.1"
   },
   "devDependencies": {
-    "@opennextjs/cloudflare": "^1.0.0",
-    "wrangler": "^4.0.0",
-    "@serwist/next": "^9.5.7",
-    "@serwist/precaching": "^9.5.7",
-    "@serwist/sw": "^9.5.7",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

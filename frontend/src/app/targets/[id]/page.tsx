@@ -10,9 +10,11 @@ import {
   ExternalLink, Building2, Calendar, Hash, User, Newspaper, ScrollText
 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
 import { Target as TargetType } from "@/types";
-import { useTarget } from "@/lib/queries/useTarget";
+import ScoreRadar from "@/components/ScoreRadar";
+import EventTimeline from "@/components/EventTimeline";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
 const DIMENSION_FR: Record<string, string> = {
   signaux_patrimoniaux: "Patrimoniaux",
@@ -52,28 +54,15 @@ export default function TargetDetail() {
     setMounted(true);
   }, []);
 
-  const { data: targetData, isLoading: loading, error } = useTarget(id);
-  const siren = targetData?.siren;
-
-  const { data: newsData, isLoading: newsLoading } = useQuery({
-    queryKey: ["news", siren],
-    queryFn: () => fetch(`/api/news/${siren}`).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
-    enabled: !!siren,
-    staleTime: 10 * 60 * 1000,
-  });
-
-  const { data: actesData, isLoading: actesLoading } = useQuery({
-    queryKey: ["actes", siren],
-    queryFn: () => fetch(`/api/infogreffe/${siren}`).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
-    enabled: !!siren,
-    staleTime: 10 * 60 * 1000,
-  });
-
-  const news: any[] = newsData?.data?.articles ?? [];
-  const actes: any[] = actesData?.data?.actes ?? [];
-
+  const [targetData, setTargetData] = useState<TargetType | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [processingAction, setProcessingAction] = useState<string | null>(null);
   const [notification, setNotification] = useState<{message: string, type: 'success' | 'info'} | null>(null);
+  const [news, setNews] = useState<{title:string; link:string; date:string; source:string; signals:string[]}[]>([]);
+  const [newsLoading, setNewsLoading] = useState(false);
+  const [actes, setActes] = useState<{type:string; date:string; description:string}[]>([]);
+  const [actesLoading, setActesLoading] = useState(false);
 
   useEffect(() => {
     if (notification) {
@@ -90,6 +79,40 @@ export default function TargetDetail() {
     }, 1500);
   };
 
+  useEffect(() => {
+    if (!id) return;
+
+    setLoading(true);
+    fetch(`/api/targets/${id}`)
+      .then(res => {
+        if (!res.ok) throw new Error();
+        return res.json();
+      })
+      .then(json => {
+        setTargetData(json.data);
+        setLoading(false);
+        // Fetch external enrichments after main data loads
+        const siren = json.data?.siren;
+        if (siren) {
+          setNewsLoading(true);
+          fetch(`/api/news/${siren}`)
+            .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+            .then(d => { setNews(d.data?.articles || []); setNewsLoading(false); })
+            .catch(() => setNewsLoading(false));
+          setActesLoading(true);
+          fetch(`/api/infogreffe/${siren}`)
+            .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+            .then(d => { setActes(d.data?.actes || []); setActesLoading(false); })
+            .catch(() => setActesLoading(false));
+        }
+      })
+      .catch(err => {
+        console.error(err);
+        setError(true);
+        setLoading(false);
+      });
+  }, [id]);
+
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-white">
@@ -102,7 +125,7 @@ export default function TargetDetail() {
     );
   }
 
-  if (!!error || !targetData) {
+  if (error || !targetData) {
       return (
         <div className="flex flex-col items-center justify-center min-h-[60vh] text-white">
           <div className="w-20 h-20 rounded-[2rem] bg-rose-500/10 border border-rose-500/20 flex items-center justify-center mb-6 shadow-2xl">
@@ -198,7 +221,7 @@ export default function TargetDetail() {
         {/* Left Column - Origination Card */}
         <div className="lg:col-span-4 flex flex-col gap-5 sm:gap-6 lg:gap-8">
           {/* Score + Financials Card */}
-          <div className="p-6 sm:p-10 rounded-[2rem] sm:rounded-[3rem] bg-black/40 border border-indigo-500/20 relative overflow-hidden group shadow-2xl lg:backdrop-blur-3xl">
+          <div className="p-5 sm:p-7 lg:p-10 rounded-2xl sm:rounded-[2rem] lg:rounded-[3rem] bg-black/40 border border-indigo-500/20 relative overflow-hidden group shadow-2xl backdrop-blur-3xl">
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-600/10 via-transparent to-transparent opacity-50" />
 
             <div className="relative z-10">
@@ -303,8 +326,21 @@ export default function TargetDetail() {
             </div>
           </div>
 
+          {/* Score Radar */}
+          <ScoreRadar
+            globalScore={targetData.globalScore ?? 0}
+            scores={{
+              effectif: Math.min(100, ((targetData.scoring_details as Record<string,{score?:number}>)?.effectif?.score ?? 0) * 5),
+              anciennete: Math.min(100, ((targetData.scoring_details as Record<string,{score?:number}>)?.anciennete?.score ?? 0) * 5),
+              secteur: targetData.sector ? 70 : 20,
+              bodacc: targetData.bodacc_recent ? 90 : 10,
+              gouvernance: Math.min(100, ((targetData.scoring_details as Record<string,{score?:number}>)?.gouvernance?.score ?? 0) * 5),
+              financier: Math.min(100, ((targetData.scoring_details as Record<string,{score?:number}>)?.financier?.score ?? 0) * 5),
+            }}
+          />
+
           {/* Company Identity */}
-          <div className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl lg:backdrop-blur-xl">
+          <div className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl backdrop-blur-xl">
             <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] flex items-center gap-2 mb-8">
               <Building2 size={16} className="text-indigo-400" /> Identite Societe
             </h3>
@@ -331,7 +367,7 @@ export default function TargetDetail() {
 
           {/* Dirigeants Section */}
           {targetData.dirigeants && targetData.dirigeants.length > 0 && (
-            <div className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl lg:backdrop-blur-xl">
+            <div className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl backdrop-blur-xl">
               <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] flex items-center gap-2 mb-8">
                 <Users size={16} className="text-indigo-400" /> Dirigeants
               </h3>
@@ -378,7 +414,7 @@ export default function TargetDetail() {
 
           {/* Group Section */}
           {targetData.group?.is_group && (
-            <div className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl lg:backdrop-blur-xl">
+            <div className="p-8 rounded-[2.5rem] bg-black/40 border border-white/10 shadow-2xl backdrop-blur-xl">
               <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] flex items-center gap-2 mb-8">
                 <Network size={16} className="text-indigo-400" /> Structure du Groupe
               </h3>
@@ -516,9 +552,9 @@ export default function TargetDetail() {
            </div>
 
            {/* Google News Section */}
-           <section className="p-6 sm:p-10 rounded-[2rem] sm:rounded-[3rem] bg-white/[0.02] border border-white/10 space-y-6">
-              <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-500 flex items-center gap-4">
-                 <span className="w-10 h-px bg-white/10" />
+           <section className="p-5 sm:p-7 lg:p-10 rounded-2xl sm:rounded-[2rem] lg:rounded-[3rem] bg-white/[0.02] border border-white/10 space-y-4 sm:space-y-6">
+              <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-500 flex items-center gap-3 sm:gap-4">
+                 <span className="hidden sm:block w-10 h-px bg-white/10" />
                  <Newspaper size={16} className="text-indigo-400" /> Veille Presse
               </h2>
               {newsLoading ? (
@@ -544,7 +580,7 @@ export default function TargetDetail() {
                         <div className="flex items-center gap-3 mt-2 flex-wrap">
                           <span className="text-[9px] font-black text-gray-600 uppercase tracking-widest">{article.source}</span>
                           <span className="text-[9px] text-gray-700">{article.date?.split(',')[0]}</span>
-                          {article.signals?.map((sig: string) => (
+                          {article.signals?.map(sig => (
                             <span key={sig} className="px-2 py-0.5 rounded-md bg-rose-500/10 border border-rose-500/20 text-[8px] font-black text-rose-400 uppercase tracking-widest">
                               Signal M&A
                             </span>
@@ -557,38 +593,17 @@ export default function TargetDetail() {
               )}
            </section>
 
-           {/* Infogreffe Actes Section */}
-           <section className="p-6 sm:p-10 rounded-[2rem] sm:rounded-[3rem] bg-white/[0.02] border border-white/10 space-y-6">
-              <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-500 flex items-center gap-4">
-                 <span className="w-10 h-px bg-white/10" />
-                 <ScrollText size={16} className="text-amber-400" /> Actes RCS — Infogreffe
-              </h2>
-              {actesLoading ? (
-                <div className="flex items-center gap-3 text-gray-600 text-[10px] font-black uppercase tracking-widest">
-                  <div className="w-4 h-4 border-2 border-gray-700 border-t-amber-500 rounded-full animate-spin" />
-                  Chargement actes...
-                </div>
-              ) : actes.length === 0 ? (
-                <p className="text-gray-600 text-xs font-medium">Aucun acte récent disponible en open data pour cette société.</p>
-              ) : (
-                <div className="space-y-3">
-                  {actes.map((acte, i) => (
-                    <div key={i} className="flex items-start gap-4 p-4 rounded-2xl bg-white/[0.03] border border-white/5 hover:border-amber-500/20 transition-all">
-                      <div className="w-2 h-2 rounded-full bg-amber-500 shrink-0 mt-2" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-black text-gray-200 uppercase tracking-tight">{acte.type}</p>
-                        {acte.description && (
-                          <p className="text-xs text-gray-500 mt-1 leading-snug line-clamp-2">{acte.description}</p>
-                        )}
-                        {acte.date && (
-                          <span className="text-[9px] font-black text-amber-500/60 uppercase tracking-widest mt-2 block">{acte.date}</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-           </section>
+           {/* Timeline événements */}
+           <EventTimeline
+             loading={actesLoading}
+             events={actes.map((a, i) => ({
+               id: String(i),
+               date: a.date || "",
+               type: (["VENTE","PROCOL","DEPOT","CREATION","MODIFICATION"].includes(a.type) ? a.type : "DEPOT") as "VENTE"|"PROCOL"|"DEPOT"|"CREATION"|"MODIFICATION",
+               title: a.type,
+               description: a.description,
+             }))}
+           />
 
            {/* Bottom Bar */}
            <div className="mt-6 sm:mt-8 lg:mt-10 pt-6 sm:pt-8 lg:pt-10 border-t border-white/5 flex flex-col sm:flex-row justify-between items-center gap-5 sm:gap-8">

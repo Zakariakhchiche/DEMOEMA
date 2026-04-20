@@ -695,7 +695,7 @@ async def search_pappers_endpoint(q: str = Query(...)):
         companies = []
         # Enrich each result in background — add to enriched_targets
         add_tasks = []
-        for r in pappers_data["resultats"][:10]:
+        for r in pappers_data["resultats"][:50]:
             siren = r.get("siren", "")
             company = {
                 "siren": siren,
@@ -1568,11 +1568,31 @@ async def copilot_stream_endpoint(q: str = Query(...)):
         global enriched_targets, raw_targets
         targets_updated = False
 
+        # ── Handler "top N" direct — sans passer par l'IA ──────────────
+        top_n_match = re.search(r'\btop\s*(\d+)\b', q.lower())
+        if top_n_match:
+            n = min(int(top_n_match.group(1)), 100)
+            sorted_t = sorted(enriched_targets, key=lambda x: x.get("globalScore", 0), reverse=True)[:n]
+            if sorted_t:
+                lines = [f"**Top {n} cibles EdRCF par score M&A :**\n"]
+                for i, t in enumerate(sorted_t, 1):
+                    score = t.get("globalScore", 0)
+                    sector = t.get("sector", "?")
+                    city = t.get("city", "?")
+                    priority = t.get("priorityLevel", "?")
+                    lines.append(f"{i}. **{t['name']}** — Score {score} | {sector} | {city} | *{priority}*")
+                text = "\n".join(lines)
+                for i in range(0, len(text), 60):
+                    yield f"data: {json.dumps({'chunk': text[i:i+60]})}\n\n"
+                yield f"data: {json.dumps({'done': True, 'source': 'rule-based', 'targets_updated': False})}\n\n"
+                return
+
+        # ── Contexte étendu top 20 pour l'IA ─────────────────────────
         context_lines = [
             f"- {t['name']} ({t['sector']}, {t.get('city','?')}): Score {t['globalScore']}, {t['priorityLevel']}"
-            for t in enriched_targets[:5]
+            for t in sorted(enriched_targets, key=lambda x: x.get("globalScore", 0), reverse=True)[:20]
         ]
-        context = f"Cibles EdRCF ({len(enriched_targets)} total):\n" + "\n".join(context_lines)
+        context = f"Cibles EdRCF ({len(enriched_targets)} total, top 20 par score):\n" + "\n".join(context_lines)
 
         # SIREN direct lookup
         siren_match = re.search(r'\b(\d{9})\b', q)
@@ -1650,14 +1670,26 @@ async def copilot_stream_endpoint(q: str = Query(...)):
 async def copilot_query(q: str = Query(...)):
     global enriched_targets, raw_targets
 
-    # Build compact context from local targets (top 5 only to save tokens)
+    # Build compact context from local targets (top 20 by score)
+    top_targets = sorted(enriched_targets, key=lambda x: x.get("globalScore", 0), reverse=True)[:20]
     context_lines = []
-    for t in enriched_targets[:5]:
+    for t in top_targets:
         context_lines.append(
-            f"- {t['name']} ({t['sector']}, {t['city']}): Score {t['globalScore']}, "
-            f"{t['priorityLevel']}, {t['analysis']['type']}, {t['analysis']['window']}"
+            f"- {t['name']} ({t['sector']}, {t.get('city','?')}): Score {t['globalScore']}, "
+            f"{t['priorityLevel']}, {t.get('analysis',{}).get('type','?')}, {t.get('analysis',{}).get('window','?')}"
         )
-    context = f"Cibles EdRCF ({len(enriched_targets)} total, top 5):\n" + "\n".join(context_lines)
+    context = f"Cibles EdRCF ({len(enriched_targets)} total, top 20 par score):\n" + "\n".join(context_lines)
+
+    # Handler "top N" direct — bypass IA
+    top_n_match = re.search(r'\btop\s*(\d+)\b', q.lower())
+    if top_n_match:
+        n = min(int(top_n_match.group(1)), 100)
+        sorted_t = sorted(enriched_targets, key=lambda x: x.get("globalScore", 0), reverse=True)[:n]
+        if sorted_t:
+            lines_out = [f"**Top {n} cibles EdRCF par score M&A :**\n"]
+            for i, t in enumerate(sorted_t, 1):
+                lines_out.append(f"{i}. **{t['name']}** — Score {t['globalScore']} | {t.get('sector','?')} | {t.get('city','?')} | *{t.get('priorityLevel','?')}*")
+            return {"response": "\n".join(lines_out), "source": "rule-based", "targets_updated": False}
 
     # --- Detect if user wants Pappers data and enrich context ---
     ql = q.lower()

@@ -77,6 +77,43 @@ async def load_bronze(
 
 
 # =============================================================================
+# Gold (M&A scoring + KPIs)
+# =============================================================================
+
+@router.get("/build-gold")
+async def build_gold_endpoint(
+    background_tasks: BackgroundTasks,
+    secret: str = Query(default=""),
+):
+    """Construit la couche Gold depuis Silver (M&A scoring + enrichissement + KPIs)."""
+    _check_secret(secret)
+
+    async def _run():
+        import bronze_pipeline as bp
+        bp._PIPELINE_STATUS.update({
+            "running": True, "step": "gold_build", "error": None,
+            "started_at": datetime.utcnow().isoformat(), "finished_at": None,
+        })
+        try:
+            await asyncio.to_thread(bp.build_gold)
+            bp._PIPELINE_STATUS["step"] = "sync_supabase"
+            await bp.sync_silver_to_supabase(top_n=5000, priority="score")
+            bp._PIPELINE_STATUS.update({
+                "running": False, "step": "done",
+                "finished_at": datetime.utcnow().isoformat(),
+            })
+        except Exception as e:
+            bp._PIPELINE_STATUS.update({
+                "running": False, "step": "error",
+                "error": str(e), "finished_at": datetime.utcnow().isoformat(),
+            })
+            print(f"[ADMIN] Erreur build-gold: {e}")
+
+    background_tasks.add_task(_run)
+    return {"status": "started", "message": "Gold build lancé (~5-15 min). Voir /api/admin/bronze-stats"}
+
+
+# =============================================================================
 # BODACC
 # =============================================================================
 
@@ -286,8 +323,12 @@ async def run_all(
                 bp._PIPELINE_STATUS["step"] = "silver_build"
                 print("[ADMIN] run-all étape 3 — silver build…")
                 await asyncio.to_thread(bp.build_silver)
+
+                bp._PIPELINE_STATUS["step"] = "gold_build"
+                print("[ADMIN] run-all étape 3b — gold build (M&A scoring)…")
+                await asyncio.to_thread(bp.build_gold)
             else:
-                print("[ADMIN] run-all — bronze/silver skippés (skip_bronze=true)")
+                print("[ADMIN] run-all — bronze/silver/gold skippés (skip_bronze=true)")
 
             bp._PIPELINE_STATUS["step"] = "bodacc_load"
             print(f"[ADMIN] run-all étape 4 — BODACC DILA (since={since_bodacc})…")
