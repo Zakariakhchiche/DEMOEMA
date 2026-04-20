@@ -8,7 +8,7 @@ from .docs import read_docs, search_codebase
 from .postgres import postgres_query_ro
 from .atlassian import atlassian_api
 from .slack import slack_notify
-from .http import httpx_get
+from .http import httpx_get, test_endpoint
 
 ToolFunc = Callable[..., Any]
 
@@ -80,6 +80,25 @@ REGISTRY: dict[str, dict[str, Any]] = {
                     "type": "object",
                     "properties": {
                         "url": {"type": "string"},
+                    },
+                    "required": ["url"],
+                },
+            },
+        },
+    },
+    "test_endpoint": {
+        "func": test_endpoint,
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "test_endpoint",
+                "description": "VALIDE un endpoint API avant d'écrire le fetcher. Retourne works/status/content_type/sample_record_keys. **APPELLE CE TOOL AVANT DE GÉNÉRER DU CODE** pour vérifier que l'URL existe et connaître le format de réponse.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string", "description": "URL complète à tester"},
+                        "method": {"type": "string", "enum": ["GET", "HEAD", "POST"], "default": "GET"},
+                        "params": {"type": "object", "description": "Query params optionnels", "default": {}},
                     },
                     "required": ["url"],
                 },

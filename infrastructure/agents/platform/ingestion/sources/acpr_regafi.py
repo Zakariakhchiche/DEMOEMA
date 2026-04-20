@@ -21,8 +21,8 @@ log = logging.getLogger(__name__)
 
 ACPR_ENDPOINT = "https://www.regafi.fr/api/v1/institutions"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 20
-BACKFILL_DAYS_FIRST_RUN = 365  # Full backfill 1 an pour couvrir historique complet
+MAX_PAGES_PER_RUN = 1000
+BACKFILL_DAYS_FIRST_RUN = 3650  # Full backfill 1 an pour couvrir historique complet
 INCREMENTAL_HOURS = 168  # 1 semaine (7×24h) entre runs, conforme à refresh_trigger=168h
 
 

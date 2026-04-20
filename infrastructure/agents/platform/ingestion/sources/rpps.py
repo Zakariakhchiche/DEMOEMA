@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 
 RPPS_ENDPOINT = "https://annuaire.sante.fr/api/v1/professionnels"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 100  # ~10k professionnels par run — couvre 700k en <70 runs
-BACKFILL_DAYS_FIRST_RUN = 365
+MAX_PAGES_PER_RUN = 1000  # ~10k professionnels par run — couvre 700k en <70 runs
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 720  # 30 jours (spec: refresh_trigger=720h)
 
 

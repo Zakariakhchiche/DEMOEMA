@@ -20,9 +20,9 @@ log = logging.getLogger(__name__)
 
 API_CADASTRE_ENDPOINT = "https://apicarto.ign.fr/api/cadastre/parcelle"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 500  # ~50k parcelles par run — backfill 1 an via plusieurs invocations
+MAX_PAGES_PER_RUN = 1000  # ~50k parcelles par run — backfill 1 an via plusieurs invocations
 # FULL backfill 1 an (~100M parcelles) pour couverture nationale ; delta hebdo ensuite
-BACKFILL_DAYS_FIRST_RUN = 365
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 168  # 1 semaine
 
 

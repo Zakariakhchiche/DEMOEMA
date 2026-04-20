@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 
 AGRIBALYSE_ENDPOINT = "https://api.agribalyse.ademe.fr/api/v1/products"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 100  # ~10k produits par run — backfill complet ~10k produits
+MAX_PAGES_PER_RUN = 1000  # ~10k produits par run — backfill complet ~10k produits
 BACKFILL_DAYS_FIRST_RUN = 3650  # 10 ans pour couvrir historique complet (rarement mis à jour)
 INCREMENTAL_HOURS = 720  # 30 jours pour delta (produits rarement modifiés)
 

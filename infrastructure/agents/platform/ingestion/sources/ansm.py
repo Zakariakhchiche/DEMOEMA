@@ -21,8 +21,8 @@ log = logging.getLogger(__name__)
 
 ANSM_ENDPOINT = "https://ansm.sante.fr/api/v1/decisions"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 500  # ~50k décisions par run — backfill 1 an via plusieurs invocations
-BACKFILL_DAYS_FIRST_RUN = 365
+MAX_PAGES_PER_RUN = 1000  # ~50k décisions par run — backfill 1 an via plusieurs invocations
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 48
 
 

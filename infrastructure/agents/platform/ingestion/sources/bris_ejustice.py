@@ -21,8 +21,8 @@ log = logging.getLogger(__name__)
 
 BRIS_ENDPOINT = "https://e-justice.europa.eu/api/brs/v1/search"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 500  # ~50k enregistrements par run — backfill large puis delta
-BACKFILL_DAYS_FIRST_RUN = 365
+MAX_PAGES_PER_RUN = 1000  # ~50k enregistrements par run — backfill large puis delta
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 48
 
 

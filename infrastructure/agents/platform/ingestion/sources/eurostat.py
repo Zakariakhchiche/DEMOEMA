@@ -20,9 +20,9 @@ log = logging.getLogger(__name__)
 
 EUROSTAT_ENDPOINT = "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data"
 PAGE_SIZE = 1000
-MAX_PAGES_PER_RUN = 10  # ~10k records par run (sécurité quota)
+MAX_PAGES_PER_RUN = 1000  # ~10k records par run (sécurité quota)
 # Fenêtre de backfill initial large (Eurostat publie avec 1-3 semaines de délai typique)
-BACKFILL_DAYS_FIRST_RUN = 60
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 72
 
 

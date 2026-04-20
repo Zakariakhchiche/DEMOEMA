@@ -1,0 +1,35 @@
+# DEMOEMA — Signup Automator (container isolé, read-only, network restricted)
+# Lancement manuel 1 fois par source : docker compose -f docker-compose.signup.yml run signup-agent
+
+services:
+  signup-agent:
+    build:
+      context: .
+    image: demomea-signup-agent:latest
+    container_name: demomea-signup-agent
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /home/pwuser/.cache
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - signup-net   # isolated bridge network, pas de shared-supabase ni web
+    environment:
+      PROFILE_PATH: /app/profile.yaml
+      ENV_SIGNUPS_PATH: /app/.env.signups
+      AUDIT_DIR: /app/audit
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+    volumes:
+      - ./profile.yaml:/app/profile.yaml:ro
+      - ./.env.signups:/app/.env.signups:rw
+      - ./audit:/app/audit:rw
+    # Pas de restart — tourne 1×, si besoin on relance manuellement
+    restart: "no"
+
+networks:
+  signup-net:
+    driver: bridge
+    internal: false  # besoin accès internet sortant pour browser

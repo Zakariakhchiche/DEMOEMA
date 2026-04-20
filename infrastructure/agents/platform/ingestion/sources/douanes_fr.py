@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 
 DOUANES_ENDPOINT = "https://lekiosque.finances.gouv.fr/api/stats"
 PAGE_SIZE = 1000
-MAX_PAGES_PER_RUN = 100
-BACKFILL_DAYS_FIRST_RUN = 365
+MAX_PAGES_PER_RUN = 1000
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 720  # 30 jours → 720h (conforme à refresh_trigger=720h)
 
 

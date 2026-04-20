@@ -21,8 +21,8 @@ log = logging.getLogger(__name__)
 
 OPENALEX_ENDPOINT = "https://api.openalex.org/works"
 PAGE_SIZE = 50
-MAX_PAGES_PER_RUN = 20
-BACKFILL_DAYS_FIRST_RUN = 365
+MAX_PAGES_PER_RUN = 1000
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 720  # 30 jours → 720h (cf. spec refresh_trigger=720h)
 
 

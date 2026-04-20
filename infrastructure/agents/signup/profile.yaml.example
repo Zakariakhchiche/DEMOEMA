@@ -1,0 +1,47 @@
+# DEMOEMA — Profil signup automator
+# Infos PROJET uniquement. AUCUNE donnée personnelle / bancaire.
+# Copier en profile.yaml et remplir avant déploiement.
+
+company_name: "DEMOEMA"
+company_legal_form: "SAS en cours"    # ou "SAS", "SARL"
+company_siren: ""                      # vide si non encore constitué
+company_naf: "6201Z"                   # programmation
+
+# Contact pour API signups (identité signataire form uniquement, pas usage perso)
+contact_first_name: ""                 # à remplir
+contact_last_name: ""                  # à remplir
+
+# Email dédié projet (JAMAIS le Gmail perso du founder)
+# Option C recommandée : signups@demoema.fr sur VPS Postfix
+project_email: ""
+project_email_imap_host: "localhost"   # si postfix VPS
+project_email_imap_port: 143
+project_email_user: ""                 # inside signups@demoema.fr
+project_email_password: ""             # dans .env.signups séparément
+
+# Infos corporate minimales (pour formulaires)
+company_address: ""                    # optionnel, souvent vide OK
+company_city: "Paris"
+company_postal_code: "75001"
+company_country: "FR"
+
+# Téléphone projet (optionnel, certains formulaires le demandent)
+# Si vide, l'agent skippe et escalate au founder si le champ est required
+project_phone: ""
+
+# Slack webhook pour notifications (récupéré dans .env.signups)
+# slack_webhook: chargé depuis env var
+
+# Sources à enrôler automatiquement (ordre de priorité)
+sources_to_signup:
+  - insee_sirene
+  - inpi_rne
+  - piste_gouv        # Judilibre + Légifrance
+  - france_travail
+  - epo_ops
+
+# Sources EXPLICITEMENT interdites d'automation (ToS violation)
+sources_blocked_manual:
+  - github       # anti-bot + 2FA obligatoire
+  - companies_house_uk  # reCAPTCHA + verification postale
+  - shodan       # manual only

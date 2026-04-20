@@ -20,9 +20,9 @@ log = logging.getLogger(__name__)
 
 DARES_ENDPOINT = "https://data.dares.travail-emploi.gouv.fr/api/records/1.0/search"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 500
+MAX_PAGES_PER_RUN = 1000
 # FULL historique par pagination (API limitée à 10K records)
-BACKFILL_DAYS_FIRST_RUN = 365
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 168  # 1 semaine (7×24h) → aligné sur refresh_trigger=168h
 BULK_BATCH_SIZE = 1000
 

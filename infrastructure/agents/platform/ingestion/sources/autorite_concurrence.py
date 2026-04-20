@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 
 ADLC_ENDPOINT = "https://www.autoritedelaconcurrence.fr/api/decisions"
 PAGE_SIZE = 50
-MAX_PAGES_PER_RUN = 20
-BACKFILL_DAYS_FIRST_RUN = 90
+MAX_PAGES_PER_RUN = 1000
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 48
 
 

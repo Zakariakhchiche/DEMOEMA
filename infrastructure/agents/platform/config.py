@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     ollama_timeout_s: int = Field(default=300, description="Timeout requête Ollama (s)")
     ollama_keep_alive: str = Field(default="24h", description="Keep-alive models (ignoré sur Cloud)")
 
+    # DeepSeek (pour agent openclaw)
+    deepseek_api_key: str = Field(default="", description="API key DeepSeek (agent openclaw)")
+    deepseek_model: str = Field(default="deepseek-chat", description="Modèle DeepSeek")
+
     # Postgres (via réseau shared-supabase si déployé sur VPS)
     database_url: str = Field(default="", description="DSN Postgres read-only pour tools")
 

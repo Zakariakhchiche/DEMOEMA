@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 
 ESANE_ENDPOINT = "https://www.insee.fr/fr/statistiques/esane/data.json"
 PAGE_SIZE = 1000
-MAX_PAGES_PER_RUN = 100
-BACKFILL_DAYS_FIRST_RUN = 365
+MAX_PAGES_PER_RUN = 1000
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 8760  # 1 an (spec: refresh_trigger=8760h)
 BULK_BATCH_SIZE = 1000
 

@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 
 BUNDESANZEIGER_ENDPOINT = "https://www.bundesanzeiger.de/api/v1/companies"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 500  # ~50k filiales par run — backfill complet via plusieurs invocations
-BACKFILL_DAYS_FIRST_RUN = 365
+MAX_PAGES_PER_RUN = 1000  # ~50k filiales par run — backfill complet via plusieurs invocations
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 720  # 30 jours (spec: refresh_trigger=720h)
 
 

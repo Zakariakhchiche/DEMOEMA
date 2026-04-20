@@ -21,8 +21,8 @@ log = logging.getLogger(__name__)
 
 AMF_ENDPOINT = "https://www.data.gouv.fr/api/1/datasets/liste-noire-amf/"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 100  # ~10k entités max — source petite (typiquement <5k entités)
-BACKFILL_DAYS_FIRST_RUN = 365
+MAX_PAGES_PER_RUN = 1000  # ~10k entités max — source petite (typiquement <5k entités)
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 168  # 1 semaine (7j) → refresh_trigger=168h
 
 

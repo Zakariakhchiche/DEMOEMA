@@ -20,9 +20,9 @@ log = logging.getLogger(__name__)
 
 ANNUAIRE_ENDPOINT = "https://recherche-entreprises.api.gouv.fr/search"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 50  # ~5000 entreprises par run (sécurité quota)
+MAX_PAGES_PER_RUN = 1000  # ~5000 entreprises par run (sécurité quota)
 # Fenêtre de backfill initial large (données mises à jour hebdo, délai typique ~15j)
-BACKFILL_DAYS_FIRST_RUN = 30
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 72
 
 

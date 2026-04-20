@@ -1,0 +1,9 @@
+playwright==1.48.0
+httpx[http2]==0.28.1
+pydantic==2.10.5
+pydantic-settings==2.6.1
+pyyaml==6.0.2
+imap-tools==1.8.0
+python-dotenv==1.0.1
+cryptography==44.0.0
+pillow==11.0.0

@@ -21,8 +21,8 @@ log = logging.getLogger(__name__)
 
 COMPANIES_HOUSE_UK_ENDPOINT = "https://api.company-information.service.gov.uk/search/companies"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 10  # ~1k entreprises par run — delta quotidien suffisant
-BACKFILL_DAYS_FIRST_RUN = 365  # Full backfill 1 an pour couvrir filiales FR
+MAX_PAGES_PER_RUN = 1000  # ~1k entreprises par run — delta quotidien suffisant
+BACKFILL_DAYS_FIRST_RUN = 3650  # Full backfill 1 an pour couvrir filiales FR
 INCREMENTAL_HOURS = 24  # Delta quotidien
 
 

@@ -19,8 +19,8 @@ log = logging.getLogger(__name__)
 
 ADEME_ENDPOINT = "https://data.ademe.fr/api/records/1.0/search"
 PAGE_SIZE = 1000
-MAX_PAGES_PER_RUN = 20  # ~20k facteurs max (source petite : ~15k facteurs en 2026)
-BACKFILL_DAYS_FIRST_RUN = 365  # backfill complet si bronze vide
+MAX_PAGES_PER_RUN = 1000  # ~20k facteurs max (source petite : ~15k facteurs en 2026)
+BACKFILL_DAYS_FIRST_RUN = 3650  # backfill complet si bronze vide
 INCREMENTAL_HOURS = 8760  # 1 an → delta journalier suffisant (source mise à jour annuellement)
 
 

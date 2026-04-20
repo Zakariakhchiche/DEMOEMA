@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 
 CERT_FR_ENDPOINT = "https://www.cert.ssi.gouv.fr/api/alerte"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 10  # ~1k alertes max par run (source peu volumineuse)
-BACKFILL_DAYS_FIRST_RUN = 365  # 1 an historique pour couvrir les alertes passées
+MAX_PAGES_PER_RUN = 1000  # ~1k alertes max par run (source peu volumineuse)
+BACKFILL_DAYS_FIRST_RUN = 3650  # 1 an historique pour couvrir les alertes passées
 INCREMENTAL_HOURS = 24  # delta quotidien (refresh_trigger=24h)
 
 

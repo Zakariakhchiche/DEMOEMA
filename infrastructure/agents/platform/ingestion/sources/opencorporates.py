@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 
 OPENCORPORATES_ENDPOINT = "https://api.opencorporates.com/v0.4/companies/search"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 5  # ~500 entreprises par run (sécurité quota free tier)
-BACKFILL_DAYS_FIRST_RUN = 365  # Snapshot gelé 2019 → backfill large sur 1 an
+MAX_PAGES_PER_RUN = 1000  # ~500 entreprises par run (sécurité quota free tier)
+BACKFILL_DAYS_FIRST_RUN = 3650  # Snapshot gelé 2019 → backfill large sur 1 an
 INCREMENTAL_HOURS = 24  # Mise à jour quotidienne suffisante (pas de deltas en temps réel)
 
 

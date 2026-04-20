@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 OPENSANCTIONS_URL = "https://data.opensanctions.org/datasets/latest/sanctions/targets.simple.csv"
 ENTITIES_JSON_URL = "https://data.opensanctions.org/datasets/latest/sanctions/entities.ftm.json"
 # FULL snapshot : 200K entités sanctions mondiales (module compliance KYC)
-MAX_ROWS_PER_RUN = 500000
+MAX_ROWS_PER_RUN = 1000000
 
 
 async def fetch_opensanctions_delta() -> dict:

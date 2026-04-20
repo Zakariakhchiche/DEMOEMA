@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 
 BDPM_ENDPOINT = "https://base-donnees-publique.medicaments.gouv.fr/api/v1/medicaments"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 500  # ~50k médicaments par run — backfill complet via plusieurs invocations
-BACKFILL_DAYS_FIRST_RUN = 365  # 1 an de données historiques en premier run
+MAX_PAGES_PER_RUN = 1000  # ~50k médicaments par run — backfill complet via plusieurs invocations
+BACKFILL_DAYS_FIRST_RUN = 3650  # 1 an de données historiques en premier run
 INCREMENTAL_HOURS = 168  # 1 semaine (7 jours) entre runs, conformément à refresh_trigger=168h
 
 

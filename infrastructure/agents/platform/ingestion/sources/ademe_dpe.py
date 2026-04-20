@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 
 ADEME_DPE_ENDPOINT = "https://koumoul.com/data-fair/api/v1/datasets/dpe-france/lines"
 PAGE_SIZE = 500
-MAX_PAGES_PER_RUN = 200  # ~100k DPE par run — couvre ~100k bâtiments/an (volumétrie estimée)
-BACKFILL_DAYS_FIRST_RUN = 365  # 1 an de données historiques pour first run
+MAX_PAGES_PER_RUN = 1000  # ~100k DPE par run — couvre ~100k bâtiments/an (volumétrie estimée)
+BACKFILL_DAYS_FIRST_RUN = 3650  # 1 an de données historiques pour first run
 INCREMENTAL_HOURS = 72  # 3 jours de marge sur refresh_trigger=720h
 
 

@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 
 ICPE_ENDPOINT = "https://www.georisques.gouv.fr/api/v1/installations_classees"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 50
-BACKFILL_DAYS_FIRST_RUN = 365
+MAX_PAGES_PER_RUN = 1000
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 168
 
 

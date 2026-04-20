@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 
 COMTRADE_ENDPOINT = "https://comtradeapi.un.org/public/v1/preview"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 100  # ~10k flows par run — suffisant pour delta quotidien
-BACKFILL_DAYS_FIRST_RUN = 365  # backfill 1 an pour couvrir historique
+MAX_PAGES_PER_RUN = 1000  # ~10k flows par run — suffisant pour delta quotidien
+BACKFILL_DAYS_FIRST_RUN = 3650  # backfill 1 an pour couvrir historique
 INCREMENTAL_HOURS = 72  # delta 3 jours (couvre délai publication + week-end)
 
 async def fetch_comtrade_delta() -> dict:

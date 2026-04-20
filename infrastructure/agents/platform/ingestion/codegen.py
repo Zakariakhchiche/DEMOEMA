@@ -72,9 +72,11 @@ def list_specs() -> list[dict]:
     return specs
 
 
-def _build_prompt(spec: dict) -> str:
+def _build_prompt(spec: dict, feedback: str | None = None) -> str:
     ref_code = REFERENCE_FETCHER.read_text(encoding="utf-8") if REFERENCE_FETCHER.exists() else ""
+    fb_block = f"\n\n## FEEDBACK ITÉRATION PRÉCÉDENTE (CORRIGE CES PROBLÈMES)\n{feedback}\n" if feedback else ""
     return f"""Tu es lead-data-engineer DEMOEMA. Ta mission : GÉNÉRER le code Python complet d'un fetcher pour une source data publique, à partir de la spec YAML fournie.
+{fb_block}
 
 ## SPEC YAML de la source à implémenter
 ```yaml
@@ -149,8 +151,9 @@ def _validate_code(code: str) -> tuple[bool, str]:
     return True, "OK"
 
 
-async def generate_fetcher(source_id: str) -> dict:
-    """Pipeline génération : spec → prompt → LLM → validate → write → register."""
+async def generate_fetcher(source_id: str, feedback: str | None = None) -> dict:
+    """Pipeline génération : spec → prompt → LLM → validate → write → register.
+    Optional feedback permet retry avec contexte erreur."""
     spec = load_spec(source_id)
     if not spec:
         return {"error": f"Spec introuvable : specs/{source_id}.yaml"}
@@ -159,7 +162,7 @@ async def generate_fetcher(source_id: str) -> dict:
     if not agent:
         return {"error": "Agent lead-data-engineer non chargé"}
 
-    prompt = _build_prompt(spec)
+    prompt = _build_prompt(spec, feedback=feedback)
 
     # Appel Ollama Cloud (stream=False pour avoir la réponse complète)
     client = OllamaClient()
@@ -233,6 +236,91 @@ async def generate_fetcher(source_id: str) -> dict:
         result["error_register"] = str(e)
 
     return result
+
+
+async def discover_and_generate(source_id: str, max_iterations: int = 3) -> dict:
+    """Mode C : generate + test_endpoint + retry avec feedback (max 3 iter).
+
+    Critère de SUCCESS durci (2026-04-20) : un fetcher n'est considéré valide QUE s'il
+    remonte effectivement des données (rows > 0) OU si la source est légitimement vide
+    (upstream confirme 0). Un stub `manual_research_needed` est désormais classé en
+    `status='degraded_no_data'` et NON success — le Maintainer pourra re-tenter.
+    """
+    from tools.http import test_endpoint as test_ep_func
+    spec = load_spec(source_id)
+    if not spec:
+        return {"error": f"Spec introuvable : {source_id}.yaml"}
+
+    history: list[dict] = []
+    current_feedback: str | None = None
+
+    for iteration in range(1, max_iterations + 1):
+        log.info("[discover] %s iter %d/%d", source_id, iteration, max_iterations)
+
+        endpoint_test = await test_ep_func(spec.get("endpoint", ""))
+        log.info("[discover] %s endpoint test : works=%s status=%s",
+                 source_id, endpoint_test.get("works"), endpoint_test.get("status"))
+
+        if not endpoint_test.get("works"):
+            ep_fb = (f"⚠️ L'endpoint spec {spec.get('endpoint')} retourne status "
+                     f"{endpoint_test.get('status')} ({endpoint_test.get('error', 'no content')}). "
+                     f"RECHERCHE une URL alternative réelle : data.gouv.fr, opendatasoft, api.gouv.fr. "
+                     f"PAS DE STUB 'manual_research_needed' : il faut du code qui fetch réellement. "
+                     f"Si aucune URL publique fonctionnelle, retourne un fetcher qui raise "
+                     f"NotImplementedError('aucune source publique trouvée') — il sera logué proprement.")
+            current_feedback = ((current_feedback or "") + "\n" + ep_fb) if current_feedback else ep_fb
+
+        gen_result = await generate_fetcher(source_id, feedback=current_feedback)
+        history.append({"iter": iteration, "endpoint_test": endpoint_test, "gen": gen_result})
+
+        if "error" in gen_result and "file" not in gen_result:
+            current_feedback = f"Génération précédente a échoué : {gen_result.get('error')}. Produis du code valide."
+            continue
+
+        try:
+            mod_name = f"ingestion.sources.{source_id}"
+            if mod_name in importlib.sys.modules:
+                importlib.reload(importlib.sys.modules[mod_name])
+            else:
+                importlib.import_module(mod_name)
+            mod = importlib.import_module(mod_name)
+            fetcher = getattr(mod, f"fetch_{source_id}_delta", None) or getattr(mod, f"fetch_{source_id}_full", None)
+            if fetcher:
+                dry = await fetcher()
+                history[-1]["dry_run"] = dry
+                rows = dry.get("rows", 0) if isinstance(dry, dict) else 0
+                skipped = (dry or {}).get("skipped", "") or (dry or {}).get("skipped_reason", "")
+
+                # ─── Succès réel uniquement si rows > 0 ───
+                if rows > 0:
+                    log.info("[discover] %s SUCCESS iter %d rows=%d", source_id, iteration, rows)
+                    return {"source_id": source_id, "status": "success",
+                            "iterations": iteration, "rows": rows, "history": history}
+
+                # ─── Stubs 'manual_research_needed' explicitement refusés ───
+                if skipped == "manual_research_needed":
+                    log.warning("[discover] %s iter %d : stub manual_research_needed refusé comme success",
+                                source_id, iteration)
+                    current_feedback = (
+                        "❌ Ton code précédent a retourné skipped='manual_research_needed' avec rows=0. "
+                        "C'est REFUSÉ. Tu dois trouver une source de données réelle publique "
+                        "(data.gouv.fr, opendatasoft, dumps CSV, RSS, HTML parseable). "
+                        "Explore plusieurs URL alternatives. Un fetcher qui ne fetche pas n'est pas acceptable."
+                    )
+                    continue
+
+                current_feedback = (f"Fetcher généré mais retourne 0 rows (dry_run={dry}). "
+                                   f"Causes possibles : endpoint filtre trop restrictif, parsing format incorrect, "
+                                   f"auth requise. Examine + corrige. Objectif: rows > 0.")
+        except Exception as e:
+            current_feedback = f"Erreur à l'exécution : {type(e).__name__}: {e}. Fix."
+            history[-1]["exec_error"] = str(e)
+
+    # ─── Epuisement des iter sans succès réel : 'degraded_no_data' au lieu de success ───
+    log.warning("[discover] %s DEGRADED_NO_DATA après %d iter", source_id, max_iterations)
+    return {"source_id": source_id, "status": "degraded_no_data",
+            "iterations": max_iterations, "history": history,
+            "note": "Aucune iter n'a remonté de rows. À examiner manuellement ou à rééssayer après backoff."}
 
 
 def _build_trigger(s: str):

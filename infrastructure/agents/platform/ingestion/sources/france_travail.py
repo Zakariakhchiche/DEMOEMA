@@ -22,8 +22,8 @@ FRANCE_TRAVAIL_ENDPOINT = "https://api.francetravail.io/partenaire/offresdemploi
 AUTH_TOKEN_URL = "https://entreprise.pole-emploi.fr/connexion/oauth2/access_token?realm=/partenaire"
 AUTH_SCOPE = "api_offresdemploiv2 o2dsoffre"
 PAGE_SIZE = 150
-MAX_PAGES_PER_RUN = 20
-BACKFILL_DAYS_FIRST_RUN = 7
+MAX_PAGES_PER_RUN = 1000
+BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 24
 
 # Token cache global (simple, pas thread-safe mais suffisant pour scheduler monoprocess)
