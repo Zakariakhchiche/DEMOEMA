@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useRef, useEffect, useCallback, Component } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback, Component, Suspense } from "react";
 import type { ReactNode, ErrorInfo } from "react";
 import {
   Network, Search, X, AlertTriangle, Building2, Users,
@@ -67,7 +67,7 @@ function drawDiamond(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: n
   ctx.closePath();
 }
 
-export default function GraphPage() {
+function GraphPageInner() {
   const searchParams = useSearchParams();
   const siren = searchParams?.get("siren");
 
@@ -535,5 +535,13 @@ export default function GraphPage() {
         @keyframes ping { 75%, 100% { transform: scale(2); opacity: 0; } }
       `}</style>
     </div>
+  );
+}
+
+export default function GraphPage() {
+  return (
+    <Suspense fallback={<div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100dvh", background: "#0A0A0A", fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: "#444444", letterSpacing: "0.15em" }}>CHARGEMENT_GRAPHE…</div>}>
+      <GraphPageInner />
+    </Suspense>
   );
 }
