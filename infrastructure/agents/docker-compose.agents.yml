@@ -46,6 +46,10 @@ services:
       # Hot-reload : fetchers générés par agent persistés sur host
       - ./platform/ingestion/sources:/app/ingestion/sources:rw
       - ./platform/ingestion/specs:/app/ingestion/specs:rw
+      - ./platform/ingestion/engine.py:/app/ingestion/engine.py:rw
+      - ./platform/ingestion/codegen.py:/app/ingestion/codegen.py:rw
+      - ./platform/config.py:/app/config.py:rw
+      - /root/inpi_dumps:/inpi_dumps:ro
       # Credentials store Fernet + vault key — persistés hors container
       - ./secrets:/app/.secrets:rw
       # Screenshots openclaw accessibles depuis host

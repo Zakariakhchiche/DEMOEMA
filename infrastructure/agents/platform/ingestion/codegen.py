@@ -26,6 +26,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+import httpx
 import yaml
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -181,6 +182,87 @@ def _validate_code(code: str) -> tuple[bool, str]:
                 return False, f"Appel subprocess interdit"
 
     return True, "OK"
+
+
+# ──────────── ENDPOINT VALIDATION (anti-hallucination) ────────────
+# Root cause of ~55 "ok-but-empty" sources: the LLM (and sometimes templates)
+# wrote fetchers pointing at URLs that don't exist. The fetcher silently returns
+# 0 rows because `if not records: break` doesn't raise. We intercept here: probe
+# the URL(s) embedded in the generated code. If unrecoverable, reject so the
+# maintainer retries with a feedback that tells the LLM the URL is dead.
+
+_ENDPOINT_RE = re.compile(
+    r'^\s*([A-Z_][A-Z0-9_]*ENDPOINT|ENDPOINT)\s*=\s*["\'](https?://[^"\']+)["\']',
+    re.MULTILINE,
+)
+
+# HTTP statuses we treat as "endpoint alive":
+#   200,301,302,307,308 — OK / redirects (fetcher follows redirects)
+#   401,403             — auth required but host exists (fetcher surfaces a clear error)
+#   405                 — method not allowed (HEAD rejected but GET probably works)
+#   429                 — rate-limited, not dead
+_ALIVE_STATUSES = {200, 301, 302, 307, 308, 401, 403, 405, 429}
+
+
+def _extract_endpoints(code: str) -> list[tuple[str, str]]:
+    """Return [(var_name, url), ...] for top-level *ENDPOINT = "http..." bindings."""
+    return [(m.group(1), m.group(2)) for m in _ENDPOINT_RE.finditer(code)]
+
+
+async def _probe_endpoint(url: str) -> dict:
+    """Probe one URL. Return {url, status, alive, reason}.
+
+    - HEAD first (cheap), fall back to GET on 405/400/501/bad method responses.
+    - DNS/timeout → alive=False with the exception message.
+    - status in _ALIVE_STATUSES → alive=True.
+    """
+    headers = {"User-Agent": "DEMOEMA-Agents/0.1 (codegen-probe)"}
+    try:
+        async with httpx.AsyncClient(timeout=12, follow_redirects=False, headers=headers) as c:
+            try:
+                r = await c.head(url)
+            except httpx.HTTPError as e:
+                return {"url": url, "status": None, "alive": False,
+                        "reason": f"HEAD error: {type(e).__name__}: {e}"}
+            # Some servers mishandle HEAD — retry with GET if HEAD looks wrong
+            if r.status_code in (400, 405, 501):
+                try:
+                    r = await c.get(url)
+                except httpx.HTTPError as e:
+                    return {"url": url, "status": None, "alive": False,
+                            "reason": f"GET error: {type(e).__name__}: {e}"}
+            alive = r.status_code in _ALIVE_STATUSES
+            return {"url": url, "status": r.status_code, "alive": alive,
+                    "reason": "ok" if alive else f"HTTP {r.status_code}"}
+    except Exception as e:
+        return {"url": url, "status": None, "alive": False,
+                "reason": f"{type(e).__name__}: {e}"}
+
+
+async def _validate_endpoints_in_code(code: str) -> tuple[bool, str, list[dict]]:
+    """Check every top-level ENDPOINT URL in `code`.
+
+    Returns (all_alive, human_reason, probe_results).
+    When all_alive is False, human_reason is a feedback-ready message pointing at the bad URL(s).
+    """
+    pairs = _extract_endpoints(code)
+    if not pairs:
+        # Nothing to probe — don't block; some fetchers build URLs dynamically.
+        return True, "no endpoint constants to validate", []
+    probes = []
+    for _var, url in pairs:
+        probes.append(await _probe_endpoint(url))
+    dead = [p for p in probes if not p["alive"]]
+    if not dead:
+        return True, "all endpoints alive", probes
+    lines = [f"- `{p['url']}` → {p['reason']}" for p in dead]
+    msg = (
+        "The previously generated fetcher used URL(s) that are NOT reachable. "
+        "Do NOT keep these URLs — find the real, currently-live endpoint for this source. "
+        "Dead URL(s) detected:\n" + "\n".join(lines) +
+        "\nCheck data.gouv.fr / the official API documentation and use a verified endpoint."
+    )
+    return False, msg, probes
 
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -357,6 +439,13 @@ async def generate_fetcher(source_id: str, feedback: str | None = None) -> dict:
         if rendered is not None:
             ok, msg = _validate_code(rendered)
             if ok:
+                # Endpoint probe — reject hallucinated URLs before writing.
+                ep_ok, ep_reason, ep_probes = await _validate_endpoints_in_code(rendered)
+                if not ep_ok:
+                    log.warning("[codegen template] %s endpoint probe FAILED: %s → LLM fallback",
+                                source_id, ep_reason.split('\n')[0])
+                    # Recursive call with synthetic feedback → goes straight to LLM path
+                    return await generate_fetcher(source_id, feedback=ep_reason)
                 target = SOURCES_DIR / f"{source_id}.py"
                 target.write_text(rendered, encoding="utf-8")
                 result = {"source_id": source_id, "file": str(target.name),
@@ -430,6 +519,18 @@ async def generate_fetcher(source_id: str, feedback: str | None = None) -> dict:
     ok, msg = _validate_code(code)
     if not ok:
         return {"error": f"Validation failed: {msg}", "code_preview": code[:500]}
+
+    # Endpoint probe — reject if LLM picked a dead URL.
+    ep_ok, ep_reason, ep_probes = await _validate_endpoints_in_code(code)
+    if not ep_ok:
+        log.warning("[codegen LLM] %s endpoint probe FAILED: %s", source_id,
+                    ep_reason.split('\n')[0])
+        return {
+            "error": "endpoint probe failed",
+            "endpoint_feedback": ep_reason,
+            "probes": ep_probes,
+            "source_id": source_id,
+        }
 
     # Write
     target = SOURCES_DIR / f"{source_id}.py"

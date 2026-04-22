@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     deepseek_api_key: str = Field(default="", description="API key DeepSeek (agent openclaw)")
     deepseek_model: str = Field(default="deepseek-chat", description="Modèle DeepSeek")
 
+    # ─── INPI RNE (registre-national-entreprises) ─────────────────────────────
+    inpi_username: str = Field(default="", description="Email du compte INPI (login RNE)")
+    inpi_password: str = Field(default="", description="Password du compte INPI (login RNE)")
+
     # Postgres (via réseau shared-supabase si déployé sur VPS)
     database_url: str = Field(default="", description="DSN Postgres read-only pour tools")
 

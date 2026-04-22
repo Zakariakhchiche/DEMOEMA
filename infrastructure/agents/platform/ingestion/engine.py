@@ -480,8 +480,52 @@ async def run_maintainer_check() -> dict:
         log.info("[Maintainer] regen candidate: %s (status=%s retry=%d)",
                  sid, current_status, retry_count)
         attempt_t0 = time.time()
+
+        # Fetch last error from audit.agent_actions → feedback for LLM-corrective regen.
+        # Without this, codegen takes the deterministic template path and produces the
+        # exact same broken code each cycle (Sisyphus loop).
+        feedback = None
         try:
-            r = await generate_fetcher(sid)
+            async with await _pg.AsyncConnection.connect(settings.database_url) as _fconn:
+                async with _fconn.cursor() as _fcur:
+                    await _fcur.execute(
+                        """
+                        SELECT payload_out->>'type' AS err_type,
+                               payload_out->>'error' AS err_msg,
+                               action,
+                               created_at
+                        FROM audit.agent_actions
+                        WHERE source_id = %s
+                          AND status = 'failed'
+                          AND created_at > now() - interval '30 days'
+                          AND payload_out ? 'error'
+                        ORDER BY created_at DESC
+                        LIMIT 3
+                        """,
+                        (sid,),
+                    )
+                    rows = await _fcur.fetchall()
+            if rows:
+                parts = []
+                for err_type, err_msg, action, created_at in rows:
+                    parts.append(f"- [{action}] {err_type or 'Error'}: {err_msg or '(no message)'}")
+                feedback = (
+                    f"The previous generated fetcher for `{sid}` failed with these errors "
+                    f"(most recent first):\n" + "\n".join(parts) +
+                    "\n\nFix the root cause. Common patterns to check:\n"
+                    "- /exports/json endpoints return a JSON array directly, not {results:[...]} — "
+                    "handle both shapes.\n"
+                    "- .csv.gz endpoints return gzipped CSV bytes, not JSON — gunzip + csv.DictReader.\n"
+                    "- data-fair /raw endpoints return CSV — check content-type before r.json().\n"
+                    "- ODS v1 /api/records/1.0/search requires `dataset=` in params (httpx strips URL query "
+                    "when params= is passed)."
+                )
+                log.info("[Maintainer] %s: passing feedback (%d prior errors) to codegen", sid, len(rows))
+        except Exception:
+            log.exception("[Maintainer] failed fetching prior errors for %s — regen without feedback", sid)
+
+        try:
+            r = await generate_fetcher(sid, feedback=feedback)
             regen_status = "regen_success" if r.get("file") else "regen_failed"
             regen_results.append({"source": sid, "status": regen_status,
                                   "details": r, "prev_retry": retry_count})
