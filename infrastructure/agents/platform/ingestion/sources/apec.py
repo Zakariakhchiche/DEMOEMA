@@ -1,9 +1,9 @@
 """APEC Open Data — offres cadres.
 
-Source #67 d'ARCHITECTURE_DATA_V2.md. API publique gratuite via Opendatasoft.
+Source #67 d'ARCHITECTURE_DATA_V2.md. API publique gratuite via OpenDataSoft.
 Endpoint : https://data.apec.fr/api/records/1.0/search
-Licence Etalab 2.0. Pas d'auth. RGPD : données anonymisées (pas d'infos personnelles).
-Pas de parsing métier ici — uniquement ingestion bronze.
+Licence Etalab 2.0. Pas d'auth. Rate-limit raisonnable (5 req/s).
+RGPD : données publiques, pas de données sensibles (pas d'email/tél/personne physique identifiable).
 """
 from __future__ import annotations
 
@@ -20,30 +20,41 @@ log = logging.getLogger(__name__)
 
 APEC_ENDPOINT = "https://data.apec.fr/api/records/1.0/search"
 PAGE_SIZE = 100
-MAX_PAGES_PER_RUN = 1000
-BACKFILL_DAYS_FIRST_RUN = 3650
+MAX_PAGES_PER_RUN = 30
+# FULL historique par delta sur 14 jours en premier run
+BACKFILL_DAYS_FIRST_RUN = 14
 INCREMENTAL_HOURS = 48
+RATE_LIMIT_DELAY = 0.2  # 5 req/s → 200ms entre requêtes
 
 
 async def fetch_apec_delta() -> dict:
-    """Récupère les offres d'emploi cadres APEC récentes, dedup sur offre_id.
-    1er run : 14 jours ; runs suivants : 48h (couvre délai publication).
+    """APEC ODS (data.apec.fr) is deprecated — DNS no longer resolves.
+
+    APEC jobs are not published as open data anymore. The real replacement
+    is the France Travail API (api.francetravail.io) which requires OAuth2
+    client_id + secret. Configure `france_travail` source instead of this one.
     """
+    return {
+        "source": "apec",
+        "rows": 0,
+        "error": "data.apec.fr deprecated — use france_travail source with OAuth2 creds",
+    }
+    # --- dead code below, kept for future migration reference ---
     if not settings.database_url:
         return {"error": "DATABASE_URL non configuré", "rows": 0}
 
     # Check if table is empty → première ingestion = backfill
-    async with await psycopg.AsyncConnection.connect(settings.database_url) as conn:
-        async with conn.cursor() as cur:
-            await cur.execute("SELECT count(*) FROM bronze.apec_offres_raw LIMIT 1")
-            existing = (await cur.fetchone())[0]
+    import psycopg as _pg
+    async with await _pg.AsyncConnection.connect(settings.database_url) as _conn:
+        async with _conn.cursor() as _cur:
+            await _cur.execute("SELECT count(*) FROM bronze.apec_offres_raw LIMIT 1")
+            existing = (await _cur.fetchone())[0]
 
     if existing == 0:
         window = timedelta(days=BACKFILL_DAYS_FIRST_RUN)
     else:
         window = timedelta(hours=INCREMENTAL_HOURS)
     since = (datetime.now(tz=timezone.utc) - window).strftime("%Y-%m-%d")
-    where = f"date_publication >= date'{since}'"
     total_fetched = 0
     total_inserted = 0
     total_skipped = 0
@@ -58,20 +69,38 @@ async def fetch_apec_delta() -> dict:
                         "rows": PAGE_SIZE,
                         "start": offset,
                         "sort": "date_publication desc",
-                        "refine.date_publication": f"[{since} TO *]",
+                        "dataset": "les-offres-d-emploi-cadres",
+                        "where": f"date_publication >= '{since}'",
                     }
-                    r = await client.get(APEC_ENDPOINT, params=params)
+                    try:
+                        r = await client.get(APEC_ENDPOINT, params=params)
+                    except httpx.TimeoutException:
+                        log.warning("APEC timeout at page %d", page)
+                        break
                     if r.status_code != 200:
                         log.warning("APEC HTTP %s: %s", r.status_code, r.text[:200])
                         break
+
                     data = r.json()
-                    records = data.get("records", [])
+                    if isinstance(data, list):
+                        records = data
+                    elif isinstance(data, dict):
+                        records = data.get("records") or data.get("results") or []
+                    else:
+                        records = []
                     if not records:
                         break
                     total_fetched += len(records)
 
+                    # Upsert bronze
                     for rec in records:
-                        fields = rec.get("fields", {})
+                        # ODS v1 wraps payload in "fields"; v2 / export return fields inline
+                        if isinstance(rec, dict) and "fields" in rec and isinstance(rec["fields"], dict):
+                            fields = rec["fields"]
+                        elif isinstance(rec, dict):
+                            fields = rec
+                        else:
+                            continue
                         offre_id_raw = fields.get("offre_id")
                         offre_id = _s(offre_id_raw)
                         if not offre_id:
@@ -91,7 +120,7 @@ async def fetch_apec_delta() -> dict:
                                     offre_id[:64],
                                     _s(fields.get("intitule"))[:512],
                                     _s(fields.get("entreprise"))[:512],
-                                    _s(fields.get("siren"))[:9] if fields.get("siren") else None,
+                                    _extract_siren(fields),
                                     _s(fields.get("lieu"))[:255],
                                     _parse_date(fields.get("date_publication")),
                                     _s(fields.get("type_contrat"))[:32],
@@ -110,6 +139,9 @@ async def fetch_apec_delta() -> dict:
                     await conn.commit()
                     if len(records) < PAGE_SIZE:
                         break
+
+                    import asyncio
+                    await asyncio.sleep(RATE_LIMIT_DELAY)
 
     return {
         "source": "apec",
@@ -140,3 +172,13 @@ def _parse_date(s: str | None):
             return datetime.strptime(s[:10], "%Y-%m-%d").date()
         except Exception:
             return None
+
+
+def _extract_siren(fields: dict) -> str | None:
+    """SIREN dans le champ 'siren' ou 'entreprise_siren'."""
+    for key in ("siren", "entreprise_siren"):
+        v = fields.get(key)
+        vs = str(v) if v is not None else ""
+        if len(vs) >= 9 and vs[:9].isdigit():
+            return vs[:9]
+    return None
