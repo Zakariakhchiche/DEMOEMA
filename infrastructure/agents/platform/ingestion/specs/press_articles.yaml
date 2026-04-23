@@ -1,0 +1,19 @@
+source_id: press_articles
+name: Press RSS aggregator (M&A signals)
+endpoint: https://news.google.com/rss/search?q=rachat+entreprise+france
+format: rss
+auth: none
+description: >
+  Aggregate French business press RSS + Google News keyword searches targeting M&A
+  signals: acquisition, rachat, cession, fusion, IPO, succession, CEO changes,
+  procédures collectives. Populates bronze.press_articles_raw.
+
+refresh_trigger:
+  interval_minutes: 30
+
+sla_minutes: 90
+
+conflict_strategy: upsert_on_article_uid
+
+backfill_days_first_run: 30
+incremental_hours: 24

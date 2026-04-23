@@ -1,0 +1,19 @@
+source_id: osint_companies
+name: OSINT companies (domain + crt.sh subdomains)
+endpoint: https://crt.sh
+format: custom
+auth: none
+description: >
+  For each SAS/SA/SCA with capital >= 500k€ not yet scanned (or stale > 90 days):
+  guess probable domain from denomination, validate DNS/HTTP, then query crt.sh
+  Certificate Transparency for subdomains. Builds bronze.osint_companies.
+
+refresh_trigger:
+  interval_hours: 6
+
+sla_minutes: 1440
+
+conflict_strategy: upsert_on_siren
+
+# Each run processes BATCH_SIZE=100 new companies (see sources/osint_companies.py)
+batch_size: 100
