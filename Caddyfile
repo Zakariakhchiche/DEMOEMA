@@ -14,3 +14,18 @@
         format console
     }
 }
+
+studio.{$DOMAIN:localhost} {
+    encode zstd gzip
+
+    basic_auth {
+        admin $2a$14$XT84OloZ/9o6i0khB2Av0eZa1FKFxPK5SgZG1BOj2NXYxgG.u/58a
+    }
+
+    reverse_proxy supabase-studio:3000
+
+    log {
+        output stdout
+        format console
+    }
+}

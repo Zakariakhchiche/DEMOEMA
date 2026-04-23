@@ -1,0 +1,14 @@
+services:
+  backend:
+    networks:
+      - web
+      - shared-supabase
+  caddy:
+    networks:
+      - web
+      - shared-supabase
+
+networks:
+  shared-supabase:
+    external: true
+    name: shared-supabase

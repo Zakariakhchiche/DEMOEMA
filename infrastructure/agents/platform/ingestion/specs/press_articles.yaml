@@ -8,9 +8,7 @@ description: >
   signals: acquisition, rachat, cession, fusion, IPO, succession, CEO changes,
   procédures collectives. Populates bronze.press_articles_raw.
 
-refresh_trigger:
-  interval_minutes: 30
-
+refresh_trigger: "interval_minutes=30"
 sla_minutes: 90
 
 conflict_strategy: upsert_on_article_uid

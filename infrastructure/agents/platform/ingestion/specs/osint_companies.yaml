@@ -8,9 +8,7 @@ description: >
   guess probable domain from denomination, validate DNS/HTTP, then query crt.sh
   Certificate Transparency for subdomains. Builds bronze.osint_companies.
 
-refresh_trigger:
-  interval_hours: 6
-
+refresh_trigger: "interval_hours=6"
 sla_minutes: 1440
 
 conflict_strategy: upsert_on_siren
