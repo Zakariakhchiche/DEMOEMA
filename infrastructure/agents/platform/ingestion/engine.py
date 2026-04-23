@@ -259,8 +259,20 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
 
+    # Silver layer: register refresh jobs + silver maintainer
+    try:
+        from ingestion.silver_engine import start_silver_scheduler
+        n_silvers = start_silver_scheduler(scheduler)
+    except Exception as e:
+        log.warning("Silver engine init skipped: %s", e)
+        n_silvers = 0
+
     scheduler.start()
-    log.info("Scheduler démarré — %d sources + 3 managers (supervisor+maintainer+completeness)", len(SOURCES))
+    log.info(
+        "Scheduler démarré — %d sources + %d silvers + 4 managers "
+        "(supervisor+maintainer+completeness+silver_maintainer)",
+        len(SOURCES), n_silvers,
+    )
 
 
 def stop_scheduler() -> None:

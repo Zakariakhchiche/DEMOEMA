@@ -1,0 +1,66 @@
+silver_name: silver.inpi_comptes
+goal: >
+  Vue flat des bilans INPI par dépôt : un row par dépôt avec les principales
+  colonnes financières extraites des liasses (CA, résultat net, total bilan, capital, effectif).
+  Sert de source pour le scoring M&A dimension "dynamique financière" (15 pts).
+
+source_tables:
+  - bronze.inpi_comptes_depots
+  - bronze.inpi_comptes_liasses
+
+grain: "1 row par depot_id (dépôt de bilan)"
+
+key_columns:
+  - depot_id
+  - siren
+  - date_cloture
+  - type_bilan
+
+business_logic: |
+  Pour chaque dépôt INPI (bronze.inpi_comptes_depots), retrouver dans les liasses
+  associées (jointure sur depot_id) les valeurs numériques des codes XBRL principaux
+  du Plan Comptable Général français.
+
+  Codes INPI à extraire vers colonnes dédiées :
+  - FL   → ventes_marchandises
+  - FJ   → ca_france (m1)
+  - FK   → ca_export (m1)
+  - FR   → ca_net (compte de résultat, total dans m3 ou fallback m1)
+  - HN   → resultat_net (m1 ou m3)
+  - HH   → resultat_avant_impot
+  - GG   → resultat_exploitation
+  - CO   → total_actif (net N, m3)
+  - BJ   → immo_incorporelles (m3)
+  - BX   → immo_corporelles (m3)
+  - BZ   → immo_financieres (m3)
+  - CJ   → stocks (m3)
+  - CF   → creances_clients (m3)
+  - DA   → capital_social (m1 ou m3)
+  - DL   → capitaux_propres (m3)
+  - DR   → total_passif (m3)
+  - DU   → emprunts_dettes (m3)
+  - YP   → effectif_moyen (m1)
+
+  Règle m1/m2/m3/m4 :
+  - Pour les codes bilan (ACTIF/PASSIF — pages 1 & 2) : m3=net N, m4=net N-1
+  - Pour les codes compte de résultat (page 3) : m1=France, m2=Export, m3=total N, m4=N-1
+  - Si m3 null sur un code P&L → fallback sur m1
+  - Si m1 null sur capital → fallback sur m3
+
+transformations: |
+  - Utiliser MAX(CASE WHEN l.code = 'XX' THEN COALESCE(l.m3, l.m1) END) pattern
+  - GROUP BY tous les champs du depot
+  - LEFT JOIN (un dépôt peut avoir 0 liasse dans quelques rares cas d'erreur parsing)
+  - Ajouter colonne count(l.code) as n_liasses_lignes (indicateur de complétude)
+  - Ajouter materialized_at = now() pour traçabilité
+
+indexes:
+  - siren
+  - "date_cloture DESC"
+  - "siren, date_cloture DESC"
+  - type_bilan
+
+refresh_trigger:
+  interval_hours: 24
+
+sla_minutes: 1500
