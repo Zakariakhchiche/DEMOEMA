@@ -91,8 +91,6 @@ def enrich_target(company):
     }
 
 
-PAPPERS_MCP_URL = os.getenv("PAPPERS_MCP_URL", "")
-
 # Global list populated at startup
 enriched_targets = []
 _next_idx = 0  # auto-increment index for new targets
@@ -1667,7 +1665,7 @@ async def copilot_query(q: str = Query(...)):
 
     # --- SIREN lookup FIRST (before anything else) ---
     siren_match = re.search(r'\b(\d{9})\b', q)
-    if siren_match and PAPPERS_MCP_URL:
+    if siren_match:
         siren_val = siren_match.group(1)
         try:
             data = await get_pappers_company(siren_val)
@@ -1790,7 +1788,7 @@ async def copilot_query(q: str = Query(...)):
 
     pappers_filters["par_page"] = "50"
 
-    if wants_pappers and PAPPERS_MCP_URL:
+    if wants_pappers:
         try:
             pappers_data = await search_pappers(**pappers_filters)
             if isinstance(pappers_data, dict) and "resultats" in pappers_data:
@@ -1839,7 +1837,6 @@ async def copilot_query(q: str = Query(...)):
         and not siren_match
         and len(ql.strip()) >= 2
         and len(ql.split()) <= 5
-        and PAPPERS_MCP_URL
     )
     if is_company_name_search:
         try:
@@ -2204,7 +2201,7 @@ async def copilot_query(q: str = Query(...)):
         }
 
     # --- Try Pappers search as last resort before default ---
-    if len(ql.strip()) > 3 and PAPPERS_MCP_URL:
+    if len(ql.strip()) > 3:
         try:
             pappers_result = await search_pappers(q)
             if isinstance(pappers_result, dict):
