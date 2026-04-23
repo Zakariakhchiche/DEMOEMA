@@ -1,0 +1,68 @@
+title = "DEMOEMA gitleaks config"
+
+# Extend the default rules (rules bundled with gitleaks).
+[extend]
+useDefault = true
+
+# Project-specific rules: external provider tokens used in DEMOEMA.
+[[rules]]
+id = "demoema-pappers-mcp-token"
+description = "Pappers MCP token (mcp.pappers.fr)"
+regex = '''(?i)mcp\.pappers\.fr/[a-f0-9]{32,}'''
+tags = ["key", "pappers"]
+
+[[rules]]
+id = "demoema-deepseek-api-key"
+description = "DeepSeek API key"
+regex = '''(?i)(deepseek[_-]?api[_-]?key|DEEPSEEK_API_KEY)[^a-zA-Z0-9]{0,5}sk-[a-zA-Z0-9]{20,}'''
+tags = ["key", "deepseek"]
+
+[[rules]]
+id = "demoema-motherduck-token"
+description = "MotherDuck token"
+regex = '''(?i)(motherduck[_-]?token|MOTHERDUCK_TOKEN)[^a-zA-Z0-9]{0,5}[a-zA-Z0-9_\-\.]{40,}'''
+tags = ["key", "motherduck"]
+
+[[rules]]
+id = "demoema-twocaptcha-api-key"
+description = "2captcha API key"
+regex = '''(?i)(twocaptcha[_-]?api[_-]?key|TWOCAPTCHA_API_KEY)[^a-zA-Z0-9]{0,5}[a-f0-9]{32}'''
+tags = ["key", "2captcha"]
+
+[[rules]]
+id = "demoema-inpi-credentials"
+description = "INPI RNE credentials"
+regex = '''(?i)(INPI_PASSWORD|INPI_USER)\s*[:=]\s*["']?[^"'\s]{4,}["']?'''
+tags = ["credential", "inpi"]
+
+[[rules]]
+id = "demoema-supabase-service-role"
+description = "Supabase service_role JWT (self-hosted)"
+regex = '''eyJ[A-Za-z0-9_=-]+\.eyJ[A-Za-z0-9_=-]+\.[A-Za-z0-9_=-]+'''
+tags = ["jwt", "supabase"]
+
+[[rules]]
+id = "demoema-caddy-bcrypt"
+description = "Caddy basic_auth bcrypt hash"
+regex = '''basic_auth\s*\{[^}]*\$2[ayb]\$[0-9]{2}\$[./A-Za-z0-9]{53}'''
+tags = ["credential", "caddy"]
+
+# Allowlist — known safe patterns
+[allowlist]
+description = "Known safe strings"
+paths = [
+    '''(?i)node_modules/''',
+    '''(?i)\.git/''',
+    '''(?i)\.next/''',
+    '''(?i)__pycache__/''',
+    '''(?i)backend/tests/fixtures/.*\.json''',
+    '''(?i)docs/.*\.md''',   # docs may reference tokens as placeholders (XXXX)
+    '''(?i)\.env\.example''',
+]
+
+regexes = [
+    '''sk-xxxxxxxxxxxxxxxxxxxxxxxx''',        # placeholder in .env.example
+    '''REMPLACEZ_PAR_VOTRE_TOKEN''',          # placeholder
+    '''CHANGEME''',                            # generic placeholder
+    '''your-deepseek-api-key-here''',
+]

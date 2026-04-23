@@ -1,0 +1,120 @@
+[project]
+name = "demoema-backend"
+version = "6.0.0"
+description = "DEMOEMA EdRCF 6.0 — FastAPI backend for M&A origination platform"
+requires-python = ">=3.12"
+readme = "../README.md"
+license = { text = "Proprietary" }
+authors = [{ name = "Zakaria Khchiche", email = "davyly1@gmail.com" }]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.6.0",
+    "mypy>=1.11.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=5.0.0",
+    "httpx>=0.27.0",
+    "respx>=0.21.0",
+    "freezegun>=1.5.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [
+    "__pycache__",
+    "migrations",
+    ".venv",
+    "venv",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "A",   # flake8-builtins
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+    "ASYNC", # flake8-async
+    "PTH", # flake8-use-pathlib
+    "RET", # flake8-return
+    "RUF", # ruff-specific
+    "DTZ", # flake8-datetimez (catch datetime.utcnow and naive datetimes)
+    "T20", # flake8-print (catch print statements — replace with logging)
+]
+ignore = [
+    "E501",   # line length — handled by formatter
+    "B008",   # function calls in defaults (OK for FastAPI Depends)
+    "RET504", # unnecessary assignment before return
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B", "N", "T20"]  # tests can use print and relaxed naming
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+ignore_missing_imports = true
+exclude = [
+    "^migrations/",
+    "^__pycache__/",
+    "^tests/fixtures/",
+]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "-ra",
+    "--cov=.",
+    "--cov-report=term-missing",
+    "--cov-report=html:htmlcov",
+    "--cov-fail-under=0",  # raise progressively; 70% target post-L12
+]
+markers = [
+    "unit: fast tests, no IO",
+    "integration: require docker-compose test stack",
+    "slow: >1s per test",
+]
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning:httpx",
+]
+
+[tool.coverage.run]
+branch = true
+omit = [
+    "tests/*",
+    "migrations/*",
+    "__pycache__/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]
