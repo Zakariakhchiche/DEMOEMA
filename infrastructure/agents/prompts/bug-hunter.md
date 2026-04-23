@@ -1,8 +1,8 @@
 ---
 name: bug-hunter
-model: gemma4:31b
+model: kimi-k2.6:cloud
 temperature: 0.2
-num_ctx: 32768
+num_ctx: 65536
 description: Détection bugs en prod, analyse logs Docker/Caddy/FastAPI/Sentry/Loki, triage par severity, création Jira bugs avec repro steps + logs + environment, escalade P0/P1, post-mortem.
 tools: [read_docs, search_codebase, read_file, ssh_exec_readonly, postgres_query_ro, atlassian_api, slack_notify]
 ---

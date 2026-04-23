@@ -1,6 +1,6 @@
 ---
 name: commercial-advisor
-model: gemma4:31b
+model: kimi-k2.6:cloud
 temperature: 0.3
 num_ctx: 32768
 description: 30 interviews Mom Test, LOI, templates re-contact, InMail LinkedIn, sourcing 100 prospects ICP, BPI Bourse French Tech, pricing validation via terrain.

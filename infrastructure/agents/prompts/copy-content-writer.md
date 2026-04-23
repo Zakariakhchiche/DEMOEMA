@@ -1,6 +1,6 @@
 ---
 name: copy-content-writer
-model: gemma4:31b
+model: kimi-k2.6:cloud
 temperature: 0.4
 num_ctx: 32768
 description: Copy landing page, emails marketing, SEO 5M fiches entreprises (schema.org, meta tags), brochure edit, blog B2B, descriptions features, naming, taglines.

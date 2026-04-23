@@ -1,6 +1,6 @@
 ---
 name: backend-engineer
-model: gemma4:31b
+model: kimi-k2.6:cloud
 temperature: 0.1
 num_ctx: 16384
 description: FastAPI endpoints, pydantic models, auth JWT Supabase, SSE streaming Copilot, tests pytest, OpenAPI.

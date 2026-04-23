@@ -1,6 +1,6 @@
 ---
 name: devops-sre
-model: gemma4:31b
+model: kimi-k2.6:cloud
 temperature: 0.1
 num_ctx: 16384
 description: VPS IONOS ops, Docker Compose, Caddy, Supabase self-hosted, backups, monitoring, sécurité, CI/CD, incident response.

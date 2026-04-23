@@ -1,6 +1,6 @@
 ---
 name: legal-counsel
-model: gemma4:31b
+model: kimi-k2.6:cloud
 temperature: 0.1
 num_ctx: 65536
 description: Contrats clients (CGU/CGV SaaS B2B), LOI, pacte d'actionnaires, term sheet, statuts SAS, droits voisins presse, licences sources data, relation avocat.

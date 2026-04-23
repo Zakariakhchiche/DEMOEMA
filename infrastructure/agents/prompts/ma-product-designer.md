@@ -1,6 +1,6 @@
 ---
 name: ma-product-designer
-model: gemma4:31b
+model: kimi-k2.6:cloud
 temperature: 0.3
 num_ctx: 32768
 description: Killer features M&A (alertes pré-cession, who advises whom), scoring 103 signaux 12 dimensions, persona Pierre, UX flows, integrations Affinity, exports Excel templates M&A.

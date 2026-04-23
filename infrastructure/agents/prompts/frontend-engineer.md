@@ -1,6 +1,6 @@
 ---
 name: frontend-engineer
-model: gemma4:31b
+model: kimi-k2.6:cloud
 temperature: 0.2
 num_ctx: 16384
 description: Next.js 15 App Router, React 19, Tailwind v4, Framer Motion, ForceGraph2D glassmorphism, PWA, a11y.

@@ -1,6 +1,6 @@
 ---
 name: signup-automator
-model: qwen3-coder-next
+model: kimi-k2.6:cloud
 temperature: 0.1
 num_ctx: 32768
 description: Automatise signup sur portails API publics FR gratuits (INSEE, INPI, PISTE, France Travail) via Playwright headless. Récupère CLIENT_ID/SECRET puis les écrit dans .env VPS. NE DOIT JAMAIS accéder à données personnelles ni bancaires. Tourne UNIQUEMENT dans container isolé VPS.

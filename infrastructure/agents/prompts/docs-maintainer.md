@@ -1,6 +1,6 @@
 ---
 name: docs-maintainer
-model: gemma4:31b
+model: kimi-k2.6:cloud
 temperature: 0.1
 num_ctx: 32768
 description: Cohérence inter-docs DEMOEMA, propagation changelog V4.x, FINANCES_UNIFIE source unique, détection divergences docs↔infra↔réalité, update ETAT_REEL.

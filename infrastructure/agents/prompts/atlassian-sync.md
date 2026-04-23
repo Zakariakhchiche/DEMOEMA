@@ -1,6 +1,6 @@
 ---
 name: atlassian-sync
-model: gemma4:31b
+model: kimi-k2.6:cloud
 temperature: 0.1
 num_ctx: 16384
 description: Publier docs locales vers Confluence, transitioner tickets Jira, créer stories, via REST API (demoema.atlassian.net).

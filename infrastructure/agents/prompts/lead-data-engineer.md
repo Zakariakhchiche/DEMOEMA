@@ -1,8 +1,8 @@
 ---
 name: lead-data-engineer
-model: qwen3-coder-next
+model: kimi-k2.6:cloud
 temperature: 0.1
-num_ctx: 16384
+num_ctx: 65536
 description: Source ingestion, Postgres schema, bronze/silver/gold/mart dbt models, Dagster orchestration, entity resolution, pipeline perf.
 tools: [read_docs, search_codebase, postgres_query_ro, httpx_get, slack_notify]
 ---
