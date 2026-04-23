@@ -1,0 +1,73 @@
+silver_name: silver.bodacc_annonces
+goal: >
+  BODACC normalisé et classifié : un row par annonce avec SIREN extrait,
+  typeavis catégorisé (cession / dissolution / création / radiation / procédure /
+  dépôt comptes / vente fonds / modification), date parsed, jugement/dépôt sous-JSONs
+  déconpaqués. Sert killer feature "alerte pré-cession" (signaux patrimoniaux +20pts)
+  et "defaillance score" (dimension juridique -10pts).
+
+source_tables:
+  - bronze.bodacc_annonces_raw
+
+grain: "1 row par annonce (annonce_id)"
+
+key_columns:
+  - annonce_id
+  - siren
+  - date_parution
+  - type_derivé
+
+business_logic: |
+  Extraire depuis payload JSONB les champs suivants:
+
+  Identifiants:
+  - annonce_id = COALESCE(payload->>'id', payload->>E'\\ufeffid')
+    ⚠️ BOM Unicode '\\ufeff' préfixe la clé 'id' dans certains rows — utiliser les 2 formes
+  - parution_id = payload->>'parution'
+  - numero_annonce = payload->>'numeroannonce'
+
+  Dates & géo:
+  - date_parution = (NULLIF(payload->>'dateparution',''))::date
+  - code_dept = payload->>'numerodepartement'
+  - departement = payload->>'departement_nom_officiel'
+  - region = payload->>'region_nom_officiel'
+  - tribunal = payload->>'tribunal'
+  - ville = payload->>'ville'
+
+  SIREN: extraire depuis registre (format "414 464 099,414464099")
+  → regexp_replace(split_part(payload->>'registre', ',', -1), '[^0-9]', '', 'g')
+  Si pas 9 chiffres → NULL.
+
+  Typeavis:
+  - typeavis_lib, familleavis_lib, typeavis_code, familleavis_code
+
+  Classification type_derivé (CASE WHEN):
+  - familleavis='procol' → 'procedure_collective'
+  - familleavis='dpc' OR familleavis_lib ILIKE '%comptes%' → 'depot_comptes'
+  - familleavis='cre' OR familleavis_lib ILIKE '%création%' → 'creation'
+  - familleavis='rad' OR familleavis_lib ILIKE '%radiation%' → 'radiation'
+  - familleavis='mod' OR familleavis_lib ILIKE '%modification%' → 'modification'
+  - familleavis='imm' → 'immatriculation'
+  - typeavis_lib ILIKE '%cession%' OR '%vente%fonds%' → 'vente_cession'
+  - ELSE 'autre'
+
+  Sub-JSON parsés:
+  - depot_details = (payload->>'depot')::jsonb (BODACC stocke ces champs comme STRINGS JSON)
+  - jugement_details = (payload->>'jugement')::jsonb
+  - listepersonnes = (payload->>'listepersonnes')::jsonb
+
+  Garder payload brut pour futures évolutions.
+
+transformations: |
+  WHERE payload IS NOT NULL (exclure rows null).
+  Attention: certains fields sont des strings vides '' → NULLIF avant cast.
+
+indexes:
+  - siren
+  - "date_parution DESC"
+  - type_derivé
+  - "siren, date_parution DESC"
+  - familleavis_code
+
+refresh_trigger: "interval_hours=4"
+sla_minutes: 480

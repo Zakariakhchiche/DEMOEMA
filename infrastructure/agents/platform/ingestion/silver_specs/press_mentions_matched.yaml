@@ -1,0 +1,67 @@
+silver_name: silver.press_mentions_matched
+goal: >
+  Articles de presse matchés avec SIRENs identifiés via détection de dénomination
+  dans titre + summary. Signal presse/média (dimension scoring +8pts — cession
+  détectée en presse, mandat conseil M&A, revue stratégique).
+
+source_tables:
+  - bronze.press_articles_raw
+  - bronze.inpi_formalites_entreprises
+
+grain: "1 row par (article_uid × siren matché)"
+
+key_columns:
+  - match_uid
+  - article_uid
+  - siren
+  - published_at
+
+business_logic: |
+  FROM bronze.press_articles_raw a, JOIN inpi_formalites_entreprises e
+  ON lower(unaccent(e.denomination)) ILIKE '%' || lower(unaccent(a.title)) || '%'
+  OU via LIKE sur substring du denomination dans title/summary.
+
+  ATTENTION — le JOIN fuzzy est lourd (800k articles × 27M entreprises).
+  Stratégie optimisée: filtrer côté e les denominations avec >= 8 chars
+  et utiliser pg_trgm similarity >= 0.4 sur les keywords du titre.
+
+  Colonnes:
+  - match_uid = sha1(article_uid || '|' || siren)
+  - article_uid, url, title, published_at, source
+  - siren (matched)
+  - denomination (depuis e)
+  - match_method = 'denomination_substring' | 'siren_regex' | 'named_entity'
+  - match_score = 1.0 si SIREN exact dans texte, similarity(name, title) sinon
+  - snippet = extrait du titre + summary où le match a été trouvé (LEFT 300 chars)
+  - is_recent = (published_at >= now() - interval '30 days')
+
+  APPROACHE PRAGMATIQUE pour éviter OOM:
+  1. Regex SIREN direct dans content/title: \b\d{9}\b → SIREN exact match (rapide)
+  2. Pour match par nom: ne garder que les articles des 90 derniers jours
+     ET seulement les SIRENs actifs avec denomination distinctive (>= 8 chars
+     et pas dans un stopword-list comme "FRANCE", "GROUPE", "HOLDING" seul)
+
+transformations: |
+  Approach 1 (SIREN regex):
+    SELECT a.article_uid, substring(content from '\\b(\\d{9})\\b') AS siren, ...
+    WHERE content ~ '\\b\\d{9}\\b'
+    → then JOIN e ON e.siren = extracted
+
+  Approach 2 (named entity) — plus lourd:
+    WITH recent_articles AS (SELECT ... WHERE published_at > now() - interval '30 days'),
+         named_entities AS (SELECT siren, denomination FROM inpi_formalites_entreprises
+                            WHERE length(denomination) >= 8
+                              AND etat_administratif = 'A')
+    SELECT ... FROM recent_articles r
+    JOIN named_entities n ON r.title ILIKE '%' || n.denomination || '%'
+
+  UNION des 2 approches pour couvrir SIREN-direct + noms.
+
+indexes:
+  - match_uid
+  - "siren, published_at DESC"
+  - "published_at DESC"
+  - article_uid
+
+refresh_trigger: "interval_hours=1"
+sla_minutes: 120

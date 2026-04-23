@@ -1,0 +1,58 @@
+silver_name: silver.opensanctions
+goal: >
+  Entités OpenSanctions normalisées avec nom canonique, types, pays, programmes
+  de sanctions. Sert le module compliance KYC (dimension scoring -20pts sur
+  match SIREN/nom dirigeant).
+
+source_tables:
+  - bronze.opensanctions_entities_raw
+
+grain: "1 row par entity_id OpenSanctions"
+
+key_columns:
+  - entity_id
+  - name_lower
+  - schema
+
+business_logic: |
+  Extraire depuis payload JSONB:
+
+  - entity_id = payload->>'id'
+  - schema = payload->>'schema' (Person / Organization / Company / LegalEntity)
+  - caption = payload->>'caption' (nom display)
+  - name = COALESCE(payload->>'caption', payload#>>'{properties,name,0}')
+  - name_lower = lower(unaccent(name)) POUR MATCHING FUZZY
+
+  Types:
+  - topics = payload->'properties'->'topics' (JSONB array)
+    → array_to_string extrait ["sanction","pep","crime"] selon contexte
+  - countries = payload->'properties'->'country' (JSONB array codes ISO)
+
+  Programmes:
+  - sanctions_programs = array_agg(DISTINCT ...) sur all sanctions entries dans payload.properties.sanctions
+  - first_seen = (payload->>'first_seen')::timestamptz
+  - last_seen = (payload->>'last_seen')::timestamptz
+  - last_change = (payload->>'last_change')::timestamptz
+
+  SIRENs et LEIs si présents:
+  - sirens_fr = array extraction depuis payload.properties.registrationNumber si country=FR et format 9-digits
+  - lei_codes = array extraction depuis payload.properties.leiCode
+
+  Alias (clés de matching):
+  - alias_names = jsonb_array_elements_text(payload->'properties'->'alias') ou NULL
+
+transformations: |
+  Pour name_lower utiliser:
+  lower(regexp_replace(unaccent(coalesce(payload->>'caption', '')), '[^a-zA-Z0-9 ]', ' ', 'g'))
+
+  NÉCESSITE extension unaccent (créer avec CREATE EXTENSION IF NOT EXISTS unaccent
+  en dehors du CREATE MATERIALIZED VIEW — pas dans le SQL généré).
+
+indexes:
+  - entity_id
+  - "name_lower gin_trgm_ops USING gin"
+  - schema
+  - "sirens_fr USING gin"
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 1500

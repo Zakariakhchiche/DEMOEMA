@@ -1,0 +1,57 @@
+silver_name: silver.osint_companies_enriched
+goal: >
+  OSINT companies (domain + crt.sh subdomains) joint avec identité INPI formalités.
+  Un row par SIREN avec domaines validés, n_subdomains, n_employees LinkedIn si connu,
+  forme juridique + capital. Feature store pour scoring "présence digitale entreprise".
+
+source_tables:
+  - bronze.osint_companies
+  - bronze.inpi_formalites_entreprises
+
+grain: "1 row par SIREN"
+
+key_columns:
+  - siren
+  - domains_count
+  - subdomains_count
+
+business_logic: |
+  LEFT JOIN bronze.osint_companies oc AVEC bronze.inpi_formalites_entreprises e
+  ON oc.siren = e.siren.
+
+  Projection:
+  - siren
+  - Infos INPI: denomination, forme_juridique, montant_capital, code_ape,
+    date_immatriculation, adresse_code_postal
+  - Counts OSINT:
+    * domains_count = COALESCE(array_length(domains, 1), 0)
+    * subdomains_count = COALESCE(array_length(subdomains_crt_sh, 1), 0)
+    * has_github_org = (github_org IS NOT NULL)
+    * has_linkedin_page = (linkedin_company_url IS NOT NULL)
+  - Domaines directs:
+    * primary_domain = domains[1] (le 1er)
+    * all_domains = domains
+    * all_subdomains = subdomains_crt_sh
+  - Tech stack si présent:
+    * tech_stack (passthrough jsonb)
+  - Score digital (dérivé simple 0-100):
+    * digital_presence_score = LEAST(100, domains_count * 20 + LEAST(subdomains_count, 20) * 2
+                                 + CASE WHEN has_linkedin_page THEN 20 ELSE 0 END
+                                 + CASE WHEN has_github_org THEN 15 ELSE 0 END)
+  - last_scanned_at (de osint_companies)
+  - materialized_at = now()
+
+  WHERE oc.siren IS NOT NULL
+
+transformations: |
+  FROM bronze.osint_companies oc
+  LEFT JOIN bronze.inpi_formalites_entreprises e ON e.siren = oc.siren
+
+indexes:
+  - siren
+  - "digital_presence_score DESC"
+  - "domains_count DESC"
+  - "has_linkedin_page) WHERE has_linkedin_page = true"
+
+refresh_trigger: "interval_hours=12"
+sla_minutes: 1440

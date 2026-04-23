@@ -1,0 +1,65 @@
+silver_name: silver.osint_persons_enriched
+goal: >
+  OSINT dirigeants joined avec contexte INPI (mandats, SCI, entreprise principale).
+  Un row par personne physique matchée entre OSINT et INPI. Feature store pour
+  signal "dirigeant avec présence digitale forte" (activité numérique = facteur
+  de valorisation M&A).
+
+source_tables:
+  - bronze.osint_persons
+  - bronze.inpi_formalites_personnes
+  - bronze.inpi_formalites_entreprises
+
+grain: "1 row par person_uid (de osint_persons)"
+
+key_columns:
+  - person_uid
+  - siren_main
+  - nom
+  - prenoms
+
+business_logic: |
+  LEFT JOIN osint_persons (qui a siren_main, representant_id) avec:
+  - inpi_formalites_personnes pour récupérer tous les mandats de ce representant
+  - inpi_formalites_entreprises pour la denomination + capital + forme juridique
+
+  Projection:
+  - person_uid, siren_main, representant_id, nom, prenoms, date_naissance
+  - Counts OSINT:
+    * n_linkedin = COALESCE(array_length(linkedin_urls, 1), 0)
+    * n_github = COALESCE(array_length(github_usernames, 1), 0)
+    * n_twitter = COALESCE(array_length(twitter_handles, 1), 0)
+    * n_other_sites = jsonb_array_length si c'est un array, sinon nombre de keys
+    * n_total_social = n_linkedin + n_github + n_twitter
+  - Flags:
+    * has_linkedin = (linkedin_urls IS NOT NULL AND array_length(linkedin_urls,1) > 0)
+    * has_github = ...
+    * has_any_social = (n_total_social > 0)
+  - Enrichissement INPI (join):
+    * denomination_main_company (from entreprises via siren_main)
+    * forme_juridique_main
+    * capital_main
+    * date_immat_main
+  - Mandats:
+    * n_mandats_inpi = count DISTINCT siren across inpi_formalites_personnes joined on representant_id
+  - Snapshots:
+    * last_scanned_at (de osint_persons)
+    * materialized_at = now()
+
+transformations: |
+  FROM bronze.osint_persons op
+  LEFT JOIN bronze.inpi_formalites_entreprises e ON e.siren = op.siren_main
+  LEFT JOIN LATERAL (
+    SELECT count(DISTINCT siren) AS n_mandats
+    FROM bronze.inpi_formalites_personnes p
+    WHERE p.representant_id = op.representant_id
+  ) mandats ON true
+
+indexes:
+  - person_uid
+  - siren_main
+  - "has_any_social) WHERE has_any_social = true"
+  - "n_total_social DESC"
+
+refresh_trigger: "interval_hours=6"
+sla_minutes: 720

@@ -1,0 +1,50 @@
+silver_name: silver.gleif_lei
+goal: >
+  Identifiants LEI internationaux normalisés — permet cross-reference
+  entreprises FR avec leurs holding/filiales internationales. Dimension
+  "international & cross-border" +5pts scoring.
+
+source_tables:
+  - bronze.gleif_lei_raw
+
+grain: "1 row par LEI (20 caractères)"
+
+key_columns:
+  - lei
+  - legal_name_lower
+  - country_code
+
+business_logic: |
+  Extraire depuis payload:
+  - lei = payload->>'lei'
+  - legal_name = payload#>>'{Entity,LegalName,$}' OR payload->>'legalName'
+  - legal_name_lower = lower(unaccent(legal_name))
+  - other_names = extraction depuis payload.Entity.OtherNames[]
+  - country_code = payload#>>'{Entity,LegalJurisdiction}' (ISO 2-letter)
+  - country_hq = payload#>>'{Entity,HeadquartersAddress,Country}'
+  - legal_form = payload#>>'{Entity,LegalForm,EntityLegalFormCode}'
+  - parent_lei = payload#>>'{Entity,DirectParent,DirectParentLei}' or similar GLEIF Level 2 path
+  - ultimate_parent_lei = payload#>>'{Entity,UltimateParent,UltimateParentLei}'
+  - status = payload#>>'{Entity,EntityStatus}' (ACTIVE / INACTIVE)
+  - registration_status = payload#>>'{Registration,RegistrationStatus}' (ISSUED / LAPSED / RETIRED)
+  - initial_registration_date = (payload#>>'{Registration,InitialRegistrationDate}')::timestamptz
+  - last_update_date = (payload#>>'{Registration,LastUpdateDate}')::timestamptz
+  - next_renewal_date = (payload#>>'{Registration,NextRenewalDate}')::timestamptz
+
+  Extraire SIREN si présent dans OtherEntityIdentifiers pour country FR:
+  - siren_fr = extraction des identifiers FR 9-digits
+
+transformations: |
+  Le format GLEIF peut varier selon source. Utiliser COALESCE sur plusieurs paths:
+  COALESCE(payload#>>'{Entity,LegalName,$}', payload->>'legalName', payload->>'legal_name')
+
+indexes:
+  - lei
+  - "legal_name_lower gin_trgm_ops USING gin"
+  - country_code
+  - parent_lei
+  - ultimate_parent_lei
+  - siren_fr
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 1500

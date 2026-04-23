@@ -1,0 +1,68 @@
+silver_name: silver.cession_events
+goal: >
+  Événements BODACC de type cession/vente fonds/dissolution extraits et enrichis.
+  Killer feature "alerte pré-cession" — permet de détecter en temps réel les
+  annonces de cession pour sourcing M&A. Dimension "Signaux patrimoniaux" +20pts.
+
+source_tables:
+  - bronze.bodacc_annonces_raw
+  - bronze.inpi_formalites_entreprises
+
+grain: "1 row par annonce de cession BODACC"
+
+key_columns:
+  - annonce_id
+  - siren
+  - date_parution
+  - type_cession
+
+business_logic: |
+  FROM bronze.bodacc_annonces_raw WHERE type = cession/vente/dissolution/procedure :
+    familleavis IN ('procol','cession') OR
+    typeavis_lib ILIKE '%cession%' OR typeavis_lib ILIKE '%vente%fonds%' OR
+    typeavis_lib ILIKE '%dissolution%' OR typeavis_lib ILIKE '%transfert%actions%'
+
+  Projection avec classification:
+  - annonce_id = COALESCE(payload->>'id', payload->>E'\\ufeffid')
+  - date_parution = (NULLIF(payload->>'dateparution',''))::date
+  - siren = extraire depuis registre (voir silver.bodacc_annonces pour pattern)
+  - tribunal, departement, code_dept, ville
+  - type_cession (CASE):
+    * WHEN typeavis_lib ILIKE '%vente%fonds%' → 'vente_fonds_commerce'
+    * WHEN typeavis_lib ILIKE '%cession%action%' OR 'cession%parts%' → 'cession_titres'
+    * WHEN familleavis='procol' → 'procedure_collective'
+    * WHEN typeavis_lib ILIKE '%dissolution%' → 'dissolution'
+    * WHEN typeavis_lib ILIKE '%transfert%' → 'transfert'
+    * ELSE 'cession_autre'
+
+  Extraits depuis listepersonnes (JSON-as-string):
+  - denomination
+  - forme_juridique
+  - numero_immatriculation
+
+  Extraits depuis jugement (si procol):
+  - jugement_type
+  - jugement_date
+
+  Enrichissement via JOIN sur inpi_formalites_entreprises:
+  - denomination_inpi, forme_juridique_inpi, capital_inpi, code_ape_inpi
+  - cp_inpi = e.adresse_code_postal
+
+  Signal actionnable:
+  - is_recent = (date_parution >= now() - interval '90 days')
+
+transformations: |
+  LEFT JOIN inpi_formalites_entreprises e ON e.siren = extracted_siren
+
+  Filtrer WHERE type_cession != 'cession_autre' (garder seulement les types clairs)
+  OU garder tous et laisser le consommateur filtrer.
+
+indexes:
+  - annonce_id
+  - "siren, date_parution DESC"
+  - type_cession
+  - "date_parution DESC"
+  - "is_recent) WHERE is_recent = true"
+
+refresh_trigger: "interval_hours=1"   # killer feature — fraîcheur élevée
+sla_minutes: 120

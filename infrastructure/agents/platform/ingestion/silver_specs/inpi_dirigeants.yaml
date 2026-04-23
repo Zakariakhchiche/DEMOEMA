@@ -1,0 +1,55 @@
+silver_name: silver.inpi_dirigeants
+goal: >
+  Un row par personne physique identifiée (nom+prenom+date_naissance), agrégant
+  tous ses mandats dans différentes sociétés françaises. Sert de base pour la
+  killer feature cartographie dirigeants + scoring dimension "maturité fondateur"
+  (20pts) et "multi-mandats/pro M&A" (10pts).
+
+source_tables:
+  - bronze.inpi_formalites_personnes
+  - bronze.inpi_formalites_entreprises
+
+grain: "1 row par personne physique (nom + prénom[1] + date_naissance)"
+
+key_columns:
+  - nom
+  - prenom
+  - date_naissance
+
+business_logic: |
+  Filter inpi_formalites_personnes avec type_de_personne='INDIVIDU',
+  individu_nom NOT NULL, length(individu_nom) > 1.
+
+  Group by (UPPER(TRIM(individu_nom)), UPPER(TRIM(individu_prenoms[1])), individu_date_naissance).
+
+  Pour chaque groupe calculer:
+  - n_mandats_total = count distinct p.siren
+  - n_mandats_actifs = count distinct p.siren FILTER (WHERE p.actif)
+  - sirens_mandats = array_agg(DISTINCT p.siren)
+  - denominations = array_agg(DISTINCT e.denomination)
+  - formes_juridiques = array_agg(DISTINCT e.forme_juridique)
+  - n_sci = count distinct SIREN où forme_juridique LIKE '654%' (SCI)
+  - sci_sirens = array_agg(DISTINCT siren) FILTER forme_juridique LIKE '654%'
+  - total_capital_sci = sum(montant_capital) FILTER forme_juridique LIKE '654%'
+  - is_multi_mandat = (n_mandats_total >= 5) BOOLEAN
+  - roles = array_agg(DISTINCT role_entreprise)
+  - age_2026 = 2026 - year extracted from individu_date_naissance (si parsable ^\d{4})
+  - first_mandat_date = MIN(e.date_immatriculation)
+  - last_mandat_date = MAX(e.date_immatriculation)
+  - materialized_at = now()
+
+transformations: |
+  LEFT JOIN inpi_formalites_entreprises e ON e.siren = p.siren
+  pour enrichir chaque mandat avec denomination + forme + capital + date_immat.
+
+  Pour age_2026: utiliser CASE avec regex ~ '^\d{4}' puis substring(date_naissance, 1, 4)::int.
+
+indexes:
+  - "nom, prenom"
+  - date_naissance
+  - "n_mandats_actifs DESC"
+  - "is_multi_mandat) WHERE is_multi_mandat = true"
+  - "sirens_mandats USING gin"
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 1500

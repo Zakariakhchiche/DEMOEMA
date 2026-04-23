@@ -1,0 +1,60 @@
+silver_name: silver.insee_unites_legales
+goal: >
+  Master identité entreprise agrégée au niveau SIREN depuis le dump INSEE SIRENE.
+  Un row par SIREN avec dénomination, NAF, catégorie entreprise, forme juridique,
+  effectif tranche, état administratif, dates clés. Base d'identité pour toute
+  requête M&A.
+
+source_tables:
+  - bronze.insee_sirene_siret_raw
+
+grain: "1 row par SIREN (distinct)"
+
+key_columns:
+  - siren
+  - denomination_unite
+  - code_ape
+  - categorie_entreprise
+  - etat_administratif
+
+business_logic: |
+  Extraire depuis payload JSONB les champs au niveau SIREN (pas SIRET).
+  Le dump INSEE contient 1 row par SIRET (établissement) — on dédoublonne par SIREN
+  via DISTINCT ON ou GROUP BY en prenant les infos du siège social.
+
+  Colonnes à extraire:
+  - siren = LEFT(payload->>'siren', 9) (déjà présent dans payload)
+  - denomination_unite = COALESCE(payload->>'denominationUniteLegale', payload->>'denomination_usuelle')
+  - sigle = payload->>'sigleUniteLegale'
+  - code_ape = payload->>'activitePrincipaleUniteLegale'
+  - categorie_entreprise = payload->>'categorieEntreprise' (PME / ETI / GE)
+  - categorie_juridique = payload->>'categorieJuridiqueUniteLegale'
+  - etat_administratif = payload->>'etatAdministratifUniteLegale' (A=active, F=fermée)
+  - date_creation = (NULLIF(payload->>'dateCreationUniteLegale',''))::date
+  - date_derniere_maj = (NULLIF(payload->>'dateDernierTraitementUniteLegale',''))::timestamptz
+  - tranche_effectifs = payload->>'trancheEffectifsUniteLegale'
+  - annee_effectifs = payload->>'anneeEffectifsUniteLegale'
+  - nom_usage = COALESCE(payload->>'nomUsageUniteLegale', payload->>'nomUniteLegale')
+  - prenom_usage = payload->>'prenom1UniteLegale' (pour personnes physiques)
+  - sexe = payload->>'sexeUniteLegale'
+  - economie_sociale_solidaire = (payload->>'economieSocialeSolidaireUniteLegale')::bool
+  - nic_siege = payload->>'nicSiegeUniteLegale'
+
+  Garder payload complet pour évolutions.
+
+transformations: |
+  Utiliser DISTINCT ON (siren) ORDER BY siren, COALESCE(ingested_at, now()) DESC
+  pour ne garder que la dernière version de chaque SIREN si doublons.
+
+  OU: GROUP BY siren avec agrégats MAX() sur chaque colonne scalaire.
+
+indexes:
+  - siren
+  - code_ape
+  - categorie_entreprise
+  - etat_administratif
+  - categorie_juridique
+  - "date_creation DESC"
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 1500

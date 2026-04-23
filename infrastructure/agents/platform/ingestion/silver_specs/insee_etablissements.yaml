@@ -1,0 +1,63 @@
+silver_name: silver.insee_etablissements
+goal: >
+  Chaque établissement (SIRET) avec infos géographiques + statut + tranche effectif.
+  Permet les filtres géo M&A (département, région, commune) et compte d'établissements
+  par SIREN (ancrage territorial +5pts scoring).
+
+source_tables:
+  - bronze.insee_sirene_siret_raw
+
+grain: "1 row par SIRET (14 chiffres)"
+
+key_columns:
+  - siret
+  - siren
+  - code_postal
+  - code_commune
+
+business_logic: |
+  Extraire 1 row par SIRET avec:
+  - siret = payload->>'siret'
+  - siren = LEFT(siret, 9)
+  - nic = RIGHT(siret, 5)
+  - denomination_usuelle = payload->>'denominationUsuelleEtablissement'
+  - enseigne_1 = payload->>'enseigne1Etablissement'
+  - etat_administratif = payload->>'etatAdministratifEtablissement' (A / F)
+  - etablissement_siege = (payload->>'etablissementSiege')::bool
+  - date_creation = (NULLIF(payload->>'dateCreationEtablissement',''))::date
+  - date_debut = (NULLIF(payload->>'dateDebut',''))::date
+  - code_ape = payload->>'activitePrincipaleEtablissement'
+  - tranche_effectifs = payload->>'trancheEffectifsEtablissement'
+  - annee_effectifs = payload->>'anneeEffectifsEtablissement'
+
+  Géographie:
+  - numero_voie = payload->>'numeroVoieEtablissement'
+  - indice_repetition = payload->>'indiceRepetitionEtablissement'
+  - type_voie = payload->>'typeVoieEtablissement'
+  - libelle_voie = payload->>'libelleVoieEtablissement'
+  - code_postal = payload->>'codePostalEtablissement'
+  - libelle_commune = payload->>'libelleCommuneEtablissement'
+  - code_commune = payload->>'codeCommuneEtablissement'
+  - code_dept = LEFT(payload->>'codeCommuneEtablissement', 2)
+  - pays = payload->>'libellePaysEtrangerEtablissement' (NULL si France)
+
+  Garder payload complet.
+
+transformations: |
+  WHERE payload->>'siret' IS NOT NULL AND length(payload->>'siret') = 14
+
+  Certains SIRETs peuvent apparaître plusieurs fois (historique). Utiliser
+  DISTINCT ON (siret) ORDER BY siret, date_debut DESC pour ne garder que l'état actuel.
+
+indexes:
+  - siret
+  - siren
+  - code_postal
+  - code_commune
+  - code_ape
+  - etat_administratif
+  - "etablissement_siege) WHERE etablissement_siege = true"
+  - code_dept
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 1500

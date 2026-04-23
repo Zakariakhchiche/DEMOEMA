@@ -1,0 +1,54 @@
+silver_name: silver.dvf_transactions
+goal: >
+  Transactions foncières DVF avec adresse normalisée (voie_norm sans accents) pour
+  joindre avec adresses d'entreprises/SCI. Alimente signal "patrimoine immo"
+  dirigeants (cross-ref DVF × SCI du dirigeant).
+
+source_tables:
+  - bronze.dvf_transactions_raw
+
+grain: "1 row par tx_uid (id_mutation + parcelle + lot)"
+
+key_columns:
+  - tx_uid
+  - id_mutation
+  - id_parcelle
+  - code_postal
+  - adresse_voie_norm
+
+business_logic: |
+  Projection directe depuis bronze.dvf_transactions_raw avec normalisation minimale.
+  Les colonnes sont déjà typées proprement dans le bronze.
+
+  Colonnes à conserver:
+  - tx_uid, id_mutation, date_mutation
+  - nature_mutation, valeur_fonciere (numeric)
+  - adresse (voie, numero, code_postal, commune, code_commune, code_departement)
+  - id_parcelle, ancien_id_parcelle
+  - nombre_lots, lot1_surface_carrez, ..., lot5_surface_carrez
+  - code_type_local, type_local, surface_reelle_bati, nombre_pieces_principales
+  - surface_terrain
+  - longitude, latitude (numeric)
+  - year (smallint)
+
+  COLONNE DERIVÉE IMPORTANTE:
+  - adresse_voie_norm = lower(unaccent(coalesce(adresse_nom_voie, '')))
+
+  Cette colonne permet le JOIN fuzzy avec entreprises.adresse_voie pour détecter
+  transactions au siège social.
+
+transformations: |
+  Simple SELECT ... FROM bronze.dvf_transactions_raw avec la colonne dérivée.
+  Nécessite extension unaccent (déjà créée lors du bronze DDL — idempotent).
+
+indexes:
+  - tx_uid
+  - "code_postal, adresse_voie_norm"
+  - id_parcelle
+  - "date_mutation DESC"
+  - "valeur_fonciere DESC"
+  - code_commune
+  - "longitude, latitude"  # géo
+
+refresh_trigger: "interval_hours=168"   # hebdo (DVF bronze update = annuel)
+sla_minutes: 10080                       # 7j

@@ -1,0 +1,67 @@
+silver_name: silver.judilibre_decisions
+goal: >
+  Union normalisée des 4 tables jurisprudence DILA (Cour de cassation, Cours d'appel,
+  Conseil d'État JADE, Conseil constitutionnel). Un row par décision unique avec
+  juridiction/chambre/date/solution/thème harmonisés. Sert dimension "Juridique &
+  Réglementaire" du scoring (-10pts si contentieux matché sur SIREN).
+
+source_tables:
+  - bronze.judilibre_decisions_raw
+  - bronze.juri_capp_raw
+  - bronze.juri_jade_raw
+  - bronze.juri_constit_raw
+
+grain: "1 row par decision_id (unique across les 4 sources)"
+
+key_columns:
+  - decision_id
+  - juridiction_source
+  - date_decision
+
+business_logic: |
+  UNION ALL des 4 tables avec colonne juridiction_source qui identifie la source:
+  - 'CASS' pour bronze.judilibre_decisions_raw
+  - 'CAPP' pour bronze.juri_capp_raw
+  - 'JADE' pour bronze.juri_jade_raw
+  - 'CONSTIT' pour bronze.juri_constit_raw
+
+  Pour chaque row, extraire:
+  - decision_id (PK existant)
+  - juridiction_source (literal selon la source)
+  - juridiction (field existant)
+  - chamber
+  - formation
+  - date_decision
+  - numero_affaire
+  - solution
+  - titre
+  - nature
+  - publie_bull
+  - date_dec_att
+  - formation_att
+  - url_source
+  - archive_week
+
+  Ne pas inclure contenu (trop lourd, garder dans bronze).
+
+  Ajouter materialized_at = now() pour traçabilité.
+
+transformations: |
+  CREATE MATERIALIZED VIEW AS
+  SELECT 'CASS' AS juridiction_source, ... FROM bronze.judilibre_decisions_raw
+  UNION ALL
+  SELECT 'CAPP' AS juridiction_source, ... FROM bronze.juri_capp_raw
+  UNION ALL
+  SELECT 'JADE' AS juridiction_source, ... FROM bronze.juri_jade_raw
+  UNION ALL
+  SELECT 'CONSTIT' AS juridiction_source, ... FROM bronze.juri_constit_raw
+
+indexes:
+  - decision_id
+  - juridiction_source
+  - "date_decision DESC"
+  - "numero_affaire"
+  - "titre gin_trgm_ops USING gin"  # pour recherche fuzzy nom entreprise dans titre
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 1500

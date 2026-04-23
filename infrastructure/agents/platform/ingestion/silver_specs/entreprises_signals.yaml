@@ -1,0 +1,112 @@
+silver_name: silver.entreprises_signals
+goal: >
+  🔑 FEATURE STORE POUR LE SCORING M&A. Un row par SIREN cible (SAS/SA/SCA avec
+  capital >= 100k€), avec 20+ features numériques/booléens alimentant le scoring
+  gold.ma_targets. C'est la table qui transforme toutes les bronze/silver en
+  signaux actionnables.
+
+source_tables:
+  - bronze.inpi_formalites_entreprises
+  - silver.inpi_dirigeants
+  - silver.inpi_comptes
+  - silver.bodacc_annonces
+  - silver.cession_events
+  - silver.judilibre_decisions
+  - silver.opensanctions
+  - silver.osint_companies_enriched
+  - silver.dirigeant_sci_patrimoine
+
+grain: "1 row par SIREN cible M&A"
+
+key_columns:
+  - siren
+
+business_logic: |
+  Construit le feature store sur ~1M entreprises cibles M&A.
+
+  FILTRE CIBLES (WHERE):
+  - forme_juridique IN (SAS, SA, SCA: '5710','5720','5730','5485','5499','5505',
+                         '5510','5515','5520','5530','5540','5599','5385','5308',
+                         '5306','5202','5203')
+  - montant_capital >= 100000
+  - pas en radiation (date_radiation IS NULL)
+
+  FEATURES par SIREN:
+
+  [Identité]
+  - siren, denomination, forme_juridique, code_ape, code_postal, date_immatriculation
+  - age_entreprise = EXTRACT(YEAR FROM AGE(now(), date_immatriculation))
+
+  [Maturité dirigeant - 20pts scoring]
+  - age_dirigeant_max = MAX(age_2026) parmi dirigeants (via silver.inpi_dirigeants joint sur sirens_mandats @> siren)
+  - has_successeur_probable = EXISTS dirigeant avec age < 45 ET meme nom_famille
+
+  [Patrimoine - 20pts]
+  - n_sci_dirigeants = SUM(n_sci) des dirigeants
+  - total_capital_sci = SUM(total_capital_sci) des dirigeants
+  - has_holding_patrimoniale = (n_sci_dirigeants >= 2)
+
+  [Financier - 15pts]
+  - ca_latest = ca_net du dernier bilan silver.inpi_comptes (ORDER BY date_cloture DESC LIMIT 1)
+  - capitaux_propres_latest
+  - resultat_net_latest
+  - n_exercices_deposés = count distinct bilans INPI
+  - has_bilan_recent = (date_cloture du dernier bilan >= now() - interval '2 years')
+
+  [Taille]
+  - capital_social = montant_capital
+  - effectif_moyen_latest = effectif_moyen du dernier bilan
+
+  [Multi-mandats dirigeants - 10pts]
+  - n_mandats_dirigeant_max = MAX(n_mandats_actifs) parmi dirigeants du SIREN
+  - has_pro_ma = (n_mandats_dirigeant_max >= 5)
+
+  [Légal/Contentieux - 10pts negatif]
+  - n_contentieux = count silver.judilibre_decisions WHERE titre ILIKE '%denomination%'
+  - has_contentieux_recent = (max date_decision within last 2 years)
+
+  [Sanctions - 20pts negatif]
+  - has_sanction = EXISTS silver.opensanctions WHERE name_lower ILIKE denomination
+  - has_sanction_dirigeant = EXISTS silver.opensanctions matched on dirigeant name
+
+  [Presse - 5pts]
+  - n_press_mentions_90d = count silver.press_mentions_matched WHERE siren = siren AND is_recent
+  - has_cession_detected = EXISTS silver.cession_events WHERE siren = siren AND is_recent
+
+  [OSINT digital]
+  - digital_presence_score = from silver.osint_companies_enriched
+  - has_website = (domains_count > 0)
+
+  [Ancrage - 5pts]
+  - n_etablissements = nombre etablissements principal + autres
+  - departement = LEFT(adresse_code_postal, 2)
+
+  [Innovation - 5pts]
+  - has_brevets = EXISTS bronze.inpi_brevets_raw WHERE siren = siren
+  - has_marques = EXISTS bronze.inpi_marques_raw WHERE siren = siren
+
+  materialized_at = now()
+
+transformations: |
+  LEFTJOINs depuis bronze.inpi_formalites_entreprises e FILTER cible:
+  - silver.inpi_comptes c ON c.siren = e.siren (dernier bilan via DISTINCT ON)
+  - silver.inpi_dirigeants d via UNNEST(d.sirens_mandats) match e.siren
+  - silver.osint_companies_enriched oc ON oc.siren = e.siren
+  - EXISTS sub-queries pour sanctions / contentieux / presse / cession
+
+  Pour la performance: construire via CTEs étagées + NO PRECISE SHARING PLAN.
+
+  Cette matvue est le goulot du scoring — accepter durée refresh ~30 min.
+
+indexes:
+  - siren
+  - "ca_latest DESC"
+  - "age_dirigeant_max DESC"
+  - "n_press_mentions_90d DESC"
+  - "has_cession_detected) WHERE has_cession_detected = true"
+  - "has_sanction) WHERE has_sanction = true"
+  - "code_ape"
+  - departement
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 1500
