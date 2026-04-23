@@ -1,0 +1,27 @@
+# DEMOEMA Code Owners
+#
+# These owners will be the default reviewers for PRs touching matching files.
+# Syntax: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Global owner — everything not matched below
+*                                   @Zakariakhchiche
+
+# Critical files — never auto-merge
+/LICENSE                            @Zakariakhchiche
+/SECURITY.md                        @Zakariakhchiche
+/CODEOWNERS                         @Zakariakhchiche
+/.github/                           @Zakariakhchiche
+/infrastructure/scripts/            @Zakariakhchiche
+/backend/core/security.py           @Zakariakhchiche
+/backend/core/config.py             @Zakariakhchiche
+
+# Compliance — extra scrutiny
+/docs/RGPD_*                        @Zakariakhchiche
+/docs/AI_ACT_*                      @Zakariakhchiche
+/docs/DPIA_*                        @Zakariakhchiche
+/docs/SECURITY_*                    @Zakariakhchiche
+
+# Note: as the team grows, add co-owners per domain here.
+# Example:
+# /backend/                         @Zakariakhchiche @senior-backend-handle
+# /frontend/                        @Zakariakhchiche @senior-frontend-handle
