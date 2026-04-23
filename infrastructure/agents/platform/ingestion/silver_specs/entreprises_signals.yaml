@@ -14,7 +14,7 @@ source_tables:
   - silver.judilibre_decisions
   - silver.opensanctions
   - silver.osint_companies_enriched
-  - silver.dirigeant_sci_patrimoine
+  - silver.press_mentions_matched
 
 grain: "1 row par SIREN cible M&A"
 
@@ -103,8 +103,8 @@ indexes:
   - "ca_latest DESC"
   - "age_dirigeant_max DESC"
   - "n_press_mentions_90d DESC"
-  - "has_cession_detected) WHERE has_cession_detected = true"
-  - "has_sanction) WHERE has_sanction = true"
+  - "has_cession_detected WHERE has_cession_detected = true"
+  - "has_sanction WHERE has_sanction = true"
   - "code_ape"
   - departement
 

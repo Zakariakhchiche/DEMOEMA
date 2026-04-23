@@ -62,7 +62,7 @@ indexes:
   - "siren, date_parution DESC"
   - type_cession
   - "date_parution DESC"
-  - "is_recent) WHERE is_recent = true"
+  - "is_recent WHERE is_recent = true"
 
 refresh_trigger: "interval_hours=1"   # killer feature — fraîcheur élevée
 sla_minutes: 120

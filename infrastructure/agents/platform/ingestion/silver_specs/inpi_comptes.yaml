@@ -60,7 +60,5 @@ indexes:
   - "siren, date_cloture DESC"
   - type_bilan
 
-refresh_trigger:
-  interval_hours: 24
-
+refresh_trigger: "interval_hours=24"
 sla_minutes: 1500

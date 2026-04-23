@@ -56,7 +56,7 @@ indexes:
   - code_commune
   - code_ape
   - etat_administratif
-  - "etablissement_siege) WHERE etablissement_siege = true"
+  - "etablissement_siege WHERE etablissement_siege = true"
   - code_dept
 
 refresh_trigger: "interval_hours=24"

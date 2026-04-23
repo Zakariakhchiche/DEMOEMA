@@ -58,7 +58,7 @@ transformations: |
 indexes:
   - person_uid
   - siren_main
-  - "has_any_social) WHERE has_any_social = true"
+  - "has_any_social WHERE has_any_social = true"
   - "n_total_social DESC"
 
 refresh_trigger: "interval_hours=6"

@@ -51,7 +51,7 @@ indexes:
   - siren
   - "digital_presence_score DESC"
   - "domains_count DESC"
-  - "has_linkedin_page) WHERE has_linkedin_page = true"
+  - "has_linkedin_page WHERE has_linkedin_page = true"
 
 refresh_trigger: "interval_hours=12"
 sla_minutes: 1440

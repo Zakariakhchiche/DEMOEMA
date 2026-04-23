@@ -48,7 +48,7 @@ indexes:
   - "nom, prenom"
   - date_naissance
   - "n_mandats_actifs DESC"
-  - "is_multi_mandat) WHERE is_multi_mandat = true"
+  - "is_multi_mandat WHERE is_multi_mandat = true"
   - "sirens_mandats USING gin"
 
 refresh_trigger: "interval_hours=24"
