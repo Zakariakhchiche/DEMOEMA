@@ -1,7 +1,7 @@
 """
 EdRCF 6.0 - Demo Data Module
 Signal catalog, scoring weights, and sector heat data for the EdRCF platform.
-Company data is now loaded from Pappers MCP (see pappers_loader.py).
+Company data is loaded from gov APIs (annuaire-entreprises, INPI, BODACC) — see data_sources.py.
 """
 
 # ============================================================================
@@ -12,8 +12,8 @@ SIGNAL_CATALOG = {
     # --- HIGH severity (5 signals) ---
     "holding_creation": {
         "label": "Creation de holding patrimoniale",
-        "source": "Pappers / BODACC",
-        "source_url": "https://www.pappers.fr",
+        "source": "annuaire-entreprises / BODACC",
+        "source_url": "https://annuaire-entreprises.data.gouv.fr",
         "dimension": "signaux_patrimoniaux",
         "points": 20,
         "severity": "high",
@@ -30,8 +30,8 @@ SIGNAL_CATALOG = {
     },
     "founder_60_no_successor": {
         "label": "Fondateur > 60 ans sans successeur identifie",
-        "source": "Pappers + LinkedIn",
-        "source_url": "https://www.pappers.fr",
+        "source": "annuaire-entreprises + LinkedIn",
+        "source_url": "https://annuaire-entreprises.data.gouv.fr",
         "dimension": "maturite_dirigeant",
         "points": 15,
         "severity": "high",
@@ -95,8 +95,8 @@ SIGNAL_CATALOG = {
     },
     "ca_growth_2years": {
         "label": "Croissance CA > 15% sur 2 exercices",
-        "source": "Pappers",
-        "source_url": "https://www.pappers.fr",
+        "source": "annuaire-entreprises",
+        "source_url": "https://annuaire-entreprises.data.gouv.fr",
         "dimension": "dynamique_financiere",
         "points": 8,
         "severity": "medium",
@@ -104,8 +104,8 @@ SIGNAL_CATALOG = {
     },
     "new_establishment": {
         "label": "Ouverture d'un nouvel etablissement",
-        "source": "Pappers",
-        "source_url": "https://www.pappers.fr",
+        "source": "annuaire-entreprises",
+        "source_url": "https://annuaire-entreprises.data.gouv.fr",
         "dimension": "dynamique_financiere",
         "points": 6,
         "severity": "medium",
@@ -160,8 +160,8 @@ SIGNAL_CATALOG = {
     },
     "auditor_change": {
         "label": "Changement de commissaire aux comptes",
-        "source": "Pappers",
-        "source_url": "https://www.pappers.fr",
+        "source": "annuaire-entreprises",
+        "source_url": "https://annuaire-entreprises.data.gouv.fr",
         "dimension": "signaux_patrimoniaux",
         "points": 5,
         "severity": "low",
@@ -209,8 +209,8 @@ SIGNAL_CATALOG = {
     # --- Procédures collectives (HIGH) ---
     "procedure_collective": {
         "label": "Procedure collective en cours (redressement / liquidation)",
-        "source": "Pappers / BODACC",
-        "source_url": "https://www.pappers.fr",
+        "source": "annuaire-entreprises / BODACC",
+        "source_url": "https://annuaire-entreprises.data.gouv.fr",
         "dimension": "signaux_patrimoniaux",
         "points": 20,
         "severity": "high",
@@ -220,8 +220,8 @@ SIGNAL_CATALOG = {
     # --- Score Pappers défaillance (MEDIUM) ---
     "score_pappers_risque": {
         "label": "Score de risque Pappers eleve (defaillance probable)",
-        "source": "Pappers",
-        "source_url": "https://www.pappers.fr",
+        "source": "annuaire-entreprises",
+        "source_url": "https://annuaire-entreprises.data.gouv.fr",
         "dimension": "dynamique_financiere",
         "points": 10,
         "severity": "medium",
@@ -231,8 +231,8 @@ SIGNAL_CATALOG = {
     # --- Dirigeant multi-mandats (MEDIUM) ---
     "dirigeant_multi_mandats": {
         "label": "Dirigeant avec mandats dans plusieurs societes",
-        "source": "Pappers",
-        "source_url": "https://www.pappers.fr",
+        "source": "annuaire-entreprises",
+        "source_url": "https://annuaire-entreprises.data.gouv.fr",
         "dimension": "maturite_dirigeant",
         "points": 8,
         "severity": "medium",
@@ -403,5 +403,5 @@ SECTORS_HEAT = {
 
 
 # ============================================================================
-# COMPANIES - removed, now loaded from Pappers MCP (see pappers_loader.py)
+# COMPANIES - removed, loaded from gov APIs (see data_sources.py / pappers_loader.py)
 # ============================================================================
