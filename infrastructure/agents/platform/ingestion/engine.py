@@ -267,10 +267,24 @@ def start_scheduler() -> None:
         log.warning("Silver engine init skipped: %s", e)
         n_silvers = 0
 
+    # Neo4j graph rebuild (daily 04:00 Paris)
+    try:
+        from ingestion.neo4j_sync import run_neo4j_rebuild
+        scheduler.add_job(
+            run_neo4j_rebuild,
+            trigger=CronTrigger(hour=4, minute=0, timezone="Europe/Paris"),
+            id="neo4j_rebuild_daily",
+            name="Neo4j graph rebuild (dirigeants multi-mandats)",
+            max_instances=1, coalesce=True, replace_existing=True,
+        )
+        log.info("Neo4j rebuild job registered (04:00 daily Paris)")
+    except Exception as e:
+        log.warning("Neo4j rebuild init skipped: %s", e)
+
     scheduler.start()
     log.info(
-        "Scheduler démarré — %d sources + %d silvers + 4 managers "
-        "(supervisor+maintainer+completeness+silver_maintainer)",
+        "Scheduler démarré — %d sources + %d silvers + 5 managers "
+        "(supervisor+maintainer+completeness+silver_maintainer+neo4j_rebuild)",
         len(SOURCES), n_silvers,
     )
 
