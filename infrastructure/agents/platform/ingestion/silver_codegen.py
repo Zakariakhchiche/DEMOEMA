@@ -63,7 +63,7 @@ def _validate_sql(sql: str) -> tuple[bool, str]:
     """Check SQL for dangerous patterns + basic structure."""
     if not sql or len(sql) < 50:
         return False, "SQL too short or empty"
-    if not re.search(r"CREATE\s+(OR\s+REPLACE\s+)?MATERIALIZED\s+VIEW\s+silver\.", sql, re.IGNORECASE):
+    if not re.search(r"CREATE\s+(OR\s+REPLACE\s+)?MATERIALIZED\s+VIEW\s+(IF\s+NOT\s+EXISTS\s+)?silver\.", sql, re.IGNORECASE):
         return False, "No CREATE MATERIALIZED VIEW silver.* found"
     upper = sql.upper()
     for pattern in BANNED_PATTERNS:
