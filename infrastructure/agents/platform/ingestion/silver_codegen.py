@@ -146,9 +146,25 @@ Corrige ce problème dans cette nouvelle version.
 
     idx_block = ""
     if indexes:
-        idx_block = "\n## INDEXES À CRÉER\n" + "\n".join(
-            f"- `CREATE INDEX ON {silver_name}({idx})`" for idx in indexes
-        )
+        _idx_lines = []
+        for idx in indexes:
+            # Detect GIN indexes (array columns, jsonb, tsvector, trigram)
+            # and produce correct Postgres syntax: CREATE INDEX ON t USING gin (col)
+            idx_lower = idx.lower()
+            if "using gin" in idx_lower or idx.endswith(" USING gin"):
+                col = idx.replace("USING gin", "").replace("using gin", "").strip().strip("()")
+                _idx_lines.append(f"- `CREATE INDEX ON {silver_name} USING gin ({col})`")
+            elif "where" in idx_lower:
+                # Partial index: "col WHERE cond" -> CREATE INDEX ON t (col) WHERE cond
+                parts = re.split(r"\s+WHERE\s+", idx, maxsplit=1, flags=re.IGNORECASE)
+                if len(parts) == 2:
+                    col, cond = parts[0].strip(), parts[1].strip()
+                    _idx_lines.append(f"- `CREATE INDEX ON {silver_name} ({col}) WHERE {cond}`")
+                else:
+                    _idx_lines.append(f"- `CREATE INDEX ON {silver_name} ({idx})`")
+            else:
+                _idx_lines.append(f"- `CREATE INDEX ON {silver_name} ({idx})`")
+        idx_block = "\n## INDEXES À CRÉER (respecte EXACTEMENT cette syntaxe Postgres)\n" + "\n".join(_idx_lines)
 
     schema_block = _format_schema_for_prompt(schemas)
 
