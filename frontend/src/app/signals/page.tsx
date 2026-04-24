@@ -52,6 +52,7 @@ export default function SignalsPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("All");
+  const [dimensionFilter, setDimensionFilter] = useState("All");
   const [catalogOpen, setCatalogOpen] = useState(false);
 
   const { data, isLoading } = useSignals();

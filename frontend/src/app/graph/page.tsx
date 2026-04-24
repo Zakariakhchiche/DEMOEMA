@@ -69,23 +69,10 @@ export default function RelationshipGraph() {
 
   const filteredData = useMemo(() => {
     let nodes = graphData.nodes;
-    if (activeFilter !== "all") nodes = nodes.filter(n => n.type === activeFilter);
-    if (search) nodes = nodes.filter(n =>
-      n.name.toLowerCase().includes(search.toLowerCase()) ||
-      (n.company || "").toLowerCase().includes(search.toLowerCase()) ||
-      (n.sector || "").toLowerCase().includes(search.toLowerCase())
-    );
-    const ids = new Set(nodes.map(n => n.id));
-    const links = graphData.links.filter(l => ids.has(l.source as string) && ids.has(l.target as string));
-    return { nodes, links };
-  }, [search, activeFilter, graphData]);
-
     if (activeFilter !== "all") {
       if (activeFilter === "subsidiary") {
         const subNodes = nodes.filter((n) => n.type === "subsidiary");
-        const parentIds = new Set(
-          subNodes.map((n) => n.company).filter(Boolean)
-        );
+        const parentIds = new Set(subNodes.map((n) => n.company).filter(Boolean));
         nodes = nodes.filter(
           (n) =>
             n.type === "subsidiary" ||
@@ -95,14 +82,20 @@ export default function RelationshipGraph() {
         nodes = nodes.filter((n) => n.type === activeFilter);
       }
     }
-
+    if (search) {
+      nodes = nodes.filter(
+        (n) =>
+          n.name.toLowerCase().includes(search.toLowerCase()) ||
+          (n.company || "").toLowerCase().includes(search.toLowerCase()) ||
+          (n.sector || "").toLowerCase().includes(search.toLowerCase())
+      );
+    }
     const nodeIds = new Set(nodes.map((n) => n.id));
     const links = graphData.links.filter(
-      (l) =>
-        nodeIds.has(l.source as string) && nodeIds.has(l.target as string)
+      (l) => nodeIds.has(l.source as string) && nodeIds.has(l.target as string)
     );
     return { nodes, links };
-  }, [activeFilter, graphData]);
+  }, [search, activeFilter, graphData]);
 
   const handleNodeClick = useCallback((node: GraphNode) => {
     setSelectedNode(node);
