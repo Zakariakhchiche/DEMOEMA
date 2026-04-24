@@ -225,7 +225,6 @@ export default function SignalsPage() {
               <div className="text-[10px] font-black text-gray-600 uppercase tracking-widest">
                 {filteredSignals.length}/{signals.length} signaux
               </div>
-            </div>
             {/* Dimension row */}
             {Object.keys(dimensionCounts).length > 0 && (
               <div className="flex gap-1.5 flex-wrap">

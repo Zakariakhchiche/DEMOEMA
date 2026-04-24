@@ -96,6 +96,7 @@ export default function Sidebar() {
             ⌘K
           </span>
         </div>
+      </div>
 
       {/* Primary Navigation */}
       <nav className="flex-1 flex flex-col gap-1.5">
