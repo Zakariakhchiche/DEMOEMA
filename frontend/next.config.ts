@@ -17,7 +17,7 @@ const nextConfig: NextConfig = {
     ignoreDuringBuilds: true,
   },
   async rewrites() {
-    // En dev : proxy vers FastAPI local.
+    // En dev : proxy vers FastAPI local (ou BACKEND_URL override).
     // En prod :
     //   - Vercel : vercel.json gère le routing (pas de rewrite ici).
     //   - Cloudflare Workers / autre : utiliser BACKEND_URL pour cibler
@@ -33,6 +33,7 @@ const nextConfig: NextConfig = {
       }
       return [];
     }
+    const backendUrl = process.env.BACKEND_URL || "http://localhost:8000";
     return [
       {
         source: "/api/:path*",
