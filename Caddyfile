@@ -29,3 +29,14 @@ studio.{$DOMAIN:localhost} {
         format console
     }
 }
+
+grafana.{$DOMAIN:localhost} {
+    encode zstd gzip
+
+    reverse_proxy demomea-grafana:3000
+
+    log {
+        output stdout
+        format console
+    }
+}

@@ -1,0 +1,57 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: info
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # All Docker containers — shipped with labels = container name + image
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 15s
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container'
+      - source_labels: ['__meta_docker_container_log_stream']
+        target_label: 'stream'
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        target_label: 'service'
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_project']
+        target_label: 'project'
+    pipeline_stages:
+      # Parse JSON logs from backend (python-json-logger) — extract level, msg, logger
+      - match:
+          selector: '{container=~"demomea-backend|demomea-agents-platform"}'
+          stages:
+            - json:
+                expressions:
+                  level: levelname
+                  logger: name
+                  message: message
+                  timestamp: asctime
+            - labels:
+                level:
+                logger:
+            - timestamp:
+                source: timestamp
+                format: "2006-01-02 15:04:05,000"
+      # Caddy access logs — parse JSON format
+      - match:
+          selector: '{container="demomea-caddy"}'
+          stages:
+            - json:
+                expressions:
+                  status: status
+                  method: request.method
+                  uri: request.uri
+                  duration: duration
+            - labels:
+                status:
+                method:

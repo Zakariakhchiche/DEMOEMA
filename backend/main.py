@@ -157,6 +157,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Structured JSON logging + Prometheus /metrics
+try:
+    from logging_config import configure_logging, install_prometheus_metrics
+    configure_logging()
+    install_prometheus_metrics(app)
+except Exception as _e:
+    import logging as _logging
+    _logging.getLogger(__name__).warning("observability setup failed: %s", _e)
+
 # CORS configuration
 _default_origins = [
     "http://localhost:3000",

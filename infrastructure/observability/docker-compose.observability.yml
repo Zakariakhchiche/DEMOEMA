@@ -1,0 +1,99 @@
+version: "3.8"
+
+# DEMOEMA observability stack — Loki (logs) + Promtail (log shipping) + Grafana (UI) + Prometheus (metrics)
+# Separate compose to allow independent lifecycle from main app stack.
+# Usage:
+#   docker compose -f infrastructure/observability/docker-compose.observability.yml up -d
+# Access after DNS or via IP:
+#   Grafana:    https://grafana.<DOMAIN>     (admin/<GRAFANA_ADMIN_PASSWORD>)
+#   Prometheus: http://localhost:9090 (internal, behind Caddy if exposed)
+#
+# Logs collected from: all docker containers (Promtail mounts /var/run/docker.sock)
+# Metrics: Prometheus scrapes /metrics on backend + agents-platform (to be added)
+# Retention: Loki 30d (config below), Prometheus 15d default
+
+services:
+  loki:
+    image: grafana/loki:3.2.1
+    container_name: demomea-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/config.yaml
+    volumes:
+      - ./loki-config.yaml:/etc/loki/config.yaml:ro
+      - loki-data:/loki
+    networks:
+      - observability
+    expose:
+      - "3100"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3100/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  promtail:
+    image: grafana/promtail:3.2.1
+    container_name: demomea-promtail
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/config.yaml
+    volumes:
+      - ./promtail-config.yaml:/etc/promtail/config.yaml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - observability
+    depends_on:
+      loki:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v3.0.1
+    container_name: demomea-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./prometheus-config.yaml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - observability
+      - web
+    expose:
+      - "9090"
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: demomea-grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-change_me}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+    networks:
+      - observability
+      - web
+    expose:
+      - "3000"
+    depends_on:
+      - loki
+      - prometheus
+
+volumes:
+  loki-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  observability:
+    driver: bridge
+  web:
+    external: true

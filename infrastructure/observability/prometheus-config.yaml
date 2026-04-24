@@ -1,0 +1,34 @@
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+  external_labels:
+    env: prod
+    app: demoema
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Backend FastAPI — exposes /metrics once prometheus-fastapi-instrumentator is added
+  - job_name: demomea-backend
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['backend:8000']
+        labels:
+          service: backend
+
+  # Agents platform — exposes /metrics (to be added)
+  - job_name: demomea-agents
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['demomea-agents-platform:8001']
+        labels:
+          service: agents
+
+  # Caddy metrics — native, exposed on :2019/metrics
+  - job_name: caddy
+    static_configs:
+      - targets: ['caddy:2019']
+        labels:
+          service: caddy
