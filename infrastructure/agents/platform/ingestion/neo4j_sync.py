@@ -40,6 +40,7 @@ def _ensure_schema(driver):
         s.run("CREATE CONSTRAINT company_siren IF NOT EXISTS FOR (c:Company) REQUIRE c.siren IS UNIQUE")
         s.run("CREATE CONSTRAINT person_uid   IF NOT EXISTS FOR (p:Person)  REQUIRE p.uid   IS UNIQUE")
         s.run("CREATE INDEX person_nom IF NOT EXISTS FOR (p:Person) ON (p.nom)")
+        s.run("CREATE INDEX person_full_name IF NOT EXISTS FOR (p:Person) ON (p.full_name)")
         s.run("CREATE INDEX company_forme IF NOT EXISTS FOR (c:Company) ON (c.forme_juridique)")
 
 
@@ -80,7 +81,11 @@ SET c.denomination = row.denomination,
 MERGE_PERSON_EDGE = """
 UNWIND $rows AS row
 MERGE (p:Person {uid: row.uid})
-SET p.nom = row.nom, p.prenoms = row.prenoms, p.date_naissance = row.date_naissance
+SET p.nom = row.nom,
+    p.prenoms = row.prenoms,
+    p.prenom = row.prenom,
+    p.full_name = row.full_name,
+    p.date_naissance = row.date_naissance
 WITH p, row
 MATCH (c:Company {siren: row.siren})
 MERGE (p)-[r:IS_DIRIGEANT]->(c)
@@ -135,9 +140,14 @@ async def run_neo4j_rebuild() -> dict:
             params = []
             for (siren, nom, prenoms, dn, role_ent, actif, individu_role) in prows:
                 prenom = (prenoms or [""])[0]
+                # full_name : prénom1 + nom — caption naturel pour le Browser
+                # (sinon le node n'affiche que l'uid hash, illisible).
+                full_name = " ".join(part for part in (prenom, nom) if part).strip()
                 params.append({
                     "uid": _person_uid(nom, prenom, dn),
-                    "nom": nom, "prenoms": prenoms or [], "date_naissance": dn,
+                    "nom": nom, "prenoms": prenoms or [], "prenom": prenom,
+                    "full_name": full_name,
+                    "date_naissance": dn,
                     "siren": siren, "role": role_ent, "actif": bool(actif),
                     "individu_role": individu_role,
                 })
