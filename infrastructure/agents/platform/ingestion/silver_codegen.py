@@ -63,15 +63,34 @@ def _validate_sql(sql: str) -> tuple[bool, str]:
     """Check SQL for dangerous patterns + basic structure."""
     if not sql or len(sql) < 50:
         return False, "SQL too short or empty"
-    if not re.search(r"CREATE\s+(OR\s+REPLACE\s+)?MATERIALIZED\s+VIEW\s+(IF\s+NOT\s+EXISTS\s+)?silver\.", sql, re.IGNORECASE):
-        return False, "No CREATE MATERIALIZED VIEW silver.* found"
-    upper = sql.upper()
+
+    mv_match = re.search(
+        r"CREATE\s+(OR\s+REPLACE\s+)?MATERIALIZED\s+VIEW\s+(IF\s+NOT\s+EXISTS\s+)?(\S+)",
+        sql,
+        re.IGNORECASE,
+    )
+    if not mv_match:
+        return False, "No CREATE MATERIALIZED VIEW found"
+    or_replace, if_not_exists, target = mv_match.groups()
+
+    # IF NOT EXISTS is banned because _apply_sql drops first; with IF NOT EXISTS
+    # the CREATE silently no-ops on regen and only the indexes get re-applied,
+    # which is what produced 17 duplicate indexes on silver.insee_unites_legales.
+    if if_not_exists:
+        return False, "IF NOT EXISTS is forbidden — regen requires a real replace"
+    if or_replace:
+        return False, "OR REPLACE is not supported by Postgres for MATERIALIZED VIEW"
+    if not target.lower().startswith("silver."):
+        return False, "CREATE MATERIALIZED VIEW silver.* expected as target"
+
     for pattern in BANNED_PATTERNS:
         if re.search(pattern, sql, re.IGNORECASE):
             return False, f"Banned pattern: {pattern}"
-    # Must reference at least one bronze table
-    if "BRONZE." not in upper:
-        return False, "No bronze source referenced"
+
+    # A source must be cited via FROM or JOIN — counting "silver." occurrences
+    # would false-positive on the target itself.
+    if not re.search(r"\b(?:FROM|JOIN)\s+(?:bronze|silver)\.", sql, re.IGNORECASE):
+        return False, "No bronze or silver source referenced (FROM/JOIN bronze.* or silver.*)"
     return True, "ok"
 
 
@@ -191,10 +210,10 @@ Corrige ce problème dans cette nouvelle version.
 {idx_block}
 
 ## RÈGLES NON NÉGOCIABLES
-1. **Un seul `CREATE MATERIALIZED VIEW IF NOT EXISTS {silver_name} AS ...`** suivi des CREATE INDEX
+1. **Un seul `CREATE MATERIALIZED VIEW {silver_name} AS ...`** (PAS de `IF NOT EXISTS`, PAS de `OR REPLACE` — l'apply fait DROP CASCADE avant), suivi des CREATE INDEX
 2. **INTERDIT** : DROP/DELETE/TRUNCATE/ALTER sur bronze.*, COPY FROM PROGRAM, CREATE EXTENSION, plpython
 3. **Autorisé** : SELECT, JOIN, CASE, aggregat, CTE, jsonb_*, to_date, coalesce, nullif, array_agg
-4. **Qualifie** toutes les tables par leur schema : `bronze.xxx`, jamais sans préfixe
+4. **Qualifie** toutes les tables par leur schema : `bronze.xxx` ou `silver.xxx`, jamais sans préfixe (les silver-of-silver sont autorisés ; voir SCHÉMAS BRONZE DISPONIBLES — peut contenir des `silver.*`)
 5. **CAST** explicite pour les colonnes non typées (ex: `(payload->>'date')::date`)
 6. **Dedup** : utilise GROUP BY ou DISTINCT ON si le grain l'exige
 7. **Gère les NULLS** : NULLIF('') pour les strings vides, COALESCE quand applicable
@@ -345,14 +364,24 @@ def _log_version(
 
 
 def _apply_sql(silver_name: str, sql: str, version_uid: str) -> dict:
-    """Execute the generated SQL. Returns apply stats."""
+    """Execute the generated SQL atomically.
+
+    Drops the existing MV (CASCADE — also drops its indexes) inside the same
+    transaction as the new CREATE, so a re-applied silver fully replaces its
+    predecessor and never accumulates duplicate indexes. Postgres has no
+    CREATE OR REPLACE MATERIALIZED VIEW, so DROP+CREATE is the only path.
+    """
     if not settings.database_url:
         return {"applied": False, "error": "no database_url"}
+    qualified = silver_name if "." in silver_name else f"silver.{silver_name}"
     try:
-        with psycopg.connect(settings.database_url, autocommit=True) as conn, conn.cursor() as cur:
+        with psycopg.connect(settings.database_url) as conn, conn.cursor() as cur:
             cur.execute("SET statement_timeout = 0")
+            cur.execute(f"DROP MATERIALIZED VIEW IF EXISTS {qualified} CASCADE")
             cur.execute(sql)
-            # mark version applied
+            conn.commit()
+        # audit log on its own connection (autocommit)
+        with psycopg.connect(settings.database_url, autocommit=True) as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE audit.silver_specs_versions SET applied = true, applied_at = now() WHERE version_uid = %s",
                 (version_uid,),
@@ -371,3 +400,114 @@ def list_silver_specs() -> list[str]:
         for p in SILVER_SPECS_DIR.glob("*.yaml")
         if not p.stem.startswith("_")
     )
+
+
+# ═══════════ Bootstrap : combler l'écart specs YAML ↔ MV en base ═══════════
+
+def _silver_state(conn) -> dict[str, int | None]:
+    """For every materialized view in schema 'silver', return its row count.
+    Missing MVs are absent from the returned dict.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT n.nspname || '.' || c.relname AS qname,
+                   c.reltuples::bigint           AS approx_rows
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'silver' AND c.relkind = 'm'
+            """
+        )
+        return {row[0]: row[1] for row in cur.fetchall()}
+
+
+def _topo_sort_specs() -> list[str]:
+    """Return spec names ordered so each silver-of-silver appears after its deps.
+
+    Edges come from spec.source_tables : if `silver.B` lists `silver.A` as a
+    source, A is built before B. Pure bronze-source specs come first.
+    Cycles fall back to alphabetical order for the unresolved tail.
+    """
+    deps: dict[str, set[str]] = {}
+    for p in SILVER_SPECS_DIR.glob("*.yaml"):
+        if p.stem.startswith("_"):
+            continue
+        try:
+            with p.open(encoding="utf-8") as f:
+                spec = yaml.safe_load(f) or {}
+        except Exception:
+            continue
+        name = spec.get("silver_name") or f"silver.{p.stem}"
+        if not name.startswith("silver."):
+            name = f"silver.{name}"
+        srcs = spec.get("source_tables") or []
+        deps[name] = {s for s in srcs if isinstance(s, str) and s.startswith("silver.")}
+
+    ordered: list[str] = []
+    seen: set[str] = set()
+    pending = dict(deps)
+    while pending:
+        ready = sorted(n for n, d in pending.items() if d.issubset(seen | {n}))
+        if not ready:
+            ordered.extend(sorted(pending))
+            break
+        for n in ready:
+            ordered.append(n)
+            seen.add(n)
+            pending.pop(n, None)
+    return ordered
+
+
+async def bootstrap_missing_silvers(force_empty: bool = True) -> dict:
+    """Walk every silver spec YAML and ensure the matching MV exists with rows.
+
+    Used at engine startup AND on the migrate-VPS scenario where Postgres is
+    empty after Bronze has been ingested. For each spec :
+      - MV missing                    → generate + apply
+      - MV exists but 0 rows (and force_empty=True) → regenerate + apply
+      - MV exists with rows           → leave alone (refresh job handles it)
+
+    Specs are processed in topological order so silver-of-silver dependencies
+    are built before their consumers. Returns a per-spec report.
+    """
+    if not settings.database_url:
+        return {"error": "no database_url"}
+
+    specs = _topo_sort_specs()
+    results: list[dict] = []
+
+    with psycopg.connect(settings.database_url) as conn:
+        existing = _silver_state(conn)
+
+    for silver_name in specs:
+        rows = existing.get(silver_name)
+        needs_build = (rows is None) or (force_empty and rows == 0)
+        if not needs_build:
+            results.append({"silver_name": silver_name, "action": "skip", "rows": rows})
+            continue
+
+        reason = "missing" if rows is None else "empty"
+        log.info("[silver_bootstrap] building %s (%s)", silver_name, reason)
+        try:
+            r = await generate_silver_sql(silver_name, apply_immediately=True)
+            results.append({
+                "silver_name": silver_name,
+                "action": "build",
+                "reason": reason,
+                "valid": r.get("valid"),
+                "applied": r.get("applied"),
+                "validation_msg": r.get("validation_msg"),
+                "error": r.get("error") or r.get("apply_error"),
+            })
+        except Exception as e:
+            log.exception("[silver_bootstrap] failed %s", silver_name)
+            results.append({
+                "silver_name": silver_name, "action": "build",
+                "reason": reason, "applied": False, "error": str(e),
+            })
+
+    built = sum(1 for r in results if r["action"] == "build" and r.get("applied"))
+    failed = sum(1 for r in results if r["action"] == "build" and not r.get("applied"))
+    skipped = sum(1 for r in results if r["action"] == "skip")
+    log.info("[silver_bootstrap] %d built / %d failed / %d skipped", built, failed, skipped)
+    return {"built": built, "failed": failed, "skipped": skipped, "details": results}

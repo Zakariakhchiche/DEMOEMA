@@ -1,0 +1,60 @@
+silver_name: silver.dirigeant_sci_patrimoine
+goal: >
+  Patrimoine immobilier détecté via SCI : un row par dirigeant individu (nom +
+  prenom1 + date_naissance) ayant au moins 1 mandat dans une SCI. Alimente la
+  dimension "Signaux patrimoniaux +20pts" du scoring M&A — un dirigeant
+  multi-SCI signale forte capacité patrimoniale et probable volonté de céder.
+
+source_tables:
+  - bronze.inpi_formalites_personnes
+  - bronze.inpi_formalites_entreprises
+
+grain: "1 row par dirigeant (clé = upper(nom) + upper(prenom1) + date_naissance)"
+
+key_columns:
+  - nom
+  - prenom
+  - date_naissance
+  - n_sci
+
+business_logic: |
+  JOIN bronze.inpi_formalites_personnes p sur bronze.inpi_formalites_entreprises e
+  via e.siren = p.siren.
+
+  FILTRE base WHERE :
+  - p.type_de_personne = 'INDIVIDU'
+  - p.actif = true
+  - p.individu_nom IS NOT NULL
+
+  GROUP BY clé dirigeant :
+  - nom = upper(trim(p.individu_nom))
+  - prenom = COALESCE(upper(trim(p.individu_prenoms[1])), '')
+  - date_naissance = p.individu_date_naissance
+
+  Codes SCI (forme_juridique INSEE — code 6540 série) :
+  ('6540','6541','6542','6543','6544','6545','6546','6547','6548','6549')
+
+  Agrégats à exposer (tous FILTERed sur SCI sauf n_total_mandats et all_sirens_mandats) :
+  - n_sci                = count(DISTINCT e.siren) FILTER (WHERE e.forme_juridique IN <SCI>)
+  - n_total_mandats      = count(DISTINCT e.siren)
+  - sci_sirens           = array_agg(DISTINCT e.siren) FILTER (WHERE e.forme_juridique IN <SCI>)
+  - sci_denominations    = array_agg(DISTINCT e.denomination) FILTER (...)
+  - sci_code_postaux     = array_agg(DISTINCT e.adresse_code_postal) FILTER (...)
+  - first_sci_date       = min(e.date_immatriculation) FILTER (...)
+  - total_capital_sci    = sum(e.montant_capital) FILTER (...)
+  - all_sirens_mandats   = array_agg(DISTINCT p.siren)   -- tous mandats du dirigeant
+
+  HAVING n_sci > 0  (on ne garde que les dirigeants ayant au moins une SCI).
+
+transformations: |
+  Pas de CTE nécessaire — un seul GROUP BY suffit.
+  Attention : individu_prenoms est un text[] (array Postgres), prendre le 1er
+  élément avec [1] et appliquer upper(trim(...)).
+
+indexes:
+  - nom
+  - date_naissance
+  - "n_sci DESC"
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 1500

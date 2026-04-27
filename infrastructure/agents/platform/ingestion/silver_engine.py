@@ -72,9 +72,24 @@ def _build_trigger(spec: dict):
 
 
 def start_silver_scheduler(scheduler) -> int:
-    """Register all silver refresh jobs on the passed AsyncIOScheduler. Returns N registered."""
+    """Register all silver refresh jobs on the passed AsyncIOScheduler.
+
+    Schedules a one-shot bootstrap (5s after boot) that fills in any silver
+    spec whose MV is missing or empty. This is what makes the migration
+    scenario work end-to-end: drop a fresh Postgres in, ingest Bronze, start
+    the engine, and silver builds itself from YAML specs without any manual
+    SQL. Refresh jobs and the maintainer follow.
+    """
     global SILVERS
     SILVERS = load_all_specs()
+
+    scheduler.add_job(
+        run_silver_bootstrap, trigger="date",
+        run_date=datetime.now(tz=timezone.utc).replace(microsecond=0),
+        id="silver_bootstrap", name="Silver bootstrap missing/empty MVs",
+        max_instances=1, coalesce=True, replace_existing=True,
+        misfire_grace_time=300,
+    )
     for name, spec in SILVERS.items():
         trigger = _build_trigger(spec)
         job_id = f"silver_refresh_{name.replace('silver.', '')}"
@@ -84,14 +99,22 @@ def start_silver_scheduler(scheduler) -> int:
             max_instances=1, coalesce=True, replace_existing=True,
         )
         log.info("[silver] registered refresh %s (trigger=%s)", name, spec.get("refresh_trigger"))
-    # Maintainer job
     scheduler.add_job(
         run_silver_maintainer, trigger=IntervalTrigger(minutes=30),
         id="silver_maintainer", name="Silver maintainer staleness",
         max_instances=1, coalesce=True, replace_existing=True,
     )
-    log.info("[silver] scheduler registered %d silvers + 1 maintainer", len(SILVERS))
+    log.info("[silver] scheduler registered bootstrap + %d silvers + 1 maintainer", len(SILVERS))
     return len(SILVERS)
+
+
+async def run_silver_bootstrap() -> dict:
+    """Wrapper around silver_codegen.bootstrap_missing_silvers (cron-friendly)."""
+    try:
+        from ingestion.silver_codegen import bootstrap_missing_silvers
+    except ImportError as e:
+        return {"error": f"silver_codegen unavailable: {e}"}
+    return await bootstrap_missing_silvers(force_empty=True)
 
 
 # ═══════════ Refresh runner ═══════════
@@ -202,7 +225,15 @@ MAX_CONSECUTIVE_FAILS = 3
 
 
 async def run_silver_maintainer() -> dict:
-    """Find stale / failing silvers, trigger regen via silver_codegen with feedback."""
+    """Find stale / failing / empty / never-run silvers and regen via codegen.
+
+    Catches four kinds of broken silvers :
+      1. stale            — last_refresh_at older than sla
+      2. failing          — consecutive_fails >= MAX_CONSECUTIVE_FAILS
+      3. anomalous drop   — last_delta_pct < ANOMALY_DROP_PCT
+      4. empty            — last_status='ok' but current_rows=0 (silent zero)
+      5. never run        — spec YAML present but no row in silver_freshness
+    """
     if not settings.database_url:
         return {"error": "no db"}
     try:
@@ -212,23 +243,24 @@ async def run_silver_maintainer() -> dict:
 
     to_regen: list[dict] = []
     with psycopg.connect(settings.database_url, autocommit=True) as conn, conn.cursor() as cur:
-        # Staleness: last_refresh_at < now() - sla_minutes
         cur.execute(
             """
-            SELECT silver_name, last_refresh_at, last_status, consecutive_fails, sla_minutes, last_delta_pct
+            SELECT silver_name, last_refresh_at, last_status, consecutive_fails,
+                   sla_minutes, last_delta_pct, current_rows
             FROM audit.silver_freshness
             WHERE NOT parked
               AND (
                    last_refresh_at < now() - (sla_minutes || ' minutes')::interval
                 OR consecutive_fails >= %s
                 OR last_delta_pct < %s
+                OR (last_status = 'ok' AND COALESCE(current_rows, 0) = 0)
               )
             ORDER BY last_refresh_at NULLS FIRST
             LIMIT 5
             """,
             (MAX_CONSECUTIVE_FAILS, ANOMALY_DROP_PCT),
         )
-        for sname, last, status, fails, sla, delta_pct in cur.fetchall():
+        for sname, last, status, fails, sla, delta_pct, rows in cur.fetchall():
             reason = []
             if fails and fails >= MAX_CONSECUTIVE_FAILS:
                 reason.append(f"consecutive_fails={fails}")
@@ -236,13 +268,28 @@ async def run_silver_maintainer() -> dict:
                 reason.append(f"anomaly_delta_pct={delta_pct:.1f}")
             if last and (datetime.now(tz=timezone.utc) - last).total_seconds() > sla * 60:
                 reason.append("staleness")
+            if status == "ok" and (rows is None or rows == 0):
+                reason.append("empty_after_ok_refresh")
             to_regen.append({
                 "silver_name": sname,
                 "last_status": status,
                 "reason": ", ".join(reason) or "unknown",
             })
 
-    # Fetch last error for each candidate (feedback for LLM)
+    # Catch silvers that have a YAML but were never refreshed (no freshness row).
+    spec_names = set((SILVERS or load_all_specs()).keys())
+    if spec_names:
+        with psycopg.connect(settings.database_url, autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute("SELECT silver_name FROM audit.silver_freshness")
+            seen = {r[0] for r in cur.fetchall()}
+        for sname in sorted(spec_names - seen):
+            if len(to_regen) >= 5:
+                break
+            to_regen.append({
+                "silver_name": sname, "last_status": None,
+                "reason": "never_run",
+            })
+
     regen_results = []
     for cand in to_regen:
         sname = cand["silver_name"]
