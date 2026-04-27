@@ -222,6 +222,8 @@ async def run_silver_refresh(silver_name: str, trigger_source: str = "scheduler"
 
 ANOMALY_DROP_PCT = -15.0     # if rows drop more than 15 %, treat as anomaly
 MAX_CONSECUTIVE_FAILS = 3
+PARK_AFTER_REGEN_FAILS = 5   # après N régen LLM successives qui restent applied=false → parked
+                              # (au-delà = gaspillage budget LLM, intervention humaine requise)
 
 
 async def run_silver_maintainer() -> dict:
@@ -346,4 +348,41 @@ async def run_silver_maintainer() -> dict:
             log.exception("[silver_maintainer] regen failed %s", sname)
             regen_results.append({**cand, "regen": {"error": str(e)}})
 
-    return {"candidates": len(to_regen), "regen_results": regen_results}
+    # Parking : silvers ayant accumulé PARK_AFTER_REGEN_FAILS échecs codegen
+    # consécutifs (validation invalid OU applied=false). Au-delà de ce seuil,
+    # le LLM hallucine systématiquement (schéma source incompatible, edge case
+    # business non couvert) — intervention humaine requise. Évite cost runaway.
+    parked_count = 0
+    with psycopg.connect(settings.database_url, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            WITH recent_fails AS (
+                SELECT silver_name, count(*) AS n_fails
+                FROM audit.silver_specs_versions
+                WHERE generated_at > now() - interval '7 days'
+                  AND (validation_status != 'ok' OR applied = false)
+                GROUP BY silver_name
+                HAVING count(*) >= %s
+            )
+            UPDATE audit.silver_freshness f
+            SET parked = true,
+                parked_reason = 'codegen_fails_' || rf.n_fails::text || '_in_7d',
+                updated_at = now()
+            FROM recent_fails rf
+            WHERE f.silver_name = rf.silver_name
+              AND NOT f.parked
+            RETURNING f.silver_name
+            """,
+            (PARK_AFTER_REGEN_FAILS,),
+        )
+        parked = cur.fetchall()
+        parked_count = len(parked)
+        for (sname,) in parked:
+            log.warning("[silver_maintainer] PARKED %s (≥%d codegen fails in 7d) — manual unpark required",
+                        sname, PARK_AFTER_REGEN_FAILS)
+
+    return {
+        "candidates": len(to_regen),
+        "regen_results": regen_results,
+        "parked_now": parked_count,
+    }

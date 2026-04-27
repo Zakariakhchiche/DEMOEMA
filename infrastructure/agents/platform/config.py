@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     # DeepSeek (pour agent openclaw)
     deepseek_api_key: str = Field(default="", description="API key DeepSeek (agent openclaw)")
     deepseek_model: str = Field(default="deepseek-chat", description="Modèle DeepSeek")
+    # Timeout DEEPSEEK distinct du Ollama (qui a 1200s pour kimi-k2.6 long-context).
+    # DeepSeek répond en 30-90s normalement ; un hang réel doit être détecté à 180s,
+    # pas attendre 20 min comme Ollama. Distinct = on catch les vraies pannes.
+    deepseek_timeout_s: int = Field(default=180, description="Timeout DeepSeek (s) — distinct d'Ollama pour catch les hangs")
+    deepseek_max_tokens: int = Field(default=6144, description="Max tokens output DeepSeek (silver-of-silver lourd ≈ 5k)")
 
     # ─── INPI RNE (registre-national-entreprises) ─────────────────────────────
     inpi_username: str = Field(default="", description="Email du compte INPI (login RNE)")

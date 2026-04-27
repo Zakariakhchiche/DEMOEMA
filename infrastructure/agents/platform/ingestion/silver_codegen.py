@@ -121,10 +121,17 @@ async def _llm_chat(model: str, system: str, user: str,
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
+    # Court-circuit : si AUCUNE clé LLM, inutile de tenter quoi que ce soit
+    # — ça consomme 0 budget mais loggue clairement pour le maintainer.
+    if not settings.ollama_api_key and not settings.deepseek_api_key:
+        log.error("[llm_chat] aucune clé LLM disponible (Ollama + DeepSeek vides) — skip")
+        raise RuntimeError("no LLM provider configured — set OLLAMA_API_KEY or DEEPSEEK_API_KEY")
+
     if model.startswith("deepseek"):
-        client = DeepSeekClient(model=model)
+        client = DeepSeekClient(model=model, timeout=settings.deepseek_timeout_s)
         return await client.chat(
-            messages=messages, temperature=temperature, max_tokens=4096,
+            messages=messages, temperature=temperature,
+            max_tokens=settings.deepseek_max_tokens,
         )
 
     client = OllamaClient()
@@ -133,12 +140,21 @@ async def _llm_chat(model: str, system: str, user: str,
             model=model, messages=messages, stream=False,
             options={"temperature": temperature, "num_ctx": num_ctx},
         )
-    except (httpx.TimeoutException, httpx.RemoteProtocolError) as e:
-        log.warning("[llm_chat] Ollama %s a échoué (%s) — fallback DeepSeek", model, type(e).__name__)
+    except (httpx.TimeoutException, httpx.RemoteProtocolError, httpx.ConnectError) as e:
+        # Fallback DeepSeek avec timeout DISTINCT (180s vs Ollama 1200s) :
+        # un DeepSeek qui ramerait au delà de 3 min = vraie panne, pas hang
+        # raisonnable — on échoue vite plutôt que d'enchaîner 2 timeouts longs.
+        if not settings.deepseek_api_key:
+            log.warning("[llm_chat] Ollama failed (%s) — pas de fallback DeepSeek (clé absente)",
+                        type(e).__name__)
+            raise
+        log.warning("[llm_chat] Ollama %s failed (%s) — fallback DeepSeek (timeout %ds)",
+                    model, type(e).__name__, settings.deepseek_timeout_s)
         try:
-            ds = DeepSeekClient(model="deepseek-chat")
+            ds = DeepSeekClient(model="deepseek-chat", timeout=settings.deepseek_timeout_s)
             return await ds.chat(
-                messages=messages, temperature=temperature, max_tokens=4096,
+                messages=messages, temperature=temperature,
+                max_tokens=settings.deepseek_max_tokens,
             )
         except Exception as fb_err:
             log.exception("[llm_chat] fallback DeepSeek a aussi échoué")
@@ -487,6 +503,47 @@ def _silver_state(conn) -> dict[str, int | None]:
         return {row[0]: row[1] for row in cur.fetchall()}
 
 
+def _bronze_sources_all_empty(source_tables: list[str]) -> list[str]:
+    """Retourne la liste des sources bronze.* à 0 lignes parmi celles fournies.
+
+    Renvoie une liste VIDE soit si aucun bronze source n'est listé (le silver
+    ne dépend que d'autres silvers), soit si au moins UN bronze source a des
+    rows. Renvoie la liste des bronze vides UNIQUEMENT quand TOUS les bronzes
+    listés sont à 0 — signal pour skip safe le silver bootstrap.
+
+    Lit `c.reltuples` (rapide, pas de scan). reltuples=-1 (jamais analyzé)
+    est traité comme "inconnu, pas vide" → no-skip safe.
+    """
+    if not settings.database_url:
+        return []
+    bronze_tables = [t for t in source_tables if t.startswith("bronze.")]
+    if not bronze_tables:
+        return []
+    empty: list[str] = []
+    with psycopg.connect(settings.database_url) as conn, conn.cursor() as cur:
+        for full_name in bronze_tables:
+            schema, table = full_name.split(".", 1)
+            cur.execute(
+                """
+                SELECT c.reltuples::bigint
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = %s AND c.relname = %s AND c.relkind IN ('r','m')
+                """,
+                (schema, table),
+            )
+            row = cur.fetchone()
+            if row is None:
+                # table absente = pire que vide, mais le LLM va échouer cleanly
+                # via "bronze tables missing" check de generate_silver_sql.
+                continue
+            rt = row[0]
+            if rt == 0:
+                empty.append(full_name)
+    # Retourne la liste vide si au moins une source a des rows OU est inconnue
+    return empty if len(empty) == len(bronze_tables) else []
+
+
 def _topo_sort_specs() -> list[str]:
     """Return spec names ordered so each silver-of-silver appears after its deps.
 
@@ -577,6 +634,24 @@ async def bootstrap_missing_silvers(force_empty: bool = True) -> dict:
                 continue
 
             reason = "missing" if rows is None else "empty"
+            # Pré-check sources vides : si TOUTES les bronze.* du spec sont à
+            # 0 lignes, le LLM gaspillerait son budget pour générer un silver
+            # qui restera à 0. On warn et skip — le bootstrap re-tentera au
+            # tick maintainer suivant quand bronze ingest aura tourné.
+            spec = load_silver_spec(silver_name)
+            if spec:
+                empty_bronze = _bronze_sources_all_empty(spec.get("source_tables", []))
+                if empty_bronze:
+                    log.warning(
+                        "[silver_bootstrap] skip %s — all bronze sources empty (%s)",
+                        silver_name, empty_bronze,
+                    )
+                    results.append({
+                        "silver_name": silver_name, "action": "skip",
+                        "reason": "bronze_empty", "empty_sources": empty_bronze,
+                    })
+                    continue
+
             log.info("[silver_bootstrap] building %s (%s)", silver_name, reason)
             try:
                 r = await generate_silver_sql(silver_name, apply_immediately=True)
