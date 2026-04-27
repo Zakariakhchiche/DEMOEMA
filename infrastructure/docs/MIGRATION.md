@@ -117,6 +117,69 @@ prévoir une connexion stable.
 2. Vérifie `count(*) FROM pg_matviews WHERE schemaname='silver'` doit matcher source
 3. Affiche le `/healthz`
 
+## Phase 2 bis — Bronze full backfill (premier launch agents)
+
+### Mécanisme natif
+
+**La majorité des fetchers gèrent leur premier-run automatiquement.** La
+convention DEMOEMA (cf. `sources/bodacc.py:147-164`) :
+
+```python
+async def fetch_<sid>_delta() -> dict:
+    # Check if table is empty → première ingestion = backfill
+    if existing == 0:
+        window = timedelta(days=BACKFILL_DAYS_FIRST_RUN)  # 10 ans par défaut
+    else:
+        window = timedelta(hours=INCREMENTAL_HOURS)        # 48h delta normal
+    ...
+```
+
+Au premier tick scheduler après la migration, chaque fetcher détecte sa
+bronze table vide et bascule sur la fenêtre élargie. Bronze se remplit
+progressivement (BODACC seul = 30M+ rows en ~60-120 min).
+
+**Coverage** : 57 / 71 fetchers (80%) ont ce pattern. Les 6 fetchers RSS
+(google news, cfnews, la_tribune, les_echos, press, usine_nouvelle) sont
+exclus légitimement (un flux RSS = derniers articles only, pas de
+backfill possible).
+
+### Trous connus à patcher (audit 2026-04-27)
+
+5 fetchers n'ont pas le pattern first-run et resteraient vides après
+migration :
+
+- `inpi_comptes_annuels.py` — INPI dépôts comptes (~1.5M/an)
+- `insee_sirene_v3.py` — SIRENE 40M établissements
+- `opensanctions.py` — flux sanctions
+- `osint_companies.py` — base OSINT
+- `press_articles.py` — articles presse
+
+Ces 5 sont listés dans `tests/test_first_run_coverage.py:TODO_NEED_FIRST_RUN_PATCH`.
+Le test garantit qu'aucun NOUVEAU fetcher ne sera ajouté sans le pattern.
+
+**Workaround migration** : pour ces 5 sources, déclencher manuellement
+`/api/admin/run-all` après la migration datalake (avec `CRON_SECRET` en
+header), OU laisser le `silver_maintainer` regen via codegen LLM (cycle
+30 min) qui va régénérer le fetcher avec le prompt actualisé qui inclut
+la règle #6 ("Backfill first-run", cf. `codegen.py:130`).
+
+### Vérification post-launch
+
+Après 6-24h sur le nouveau VPS, count les bronze tables :
+
+```bash
+ssh root@NEW_HOST 'docker exec demomea-datalake-db psql -U postgres -d datalake -c "
+    SELECT n.nspname || \".\" || c.relname AS table_name, c.reltuples::bigint AS approx_rows
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = '\''bronze'\'' AND c.relkind = '\''r'\''
+    ORDER BY c.reltuples DESC LIMIT 30
+"'
+```
+
+Si une table est restée à 0 après plusieurs ticks attendus, vérifier
+ses logs : `docker logs demomea-agents-platform | grep <source_id>`.
+
 ## Phase 3 — Migration Neo4j (optionnel)
 
 Le rebuild Neo4j est quotidien automatique (job APScheduler 04:00 Paris,
