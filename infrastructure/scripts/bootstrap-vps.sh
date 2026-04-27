@@ -84,6 +84,16 @@ if [ -z "$(ls -A /root/inpi_dumps 2>/dev/null)" ]; then
     log "⚠️  /root/inpi_dumps vide — INPI ingest restera à 0 jusqu'à dépose des dumps"
 fi
 
+# 2ter. Networks Docker external requis par les compose (audit migration
+# 2026-04-27 : sans ça, le up échoue avec "network shared-supabase declared
+# as external, but could not be found"). Idempotent.
+for net in shared-supabase; do
+    if ! docker network inspect "$net" >/dev/null 2>&1; then
+        docker network create "$net" >/dev/null
+        log "network $net créé"
+    fi
+done
+
 # 3. Compose up
 log "lancement docker compose (stack principale)"
 docker compose up -d --remove-orphans
