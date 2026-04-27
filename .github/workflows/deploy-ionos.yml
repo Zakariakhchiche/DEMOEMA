@@ -8,6 +8,9 @@ on:
       - 'frontend/**'
       - 'infrastructure/agents/**'
       - 'infrastructure/dbt/**'
+      - 'infrastructure/scripts/deploy.sh'
+      - 'infrastructure/scripts/rollback.sh'
+      - 'infrastructure/scripts/bootstrap-vps.sh'
       - '.github/workflows/deploy-ionos.yml'
   workflow_dispatch:
     inputs:
