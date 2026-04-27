@@ -1,5 +1,12 @@
 # DEMOEMA Agents Stack — Ollama Cloud Pro + Datalake Postgres dédié
 # Lancement : docker compose -f docker-compose.agents.yml up -d
+#
+# `name:` épingle le project Compose à `demoema-agents`. Sans ça, le project
+# dérive du dossier courant ("agents" si on lance depuis infrastructure/agents/,
+# "demoema" depuis la racine), ce qui crée des networks et volumes différents
+# à chaque invocation et casse la résolution DNS entre datalake-db et
+# agents-platform — exactement le bug rencontré le 2026-04-27.
+name: demoema-agents
 
 services:
   datalake-db:
