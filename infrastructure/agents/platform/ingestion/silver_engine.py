@@ -293,6 +293,13 @@ async def run_silver_maintainer() -> dict:
     regen_results = []
     for cand in to_regen:
         sname = cand["silver_name"]
+        # Le feedback vient de DEUX sources :
+        #  1. audit.silver_runs : erreurs de REFRESH MATERIALIZED VIEW (post-build)
+        #  2. audit.silver_specs_versions : erreurs de validation/apply au moment
+        #     de la génération initiale (bootstrap). Crucial pour les silvers qui
+        #     n'ont jamais réussi à exister — leur dernière trace est dans
+        #     silver_specs_versions, pas silver_runs.
+        feedback_lines = []
         with psycopg.connect(settings.database_url, autocommit=True) as conn, conn.cursor() as cur:
             cur.execute(
                 """
@@ -303,8 +310,33 @@ async def run_silver_maintainer() -> dict:
                 (sname,),
             )
             row = cur.fetchone()
-            feedback = row[0] if row else None
-        feedback_full = f"Last refresh error: {feedback}. Reason for regen: {cand['reason']}." if feedback else cand["reason"]
+            if row and row[0]:
+                feedback_lines.append(f"Refresh error: {row[0]}")
+            cur.execute(
+                """
+                SELECT validation_status, validation_msg, applied
+                FROM audit.silver_specs_versions
+                WHERE silver_name = %s AND validation_status != 'ok' OR applied = false
+                ORDER BY generated_at DESC LIMIT 1
+                """,
+                (sname,),
+            )
+            row = cur.fetchone()
+            if row:
+                vstat, vmsg, applied = row
+                if vstat != "ok":
+                    feedback_lines.append(f"Codegen validation failed: {vmsg}")
+                elif applied is False:
+                    feedback_lines.append(
+                        f"Last codegen produced valid-looking SQL but PG rejected it at execute time. "
+                        f"Inspect the previously generated SQL for type mismatches, undefined columns "
+                        f"(check that JOIN aliases reference columns that actually exist in the source), "
+                        f"or wrong cast operators."
+                    )
+        feedback_full = (
+            "\n".join(feedback_lines) + f"\nReason for regen: {cand['reason']}."
+            if feedback_lines else cand["reason"]
+        )
 
         log.info("[silver_maintainer] regen %s (%s)", sname, cand["reason"])
         try:
