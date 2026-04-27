@@ -267,6 +267,29 @@ def start_scheduler() -> None:
         log.warning("Silver engine init skipped: %s", e)
         n_silvers = 0
 
+    # Bronze bootstrap : génère les fetchers manquants en arrière-plan, un par
+    # tick (5 min). Permet de combler le gap specs YAML / sources/*.py sans
+    # que le maintainer existant ait à les voir d'abord en source_freshness.
+    try:
+        from ingestion.bronze_bootstrap import (
+            list_missing_fetchers,
+            run_bronze_bootstrap_tick,
+        )
+        n_missing = len(list_missing_fetchers())
+        if n_missing > 0:
+            scheduler.add_job(
+                run_bronze_bootstrap_tick,
+                trigger=IntervalTrigger(minutes=5),
+                id="bronze_bootstrap_tick",
+                name=f"Bronze bootstrap (génère 1 fetcher manquant / 5min, {n_missing} en attente)",
+                max_instances=1, coalesce=True, replace_existing=True,
+            )
+            log.info("Bronze bootstrap registered — %d fetchers à générer", n_missing)
+        else:
+            log.info("Bronze bootstrap : aucun fetcher manquant, pas de job programmé")
+    except Exception as e:
+        log.warning("Bronze bootstrap init skipped: %s", e)
+
     # Neo4j graph rebuild (daily 04:00 Paris)
     try:
         from ingestion.neo4j_sync import run_neo4j_rebuild
