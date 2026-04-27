@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     ollama_base_url: str = Field(default="https://ollama.com", description="Endpoint Ollama (Cloud https://ollama.com ou self-hosted http://ollama:11434)")
     ollama_api_key: str = Field(default="", description="API key Ollama Cloud (Pro/Max plan)")
-    ollama_timeout_s: int = Field(default=600, description="Timeout requête Ollama (s) — codegen silver_of_silver avec 9 schémas en prompt peut dépasser 5 min côté kimi")
+    ollama_timeout_s: int = Field(default=1200, description="Timeout requête Ollama (s) — codegen silver_of_silver avec 9 schémas peut dépasser 10 min côté kimi")
     ollama_keep_alive: str = Field(default="24h", description="Keep-alive models (ignoré sur Cloud)")
 
     # DeepSeek (pour agent openclaw)

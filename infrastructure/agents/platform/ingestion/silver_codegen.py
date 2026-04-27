@@ -110,7 +110,13 @@ async def _llm_chat(model: str, system: str, user: str,
     DeepSeek is preferred when the agent model starts with `deepseek-` (or the
     operator has only DEEPSEEK_API_KEY available — Ollama Cloud needs a paid
     plan with valid OLLAMA_API_KEY which is easy to misplace).
+
+    Resilience : si l'appel Ollama timeout (silver-of-silver avec gros prompt
+    peut dépasser 20 min côté kimi), retry automatique avec deepseek-chat.
+    Évite que la résilience dépende d'une seule API.
     """
+    import httpx
+
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": user},
@@ -120,12 +126,23 @@ async def _llm_chat(model: str, system: str, user: str,
         return await client.chat(
             messages=messages, temperature=temperature, max_tokens=4096,
         )
+
     client = OllamaClient()
     try:
         return await client.chat(
             model=model, messages=messages, stream=False,
             options={"temperature": temperature, "num_ctx": num_ctx},
         )
+    except (httpx.TimeoutException, httpx.RemoteProtocolError) as e:
+        log.warning("[llm_chat] Ollama %s a échoué (%s) — fallback DeepSeek", model, type(e).__name__)
+        try:
+            ds = DeepSeekClient(model="deepseek-chat")
+            return await ds.chat(
+                messages=messages, temperature=temperature, max_tokens=4096,
+            )
+        except Exception as fb_err:
+            log.exception("[llm_chat] fallback DeepSeek a aussi échoué")
+            raise fb_err from e
     finally:
         await client.close()
 
@@ -176,16 +193,23 @@ def introspect_schema(conn, tables: list[str]) -> dict[str, list[dict]]:
 
 
 def _format_schema_for_prompt(schemas: dict[str, list[dict]]) -> str:
+    """Compact schema dump for the LLM prompt.
+
+    Le cap a été baissé de 60 à 30 cols par table parce que sur les silvers
+    fortement dénormalisés (ex: silver.entreprises_signals avec 9 sources),
+    le prompt total dépassait la fenêtre de réflexion utile de kimi-k2.6 et
+    déclenchait des ReadTimeout > 10 min.
+    """
     lines = []
     for tbl, cols in schemas.items():
         lines.append(f"### `{tbl}` ({len(cols)} cols)")
-        for c in cols[:60]:   # cap at 60 cols per table to keep prompt sane
+        for c in cols[:30]:
             type_repr = c["type"]
             if c.get("len"):
                 type_repr += f"({c['len']})"
             lines.append(f"- `{c['column']}` : {type_repr}")
-        if len(cols) > 60:
-            lines.append(f"- ...({len(cols) - 60} more cols truncated)")
+        if len(cols) > 30:
+            lines.append(f"- ...({len(cols) - 30} more cols truncated)")
         lines.append("")
     return "\n".join(lines)
 
