@@ -1,6 +1,6 @@
 ---
 name: lead-data-engineer
-model: kimi-k2.6:cloud
+model: deepseek-chat
 temperature: 0.1
 num_ctx: 65536
 description: Source ingestion, Postgres schema, bronze/silver/gold/mart dbt models, Dagster orchestration, entity resolution, pipeline perf.

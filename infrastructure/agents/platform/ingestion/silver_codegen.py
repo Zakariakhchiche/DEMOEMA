@@ -31,6 +31,7 @@ import psycopg
 import yaml
 
 from config import settings
+from deepseek_client import DeepSeekClient
 from loader import get_agent
 from ollama_client import OllamaClient
 
@@ -97,6 +98,36 @@ def _validate_sql(sql: str) -> tuple[bool, str]:
 def _version_uid(silver_name: str, sql: str) -> str:
     raw = f"{silver_name}|{sql}|{datetime.now(tz=timezone.utc).isoformat()}"
     return hashlib.sha1(raw.encode()).hexdigest()[:40]
+
+
+# ═══════════ LLM client routing ═══════════
+
+async def _llm_chat(model: str, system: str, user: str,
+                    temperature: float = 0.1, num_ctx: int = 65536) -> dict:
+    """Route the codegen LLM call to DeepSeek or Ollama based on model name.
+
+    Returns the same shape both providers expose : {"message": {"content": ...}}.
+    DeepSeek is preferred when the agent model starts with `deepseek-` (or the
+    operator has only DEEPSEEK_API_KEY available — Ollama Cloud needs a paid
+    plan with valid OLLAMA_API_KEY which is easy to misplace).
+    """
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    if model.startswith("deepseek"):
+        client = DeepSeekClient(model=model)
+        return await client.chat(
+            messages=messages, temperature=temperature, max_tokens=4096,
+        )
+    client = OllamaClient()
+    try:
+        return await client.chat(
+            model=model, messages=messages, stream=False,
+            options={"temperature": temperature, "num_ctx": num_ctx},
+        )
+    finally:
+        await client.close()
 
 
 # ═══════════ Bronze introspection ═══════════
@@ -282,19 +313,13 @@ async def generate_silver_sql(
         return {"error": "agent lead-data-engineer not loaded"}
 
     prompt = _build_prompt(spec, schemas, feedback=feedback)
-    client = OllamaClient()
-    try:
-        response = await client.chat(
-            model=agent.model,
-            messages=[
-                {"role": "system", "content": agent.system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-            options=agent.to_ollama_options(),
-            stream=False,
-        )
-    finally:
-        await client.close()
+    response = await _llm_chat(
+        model=agent.model,
+        system=agent.system_prompt,
+        user=prompt,
+        temperature=agent.temperature,
+        num_ctx=agent.num_ctx,
+    )
 
     content = response.get("message", {}).get("content", "") if isinstance(response, dict) else ""
     sql = _extract_sql_from_response(content)
