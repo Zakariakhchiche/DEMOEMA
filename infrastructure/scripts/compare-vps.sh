@@ -111,8 +111,14 @@ for bin in python3 python py; do
     fi
 done
 [ -n "$PYTHON_BIN" ] || { echo "ERROR: python introuvable (besoin python3, python ou py)" >&2; exit 1; }
-"$PYTHON_BIN" - "$TMP_SRC" "$TMP_TGT" <<'PYEOF'
+PYTHONIOENCODING=utf-8 "$PYTHON_BIN" - "$TMP_SRC" "$TMP_TGT" <<'PYEOF'
 import sys
+
+# Force UTF-8 output (sinon Windows charmap cp1252 plante sur les emojis ⚠️ ❌ ✅)
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 src_path, tgt_path = sys.argv[1], sys.argv[2]
 
