@@ -25,14 +25,36 @@ COMPANIES_LIMIT = int(os.environ.get("NEO4J_COMPANIES_LIMIT", "10000"))
 BATCH = int(os.environ.get("NEO4J_BATCH", "500"))
 
 
-def _person_uid(nom: str, prenom: str, dn: str) -> str:
+def _slug(s: str) -> str:
+    """Slug ASCII lowercase pour la composition du person_uid."""
     import unicodedata, re
-    def _slug(s):
-        if not s:
-            return ""
-        s = unicodedata.normalize("NFKD", s).encode("ASCII", "ignore").decode()
-        return re.sub(r"[^a-zA-Z0-9]", "", s).lower()
-    return hashlib.sha1(f"{_slug(nom)}|{_slug(prenom)}|{dn or ''}".encode()).hexdigest()[:40]
+    if not s:
+        return ""
+    s = unicodedata.normalize("NFKD", s).encode("ASCII", "ignore").decode()
+    return re.sub(r"[^a-zA-Z0-9]", "", s).lower()
+
+
+def _person_uid(nom: str, prenoms: list[str] | str | None, dn: str) -> str:
+    """UID stable pour un dirigeant individu.
+
+    L'ordre des prénoms dans `bronze.inpi_formalites_personnes.individu_prenoms`
+    n'est pas garanti stable entre dumps INPI. On hashait avant sur prenoms[0],
+    ce qui produisait des UID différents selon l'ordre fourni → doublons silent
+    Neo4j (deux nodes Person pour la même personne).
+
+    Désormais : hash sur la TUPLE TRIÉE des prénoms, normalisée. Stable peu
+    importe l'ordre upstream.
+
+    Compat : accepte aussi un str (legacy callers) — sera traité comme [str].
+    """
+    if isinstance(prenoms, str):
+        prenoms_list = [prenoms]
+    else:
+        prenoms_list = list(prenoms or [])
+    canonical_prenoms = "|".join(sorted(_slug(p) for p in prenoms_list if p))
+    return hashlib.sha1(
+        f"{_slug(nom)}|{canonical_prenoms}|{dn or ''}".encode()
+    ).hexdigest()[:40]
 
 
 def _ensure_schema(driver):
@@ -139,13 +161,15 @@ async def run_neo4j_rebuild() -> dict:
             prows = cur.fetchall()
             params = []
             for (siren, nom, prenoms, dn, role_ent, actif, individu_role) in prows:
-                prenom = (prenoms or [""])[0]
-                # full_name : prénom1 + nom — caption naturel pour le Browser
-                # (sinon le node n'affiche que l'uid hash, illisible).
-                full_name = " ".join(part for part in (prenom, nom) if part).strip()
+                prenoms_list = list(prenoms or [])
+                # `prenom` : 1er prénom pour l'affichage (caption Browser).
+                # `uid` : hash sur la TOTALITÉ des prénoms TRIÉS (cf _person_uid)
+                # — stable même si INPI réordonne le tableau entre dumps.
+                prenom_display = prenoms_list[0] if prenoms_list else ""
+                full_name = " ".join(part for part in (prenom_display, nom) if part).strip()
                 params.append({
-                    "uid": _person_uid(nom, prenom, dn),
-                    "nom": nom, "prenoms": prenoms or [], "prenom": prenom,
+                    "uid": _person_uid(nom, prenoms_list, dn),
+                    "nom": nom, "prenoms": prenoms_list, "prenom": prenom_display,
                     "full_name": full_name,
                     "date_naissance": dn,
                     "siren": siren, "role": role_ent, "actif": bool(actif),
@@ -156,7 +180,20 @@ async def run_neo4j_rebuild() -> dict:
                     s.run(MERGE_PERSON_EDGE, rows=params[j:j + BATCH])
             n_persons += len(params)
 
+    # Cleanup orphans : Persons sans IS_DIRIGEANT — créés par les anciens
+    # uids (avant la fix sorted prenoms) qui ne sont plus mergés. À la fin
+    # du rebuild, tout dirigeant légitime a au moins un IS_DIRIGEANT vers
+    # une des companies présentes. Les autres sont des duplicates à purger.
+    n_orphans = 0
     with driver.session() as s:
+        deleted = s.run(
+            "MATCH (p:Person) WHERE NOT (p)-[:IS_DIRIGEANT]->() "
+            "WITH p LIMIT 50000 DETACH DELETE p RETURN count(*) AS n"
+        ).single()
+        n_orphans = deleted["n"] if deleted else 0
+        if n_orphans > 0:
+            log.info("[neo4j_sync] cleanup: deleted %d orphan Person nodes", n_orphans)
+
         cnt_c = s.run("MATCH (c:Company) RETURN count(c) AS n").single()["n"]
         cnt_p = s.run("MATCH (p:Person) RETURN count(p) AS n").single()["n"]
         cnt_e = s.run("MATCH ()-[r:IS_DIRIGEANT]->() RETURN count(r) AS n").single()["n"]
@@ -165,6 +202,7 @@ async def run_neo4j_rebuild() -> dict:
     result = {
         "companies_loaded": n_companies,
         "persons_loaded": n_persons,
+        "orphans_deleted": n_orphans,
         "graph_companies": cnt_c,
         "graph_persons": cnt_p,
         "graph_edges": cnt_e,

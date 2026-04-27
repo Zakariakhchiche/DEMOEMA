@@ -316,7 +316,7 @@ async def run_silver_maintainer() -> dict:
                 """
                 SELECT validation_status, validation_msg, applied
                 FROM audit.silver_specs_versions
-                WHERE silver_name = %s AND validation_status != 'ok' OR applied = false
+                WHERE silver_name = %s AND (validation_status != 'ok' OR applied = false)
                 ORDER BY generated_at DESC LIMIT 1
                 """,
                 (sname,),

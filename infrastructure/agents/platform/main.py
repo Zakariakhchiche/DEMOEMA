@@ -39,6 +39,20 @@ async def lifespan(app: FastAPI):
     load_agents()
     app.state.ollama = OllamaClient()
     app.state.scheduler_started = False
+    app.state.llm_available = bool(settings.ollama_api_key) or bool(settings.deepseek_api_key)
+
+    # Fail-loud (pas crash) si AUCUN LLM provider n'a de clé : silver_codegen +
+    # bronze codegen seraient inertes mais le scheduler continuerait à itérer
+    # candidates en boucle et incrémenter consecutive_fails. Mieux vaut signaler
+    # explicitement dans les logs + healthz pour qu'un monitor catch.
+    if not app.state.llm_available:
+        log.error(
+            "AUCUNE clé LLM configurée (OLLAMA_API_KEY + DEEPSEEK_API_KEY vides) — "
+            "codegen silver/bronze INERTE, regen LLM impossible. Refresh des MV "
+            "existantes continuera, mais aucun nouveau silver/fetcher ne pourra "
+            "être généré. Set au moins une clé dans .env."
+        )
+
     if settings.database_url:
         try:
             start_scheduler()
@@ -52,8 +66,8 @@ async def lifespan(app: FastAPI):
             "ingestion + silver pipelines INACTIFS. Set au moins l'un des deux "
             "dans .env pour activer."
         )
-    log.info("Platform démarrée (%d agents, scheduler=%s)",
-             len(list_agents()), app.state.scheduler_started)
+    log.info("Platform démarrée (%d agents, scheduler=%s, llm=%s)",
+             len(list_agents()), app.state.scheduler_started, app.state.llm_available)
     yield
     if app.state.scheduler_started:
         stop_scheduler()
@@ -71,16 +85,17 @@ def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
 
 @app.get("/healthz")
 async def healthz(request: Request) -> dict:
-    """Health-check exposé via Caddy. `scheduler` est False si le pipeline
-    silver/bronze n'a pas démarré — c'est le signal externe pour qu'un monitor
-    page l'opérateur (sinon un container "up" peut tourner muet pendant des
-    jours, comme c'est arrivé avec le DATABASE_URL manquant)."""
+    """Health-check exposé via Caddy. Les flags sont des signaux pour
+    monitoring externe — un container 'up' peut tourner muet pendant des
+    jours sans ces signaux (cas DATABASE_URL manquant déjà vu en prod).
+    """
     state = request.app.state
     return {
         "status": "ok",
         "agents_loaded": len(list_agents()),
         "scheduler": getattr(state, "scheduler_started", False),
         "database_url_set": bool(settings.database_url),
+        "llm_available": getattr(state, "llm_available", False),
     }
 
 
