@@ -107,6 +107,19 @@ if [ "$INTERNAL_OK" != "1" ]; then
     docker logs --tail=80 demomea-agents-platform 2>&1 | tail -40 || true
     exit 3
 fi
+
+# Cleanup git stash : on accumule un stash à chaque deploy auto. Garder les
+# 50 derniers (utile pour debug récent), drop au-delà. `|| true` strict pour
+# ne JAMAIS laisser un cleanup foiré faire échouer le deploy (l'exit code 3
+# est réservé au smoke health KO, on ne le pollue pas).
+{
+    STASH_COUNT=$(git stash list 2>/dev/null | wc -l || echo 0)
+    if [ "$STASH_COUNT" -gt 50 ]; then
+        echo "[remote] cleanup git stash : $STASH_COUNT stashes, garde les 50 derniers"
+        git stash list | tail -n +51 | awk -F: '{print $1}' | \
+            xargs -r -n1 git stash drop || true
+    fi
+} || true
 REMOTE
 
 # Smoke tests publics — informatif uniquement. Le DNS / Caddy peut être

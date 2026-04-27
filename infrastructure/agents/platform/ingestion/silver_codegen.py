@@ -445,6 +445,36 @@ def _log_version(
         log.warning("audit log failed: %s", e)
 
 
+def _list_downstream_silvers(conn, qualified: str) -> list[str]:
+    """Liste les MV silver.* qui dépendent de `qualified` via pg_depend.
+
+    Pré-check INFORMATIF avant DROP CASCADE — pour logger ce qu'on s'apprête
+    à dropper. Ne BLOQUE jamais (le DROP atomique reste la seule option pour
+    éviter les indexes dupliqués). Mais l'opérateur sait quoi rebuild ensuite.
+    """
+    schema, table = qualified.split(".", 1)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT n2.nspname || '.' || c2.relname AS downstream
+                FROM pg_depend d
+                JOIN pg_rewrite r ON d.objid = r.oid
+                JOIN pg_class c2 ON r.ev_class = c2.oid
+                JOIN pg_namespace n2 ON n2.oid = c2.relnamespace
+                JOIN pg_class c1 ON d.refobjid = c1.oid
+                JOIN pg_namespace n1 ON n1.oid = c1.relnamespace
+                WHERE n1.nspname = %s AND c1.relname = %s
+                  AND c2.relkind = 'm'
+                  AND (n2.nspname, c2.relname) != (%s, %s)
+                """,
+                (schema, table, schema, table),
+            )
+            return [r[0] for r in cur.fetchall()]
+    except Exception:
+        return []
+
+
 def _apply_sql(silver_name: str, sql: str, version_uid: str) -> dict:
     """Execute the generated SQL atomically.
 
@@ -452,27 +482,43 @@ def _apply_sql(silver_name: str, sql: str, version_uid: str) -> dict:
     transaction as the new CREATE, so a re-applied silver fully replaces its
     predecessor and never accumulates duplicate indexes. Postgres has no
     CREATE OR REPLACE MATERIALIZED VIEW, so DROP+CREATE is the only path.
+
+    Pré-check informatif `pg_depend` : log les silvers downstream qui seront
+    drop-cascadés par cette opération. Permet à l'opérateur de savoir quoi
+    rebuild ensuite (via le bootstrap one-shot ou le maintainer).
     """
     if not settings.database_url:
         return {"applied": False, "error": "no database_url"}
     qualified = silver_name if "." in silver_name else f"silver.{silver_name}"
+    downstream: list[str] = []
     try:
-        with psycopg.connect(settings.database_url) as conn, conn.cursor() as cur:
-            cur.execute("SET statement_timeout = 0")
-            cur.execute(f"DROP MATERIALIZED VIEW IF EXISTS {qualified} CASCADE")
-            cur.execute(sql)
+        with psycopg.connect(settings.database_url) as conn:
+            downstream = _list_downstream_silvers(conn, qualified)
+            if downstream:
+                log.warning(
+                    "[silver_codegen] %s : DROP CASCADE va aussi dropper %d downstream MV : %s — "
+                    "ils devront être rebuild (next bootstrap tick + maintainer s'en chargera)",
+                    qualified, len(downstream), downstream,
+                )
+            with conn.cursor() as cur:
+                cur.execute("SET statement_timeout = 0")
+                cur.execute(f"DROP MATERIALIZED VIEW IF EXISTS {qualified} CASCADE")
+                cur.execute(sql)
+                # Audit UPDATE dans la MÊME transaction — ferme la fenêtre où
+                # la MV était créée mais audit non mis à jour (bug SE-2).
+                cur.execute(
+                    "UPDATE audit.silver_specs_versions "
+                    "SET applied = true, applied_at = now() WHERE version_uid = %s",
+                    (version_uid,),
+                )
             conn.commit()
-        # audit log on its own connection (autocommit)
-        with psycopg.connect(settings.database_url, autocommit=True) as conn, conn.cursor() as cur:
-            cur.execute(
-                "UPDATE audit.silver_specs_versions SET applied = true, applied_at = now() WHERE version_uid = %s",
-                (version_uid,),
-            )
-        log.info("[silver_codegen] applied %s (version %s)", silver_name, version_uid[:12])
-        return {"applied": True}
+        log.info("[silver_codegen] applied %s (version %s, downstream=%d)",
+                 silver_name, version_uid[:12], len(downstream))
+        return {"applied": True, "downstream_dropped": downstream}
     except Exception as e:
         log.exception("[silver_codegen] apply failed for %s", silver_name)
-        return {"applied": False, "error": f"{type(e).__name__}: {e}"}
+        return {"applied": False, "error": f"{type(e).__name__}: {e}",
+                "downstream_dropped": downstream}
 
 
 def list_silver_specs() -> list[str]:
