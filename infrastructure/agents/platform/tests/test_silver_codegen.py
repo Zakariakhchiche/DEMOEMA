@@ -157,6 +157,101 @@ def test_topo_sort_pure_bronze_alphabetical(tmp_path, monkeypatch):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# _topo_levels_specs — used to parallelize bootstrap by topological level
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_topo_levels_pure_bronze_single_level(tmp_path, monkeypatch):
+    """Trois silvers indépendants → un seul niveau, ordre alphabétique."""
+    specs_dir = tmp_path / "silver_specs"
+    specs_dir.mkdir()
+    for n in ("zebra", "apple", "mango"):
+        (specs_dir / f"{n}.yaml").write_text(
+            f"silver_name: silver.{n}\nsource_tables:\n  - bronze.x\n",
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(sc, "SILVER_SPECS_DIR", specs_dir)
+    levels = sc._topo_levels_specs()
+    assert levels == [["silver.apple", "silver.mango", "silver.zebra"]]
+
+
+def test_topo_levels_diamond_three_levels(tmp_path, monkeypatch):
+    """Diamond: D dépend de B+C, B+C dépendent de A → 3 niveaux : [A], [B,C], [D]."""
+    specs_dir = tmp_path / "silver_specs"
+    specs_dir.mkdir()
+    for name, deps in [
+        ("a", []),
+        ("b", ["silver.a"]),
+        ("c", ["silver.a"]),
+        ("d", ["silver.b", "silver.c"]),
+    ]:
+        body = f"silver_name: silver.{name}\nsource_tables:\n  - bronze.src\n"
+        for d in deps:
+            body += f"  - {d}\n"
+        (specs_dir / f"{name}.yaml").write_text(body, encoding="utf-8")
+    monkeypatch.setattr(sc, "SILVER_SPECS_DIR", specs_dir)
+    levels = sc._topo_levels_specs()
+    assert levels == [
+        ["silver.a"],
+        ["silver.b", "silver.c"],
+        ["silver.d"],
+    ]
+
+
+def test_topo_levels_silver_of_silver_two_levels(tmp_path, monkeypatch):
+    """B dépend de A → niveaux [A] puis [B]. Skip _underscore."""
+    specs_dir = tmp_path / "silver_specs"
+    specs_dir.mkdir()
+    (specs_dir / "a_pure.yaml").write_text(
+        "silver_name: silver.a_pure\nsource_tables:\n  - bronze.x\n",
+        encoding="utf-8",
+    )
+    (specs_dir / "b_uses_a.yaml").write_text(
+        "silver_name: silver.b_uses_a\n"
+        "source_tables:\n  - bronze.y\n  - silver.a_pure\n",
+        encoding="utf-8",
+    )
+    (specs_dir / "_skipme.yaml").write_text("silver_name: silver.skip\n", encoding="utf-8")
+    monkeypatch.setattr(sc, "SILVER_SPECS_DIR", specs_dir)
+    levels = sc._topo_levels_specs()
+    assert levels == [["silver.a_pure"], ["silver.b_uses_a"]]
+    flat = [n for lv in levels for n in lv]
+    assert "silver.skip" not in flat
+
+
+def test_topo_levels_flat_matches_topo_sort(tmp_path, monkeypatch):
+    """`_topo_sort_specs` doit être l'aplatissement de `_topo_levels_specs`."""
+    specs_dir = tmp_path / "silver_specs"
+    specs_dir.mkdir()
+    for name, deps in [
+        ("alpha", []),
+        ("beta", ["silver.alpha"]),
+        ("gamma", []),
+        ("delta", ["silver.beta", "silver.gamma"]),
+    ]:
+        body = f"silver_name: silver.{name}\nsource_tables:\n  - bronze.src\n"
+        for d in deps:
+            body += f"  - {d}\n"
+        (specs_dir / f"{name}.yaml").write_text(body, encoding="utf-8")
+    monkeypatch.setattr(sc, "SILVER_SPECS_DIR", specs_dir)
+    flat = [n for lv in sc._topo_levels_specs() for n in lv]
+    assert flat == sc._topo_sort_specs()
+
+
+def test_topo_levels_real_repo_structure():
+    """Les specs réelles du repo doivent produire au moins 2 niveaux
+    (entreprises_signals est silver-of-silver donc level >= 1)."""
+    levels = sc._topo_levels_specs()
+    assert len(levels) >= 1
+    flat = [n for lv in levels for n in lv]
+    # Si entreprises_signals est dans le repo, il doit être à un niveau >= 1
+    if "silver.entreprises_signals" in flat:
+        for lv_idx, lv in enumerate(levels):
+            if "silver.entreprises_signals" in lv:
+                assert lv_idx >= 1, "entreprises_signals doit être après ses deps"
+                break
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Real specs sanity (catches malformed YAML / wrong source schema in repo)
 # ─────────────────────────────────────────────────────────────────────────────
 

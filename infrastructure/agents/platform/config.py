@@ -56,6 +56,19 @@ class Settings(BaseSettings):
     # Limites
     max_concurrent_invocations: int = Field(default=3, description="Max invocations simultanées")
     max_tokens_response: int = Field(default=4096, description="Max tokens sortie agent")
+    # Codegen silver — parallélisme PAR NIVEAU topologique. À chaque niveau du DAG
+    # (silvers indépendants entre eux), on lance jusqu'à N codegen+apply en parallèle :
+    # N appels LLM concurrents (lead-data-engineer) + N DROP/CREATE MV concurrents en
+    # base. Default 4 calé sur :
+    #   - rate limit Ollama Cloud Pro (~10 req/s, on en consomme 4 pour ~5min/silver)
+    #   - DeepSeek (50 req/min, idem)
+    #   - VPS 16 vCPU + 62 GB RAM = capable d'absorber 4 CREATE MV concurrents
+    #     (chaque MV est I/O bound sur scan bronze, pas CPU)
+    # Bumper à 6-8 si on observe que les LLM saturent rarement le pipeline.
+    silver_codegen_parallelism: int = Field(
+        default=4,
+        description="Codegen silver par niveau topologique : N agents LLM + N applies concurrents",
+    )
 
     class Config:
         env_file = ".env"

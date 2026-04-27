@@ -19,6 +19,7 @@ Flow :
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -590,12 +591,11 @@ def _bronze_sources_all_empty(source_tables: list[str]) -> list[str]:
     return empty if len(empty) == len(bronze_tables) else []
 
 
-def _topo_sort_specs() -> list[str]:
-    """Return spec names ordered so each silver-of-silver appears after its deps.
+def _load_silver_deps() -> dict[str, set[str]]:
+    """Return {silver_name: {silver.dep1, silver.dep2}} from every spec.
 
-    Edges come from spec.source_tables : if `silver.B` lists `silver.A` as a
-    source, A is built before B. Pure bronze-source specs come first.
-    Cycles fall back to alphabetical order for the unresolved tail.
+    Bronze sources are filtered out — only `silver.*` deps create edges in the
+    DAG (a silver depending on bronze.* has no in-DAG predecessor).
     """
     deps: dict[str, set[str]] = {}
     for p in SILVER_SPECS_DIR.glob("*.yaml"):
@@ -611,20 +611,48 @@ def _topo_sort_specs() -> list[str]:
             name = f"silver.{name}"
         srcs = spec.get("source_tables") or []
         deps[name] = {s for s in srcs if isinstance(s, str) and s.startswith("silver.")}
+    return deps
 
-    ordered: list[str] = []
+
+def _topo_sort_specs() -> list[str]:
+    """Return spec names in a flat topological order (legacy / tests).
+
+    Edges come from spec.source_tables : if `silver.B` lists `silver.A` as a
+    source, A is built before B. Pure bronze-source specs come first.
+    Cycles fall back to alphabetical order for the unresolved tail.
+    """
+    return [name for level in _topo_levels_specs() for name in level]
+
+
+def _topo_levels_specs() -> list[list[str]]:
+    """Return spec names grouped by topological level (Kahn-style).
+
+    Level 0 = silvers with no silver.* deps (pure bronze sources) — buildable
+    immediately in parallel.
+    Level k = silvers whose silver.* deps are all in levels < k.
+
+    Within a level, all silvers are independent — codegen + apply can run
+    fully in parallel without race or correctness risk. Levels themselves are
+    sequential : level k must finish before level k+1 starts (a silver-of-
+    silver needs its deps' MVs to exist before introspect_schema sees their
+    columns).
+
+    Cycles : the unresolved tail is dropped into a final level alphabetically
+    sorted (matches `_topo_sort_specs` legacy behavior — tests assert this).
+    """
+    pending = _load_silver_deps()
+    levels: list[list[str]] = []
     seen: set[str] = set()
-    pending = dict(deps)
     while pending:
         ready = sorted(n for n, d in pending.items() if d.issubset(seen | {n}))
         if not ready:
-            ordered.extend(sorted(pending))
+            levels.append(sorted(pending))
             break
+        levels.append(ready)
         for n in ready:
-            ordered.append(n)
             seen.add(n)
             pending.pop(n, None)
-    return ordered
+    return levels
 
 
 # Postgres advisory lock id for bootstrap mutual exclusion.
@@ -636,6 +664,60 @@ def _topo_sort_specs() -> list[str]:
 _BOOTSTRAP_LOCK_ID = 0x51EA77B05  # "SILVA77BO5" mnemonic — arbitrary 64-bit
 
 
+async def _build_one_silver(silver_name: str, existing: dict[str, int | None],
+                             force_empty: bool, sem: asyncio.Semaphore) -> dict:
+    """Build (or skip) a single silver under semaphore — coroutine for gather().
+
+    Encapsule le decision-tree par silver (skip vs build) + le pré-check
+    bronze-empty pour qu'on puisse le scheduler en parallèle dans `gather`.
+    """
+    rows = existing.get(silver_name)
+    needs_build = (rows is None) or (force_empty and rows == 0)
+    if not needs_build:
+        return {"silver_name": silver_name, "action": "skip", "rows": rows}
+
+    reason = "missing" if rows is None else "empty"
+    # Pré-check sources vides : si TOUTES les bronze.* du spec sont à
+    # 0 lignes, le LLM gaspillerait son budget pour générer un silver
+    # qui restera à 0. On warn et skip — le bootstrap re-tentera au
+    # tick maintainer suivant quand bronze ingest aura tourné.
+    spec = load_silver_spec(silver_name)
+    if spec:
+        empty_bronze = _bronze_sources_all_empty(spec.get("source_tables", []))
+        if empty_bronze:
+            log.warning(
+                "[silver_bootstrap] skip %s — all bronze sources empty (%s)",
+                silver_name, empty_bronze,
+            )
+            return {
+                "silver_name": silver_name, "action": "skip",
+                "reason": "bronze_empty", "empty_sources": empty_bronze,
+            }
+
+    # Le sémaphore limite le parallélisme effectif (LLM rate limits + DB load).
+    # On l'acquiert APRÈS les pré-checks pour ne pas bloquer un slot pendant
+    # qu'on lit YAML / pg_class.
+    async with sem:
+        log.info("[silver_bootstrap] building %s (%s)", silver_name, reason)
+        try:
+            r = await generate_silver_sql(silver_name, apply_immediately=True)
+            return {
+                "silver_name": silver_name,
+                "action": "build",
+                "reason": reason,
+                "valid": r.get("valid"),
+                "applied": r.get("applied"),
+                "validation_msg": r.get("validation_msg"),
+                "error": r.get("error") or r.get("apply_error"),
+            }
+        except Exception as e:
+            log.exception("[silver_bootstrap] failed %s", silver_name)
+            return {
+                "silver_name": silver_name, "action": "build",
+                "reason": reason, "applied": False, "error": str(e),
+            }
+
+
 async def bootstrap_missing_silvers(force_empty: bool = True) -> dict:
     """Walk every silver spec YAML and ensure the matching MV exists with rows.
 
@@ -645,11 +727,17 @@ async def bootstrap_missing_silvers(force_empty: bool = True) -> dict:
       - MV exists but 0 rows (and force_empty=True) → regenerate + apply
       - MV exists with rows           → leave alone (refresh job handles it)
 
-    Mutual exclusion is enforced via a Postgres session-level advisory lock so
-    multiple Uvicorn workers don't race on the same spec.
+    Mutual exclusion (vs autres workers Uvicorn) : Postgres session-level
+    advisory lock — un seul worker du cluster boostrap à la fois.
 
-    Specs are processed in topological order so silver-of-silver dependencies
-    are built before their consumers. Returns a per-spec report.
+    Parallélisme INTRA-bootstrap : les specs sont groupées par niveau topo
+    via `_topo_levels_specs()`. Au sein d'un niveau (silvers indépendants),
+    on lance `silver_codegen_parallelism` codegen+apply en parallèle via
+    `asyncio.gather` + `Semaphore`. On attend la fin du niveau avant de
+    passer au suivant — un silver-of-silver a besoin que ses deps existent
+    pour que `introspect_schema` voie leurs colonnes.
+
+    Returns a per-spec report.
     """
     if not settings.database_url:
         return {"error": "no database_url"}
@@ -666,62 +754,44 @@ async def bootstrap_missing_silvers(force_empty: bool = True) -> dict:
             return {"built": 0, "failed": 0, "skipped": 0,
                     "skipped_due_to_lock": True, "details": []}
 
-        specs = _topo_sort_specs()
+        levels = _topo_levels_specs()
         results: list[dict] = []
 
         with psycopg.connect(settings.database_url) as conn:
             existing = _silver_state(conn)
 
-        for silver_name in specs:
-            rows = existing.get(silver_name)
-            needs_build = (rows is None) or (force_empty and rows == 0)
-            if not needs_build:
-                results.append({"silver_name": silver_name, "action": "skip", "rows": rows})
-                continue
+        parallelism = max(1, int(settings.silver_codegen_parallelism))
+        sem = asyncio.Semaphore(parallelism)
+        log.info("[silver_bootstrap] %d levels, parallelism=%d (specs=%d)",
+                 len(levels), parallelism,
+                 sum(len(lv) for lv in levels))
 
-            reason = "missing" if rows is None else "empty"
-            # Pré-check sources vides : si TOUTES les bronze.* du spec sont à
-            # 0 lignes, le LLM gaspillerait son budget pour générer un silver
-            # qui restera à 0. On warn et skip — le bootstrap re-tentera au
-            # tick maintainer suivant quand bronze ingest aura tourné.
-            spec = load_silver_spec(silver_name)
-            if spec:
-                empty_bronze = _bronze_sources_all_empty(spec.get("source_tables", []))
-                if empty_bronze:
-                    log.warning(
-                        "[silver_bootstrap] skip %s — all bronze sources empty (%s)",
-                        silver_name, empty_bronze,
-                    )
-                    results.append({
-                        "silver_name": silver_name, "action": "skip",
-                        "reason": "bronze_empty", "empty_sources": empty_bronze,
-                    })
-                    continue
+        for level_idx, level in enumerate(levels):
+            log.info("[silver_bootstrap] level %d/%d : %d specs %s",
+                     level_idx + 1, len(levels), len(level), level)
+            level_results = await asyncio.gather(*[
+                _build_one_silver(name, existing, force_empty, sem)
+                for name in level
+            ])
+            results.extend(level_results)
 
-            log.info("[silver_bootstrap] building %s (%s)", silver_name, reason)
-            try:
-                r = await generate_silver_sql(silver_name, apply_immediately=True)
-                results.append({
-                    "silver_name": silver_name,
-                    "action": "build",
-                    "reason": reason,
-                    "valid": r.get("valid"),
-                    "applied": r.get("applied"),
-                    "validation_msg": r.get("validation_msg"),
-                    "error": r.get("error") or r.get("apply_error"),
-                })
-            except Exception as e:
-                log.exception("[silver_bootstrap] failed %s", silver_name)
-                results.append({
-                    "silver_name": silver_name, "action": "build",
-                    "reason": reason, "applied": False, "error": str(e),
-                })
+            # Mettre à jour `existing` après chaque niveau pour que les
+            # silvers buildés deviennent visibles aux niveaux suivants
+            # (sinon un level k+1 dépendant pourrait croire que sa source
+            # est encore "missing" et la regénérer à tort).
+            with psycopg.connect(settings.database_url) as conn:
+                existing = _silver_state(conn)
 
         built = sum(1 for r in results if r["action"] == "build" and r.get("applied"))
         failed = sum(1 for r in results if r["action"] == "build" and not r.get("applied"))
         skipped = sum(1 for r in results if r["action"] == "skip")
-        log.info("[silver_bootstrap] %d built / %d failed / %d skipped", built, failed, skipped)
-        return {"built": built, "failed": failed, "skipped": skipped, "details": results}
+        log.info("[silver_bootstrap] %d built / %d failed / %d skipped (parallelism=%d)",
+                 built, failed, skipped, parallelism)
+        return {
+            "built": built, "failed": failed, "skipped": skipped,
+            "parallelism": parallelism, "levels": len(levels),
+            "details": results,
+        }
     finally:
         try:
             lock_conn.close()
