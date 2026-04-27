@@ -8,8 +8,9 @@
 set -euo pipefail
 
 TARGET_SHA="${1:-}"
-VPS_HOST="${VPS_HOST:-deploy@demoema.fr}"
-SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519}"
+VPS_HOST="${VPS_HOST:-root@82.165.242.205}"
+SSH_KEY="${SSH_KEY:-$HOME/.ssh/demoema_ionos_ed25519}"
+REPO_DIR="${REPO_DIR:-/root/DEMOEMA}"
 
 if [[ -z "$TARGET_SHA" ]]; then
     echo "usage: rollback.sh <target_sha>"
@@ -27,7 +28,7 @@ echo "[rollback] VPS: $VPS_HOST"
 
 # Capture current SHA for the log
 CURRENT_SHA=$(ssh -i "$SSH_KEY" -o BatchMode=yes "$VPS_HOST" \
-    'cd /root/DEMOEMA && git rev-parse --short HEAD' 2>/dev/null || echo "unknown")
+    "cd $REPO_DIR && git rev-parse --short HEAD" 2>/dev/null || echo "unknown")
 echo "[rollback] Current SHA on VPS: $CURRENT_SHA"
 
 # Confirmation prompt (skip if --yes flag or CI)
@@ -42,52 +43,61 @@ if [[ "${2:-}" != "--yes" && -z "${CI:-}" ]]; then
     fi
 fi
 
-# Run rollback on VPS
+# Run rollback on VPS — same dual-stack rebuild que deploy.sh + smoke interne
 ssh -i "$SSH_KEY" -o BatchMode=yes "$VPS_HOST" \
-    bash -s -- "$TARGET_SHA" <<'REMOTE'
+    bash -s -- "$TARGET_SHA" "$REPO_DIR" <<'REMOTE'
 set -euo pipefail
 SHA="$1"
-cd /root/DEMOEMA
+REPO_DIR="$2"
+cd "$REPO_DIR"
 
-echo "[rollback] Current HEAD: $(git rev-parse --short HEAD)"
-echo "[rollback] Target:       $SHA"
+AGENTS_COMPOSE="infrastructure/agents/docker-compose.agents.yml"
 
-# Resolve SHA (supports HEAD~N, short SHA, full SHA)
-RESOLVED=$(git rev-parse --short "$SHA")
-echo "[rollback] Resolved target: $RESOLVED"
+echo "[rollback] current=$(git rev-parse --short HEAD) target=$SHA"
 
-# Fetch latest refs (in case target is on a different branch)
-git fetch --all --tags
-
-# Hard reset
-git reset --hard "$RESOLVED"
-
-echo "[rollback] New HEAD: $(git rev-parse --short HEAD)"
-
-# Rebuild all services
-docker compose up -d --build --remove-orphans
-
-echo "[rollback] Services status:"
-docker compose ps
-
-REMOTE
-
-# Smoke test
-echo "[rollback] Waiting 10s for services to stabilize..."
-sleep 10
-
-if curl -fsSL --max-time 15 https://api.demoema.fr/healthz > /dev/null 2>&1; then
-    echo "[rollback] ✅ api.demoema.fr/healthz OK"
-else
-    echo "[rollback] ❌ api.demoema.fr/healthz FAILED — VPS in unknown state, escalate to Zak immediately"
-    exit 10
+if [ -n "$(git status --porcelain)" ]; then
+    git stash push -m "auto-rollback-$(date +%Y%m%dT%H%M%SZ)" --include-untracked || true
 fi
 
-if curl -fsSL --max-time 15 https://demoema.fr/ -o /dev/null; then
-    echo "[rollback] ✅ demoema.fr/ reachable"
+RESOLVED=$(git rev-parse --short "$SHA")
+echo "[rollback] resolved=$RESOLVED"
+
+git fetch --all --tags
+git reset --hard "$RESOLVED"
+echo "[rollback] new_head=$(git rev-parse --short HEAD)"
+
+# Rebuild les 2 stacks comme le fait deploy.sh — sinon agents-platform reste
+# sur le code post-rollback divergent.
+docker compose up -d --build --remove-orphans
+docker compose -f "$AGENTS_COMPOSE" up -d --build --remove-orphans agents-platform
+
+echo "[rollback] services :"
+docker compose ps 2>/dev/null || true
+docker compose -f "$AGENTS_COMPOSE" ps 2>/dev/null || true
+
+# Smoke interne (canonique, même logique que deploy.sh)
+sleep 8
+INTERNAL_OK=0
+for attempt in 1 2 3 4 5; do
+    if docker exec demomea-agents-platform sh -c \
+        'curl -fsSL --max-time 5 http://localhost:8100/healthz' >/dev/null 2>&1; then
+        INTERNAL_OK=1
+        echo "[rollback] ✅ agents-platform /healthz interne OK"
+        break
+    fi
+    sleep 4
+done
+if [ "$INTERNAL_OK" != "1" ]; then
+    echo "[rollback] ❌ agents-platform /healthz interne KO — état inconnu, escalader"
+    exit 10
+fi
+REMOTE
+
+# Smoke publics — informatifs (DNS peut ne pas être configuré en migration)
+if curl -fsSL --max-time 10 https://api.demoema.fr/healthz >/dev/null 2>&1; then
+    echo "[rollback] ✅ api.demoema.fr/healthz OK"
 else
-    echo "[rollback] ⚠️  demoema.fr/ FAILED"
-    exit 11
+    echo "[rollback] ℹ️  api.demoema.fr injoignable (DNS pas configuré ?)"
 fi
 
 STAMP=$(date -u +"%Y-%m-%d %H:%M UTC")

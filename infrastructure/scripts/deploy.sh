@@ -1,77 +1,126 @@
 #!/usr/bin/env bash
 # DEMOEMA — deploy script called by .github/workflows/deploy-ionos.yml
 # Usage: deploy.sh <component> <commit_sha>
-# component: all | backend | frontend | agents
+# component: all | backend | frontend | caddy | agents
+#
+# Resilient design : aucun chemin codé en dur (REPO_DIR override possible),
+# les smoke tests publics sont informatifs (l'agent-platform interne est
+# le critère canonique de succès du déploiement). Permet la migration VPS
+# avant que le DNS public ne soit configuré.
 
 set -euo pipefail
 
 COMPONENT="${1:-all}"
 COMMIT_SHA="${2:-unknown}"
-VPS_HOST="${VPS_HOST:-deploy@demoema.fr}"
+VPS_HOST="${VPS_HOST:-root@82.165.242.205}"
+REPO_DIR="${REPO_DIR:-/root/DEMOEMA}"
+PUBLIC_API_URL="${PUBLIC_API_URL:-https://api.demoema.fr/healthz}"
+PUBLIC_WEB_URL="${PUBLIC_WEB_URL:-https://demoema.fr/}"
 
-# Capture pre-deploy state for rollback
-echo "[deploy] Capturing pre-deploy SHA for rollback purposes..."
+echo "[deploy] target=$VPS_HOST repo=$REPO_DIR component=$COMPONENT sha=$COMMIT_SHA"
+
+# Pre-deploy: capture rollback SHA (best-effort)
 PREV_SHA=$(ssh -o BatchMode=yes -o StrictHostKeyChecking=no "$VPS_HOST" \
-    'cd /root/DEMOEMA && git rev-parse --short HEAD' 2>/dev/null || echo "unknown")
-echo "[deploy] prev=$PREV_SHA target=$COMMIT_SHA component=$COMPONENT"
+    "cd $REPO_DIR && git rev-parse --short HEAD" 2>/dev/null || echo "unknown")
+echo "[deploy] prev=$PREV_SHA"
 
-# Run deploy on VPS
+# Run deploy on VPS — the heredoc receives REPO_DIR via the -- args so the
+# remote side stays config-free. `set -e` ensures any failed step aborts.
 ssh -o BatchMode=yes -o StrictHostKeyChecking=no "$VPS_HOST" \
-    bash -s -- "$COMPONENT" "$COMMIT_SHA" <<'REMOTE'
+    bash -s -- "$COMPONENT" "$COMMIT_SHA" "$REPO_DIR" <<'REMOTE'
 set -euo pipefail
 COMPONENT="$1"
 SHA="$2"
-cd /root/DEMOEMA
+REPO_DIR="$3"
+cd "$REPO_DIR"
 
-echo "[deploy] current=$(git rev-parse --short HEAD) target=$SHA component=$COMPONENT"
-git fetch --all --tags --prune
+AGENTS_COMPOSE="infrastructure/agents/docker-compose.agents.yml"
+
+echo "[remote] current=$(git rev-parse --short HEAD) target=$SHA component=$COMPONENT cwd=$(pwd)"
+
+# Stash any local changes (notably the .env's CRLF/LF normalization that
+# autocrlf may have introduced) so the reset can land cleanly. Git will
+# auto-restore via stash list — no data loss, just gives the reset a clean
+# tree to land on.
+if [ -n "$(git status --porcelain)" ]; then
+    git stash push -m "auto-deploy-$(date +%Y%m%dT%H%M%SZ)" --include-untracked || true
+fi
+git fetch origin --prune
 git reset --hard origin/main
+echo "[remote] new_head=$(git rev-parse --short HEAD)"
 
-echo "[deploy] new_head=$(git rev-parse --short HEAD)"
+# Make sure the agents compose finds its env file (symlink to root .env).
+# Idempotent : ne touche pas si déjà en place.
+if [ -f "$REPO_DIR/.env" ] && [ ! -e "$REPO_DIR/infrastructure/agents/.env" ]; then
+    ln -sf "$REPO_DIR/.env" "$REPO_DIR/infrastructure/agents/.env"
+fi
+
+deploy_main() {
+    docker compose up -d --build --remove-orphans
+}
+
+deploy_agents() {
+    docker compose -f "$AGENTS_COMPOSE" up -d --build --remove-orphans agents-platform
+}
 
 case "$COMPONENT" in
     all)
-        docker compose pull 2>/dev/null || true
-        docker compose up -d --build --remove-orphans
+        # `all` redéploie LES DEUX stacks. L'oubli historique des agents dans
+        # ce branch a fait que les fixes silver de la matinée du 27/04 ne
+        # sont jamais arrivés en prod via auto-deploy.
+        deploy_main
+        deploy_agents
         ;;
     backend|frontend|caddy)
         docker compose up -d --build --no-deps "$COMPONENT"
         ;;
     agents)
-        # Agents platform lives in a separate compose file
-        docker compose -f infrastructure/agents/docker-compose.agents.yml up -d --build --no-deps agents-platform
+        deploy_agents
         ;;
     *)
-        echo "[deploy] ERROR: unknown component '$COMPONENT' (expected: all|backend|frontend|caddy|agents)"
+        echo "[remote] ERROR: unknown component '$COMPONENT' (expected: all|backend|frontend|caddy|agents)"
         exit 2
         ;;
 esac
 
-echo "[deploy] Services status:"
-docker compose ps
-REMOTE
+echo "[remote] services :"
+docker compose ps 2>/dev/null || true
+docker compose -f "$AGENTS_COMPOSE" ps 2>/dev/null || true
 
-# Append to deploy log
-STAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
-DEPLOYER="${GITHUB_ACTOR:-$(whoami)}"
-LOG_LINE="$STAMP | github-actions (sha=$COMMIT_SHA) | $PREV_SHA → $COMMIT_SHA | $COMPONENT | deploy auto"
-echo "[deploy] Appending to docs/DEPLOY_LOG.md (local only if run from CI, else post-commit): $LOG_LINE"
-
-# Smoke test
-echo "[deploy] Waiting 10s for services to stabilize..."
-sleep 10
-if curl -fsSL --max-time 15 https://api.demoema.fr/healthz > /dev/null 2>&1; then
-    echo "[deploy] ✅ api.demoema.fr/healthz OK"
-else
-    echo "[deploy] ⚠️  api.demoema.fr/healthz FAILED — investigating required"
+# Smoke test interne (canonique) — agents-platform expose /healthz sur 8100.
+# Tape directement le container pour ne pas dépendre du DNS public ni de Caddy.
+echo "[remote] attente stabilisation 8s puis smoke interne..."
+sleep 8
+INTERNAL_OK=0
+for attempt in 1 2 3 4 5; do
+    if docker exec demomea-agents-platform sh -c \
+        'curl -fsSL --max-time 5 http://localhost:8100/healthz' >/dev/null 2>&1; then
+        INTERNAL_OK=1
+        echo "[remote] ✅ agents-platform /healthz interne OK"
+        break
+    fi
+    echo "[remote] healthz attempt $attempt failed, retry in 4s..."
+    sleep 4
+done
+if [ "$INTERNAL_OK" != "1" ]; then
+    echo "[remote] ❌ agents-platform /healthz interne KO après 5 essais"
+    docker logs --tail=80 demomea-agents-platform 2>&1 | tail -40 || true
     exit 3
 fi
+REMOTE
 
-if curl -fsSL --max-time 15 https://demoema.fr/ -o /dev/null -w "web HTTP %{http_code}\n" 2>&1; then
-    echo "[deploy] ✅ demoema.fr/ reachable"
+# Smoke tests publics — informatif uniquement. Le DNS / Caddy peut être
+# pas encore configuré (cas migration VPS) sans que cela invalide le déploiement.
+echo "[deploy] smoke tests publics (informatif) :"
+if curl -fsSL --max-time 10 "$PUBLIC_API_URL" >/dev/null 2>&1; then
+    echo "[deploy] ✅ $PUBLIC_API_URL atteignable"
 else
-    echo "[deploy] ⚠️  demoema.fr/ FAILED"
-    exit 4
+    echo "[deploy] ℹ️  $PUBLIC_API_URL injoignable — DNS/Caddy pas configuré ?"
+fi
+if curl -fsSL --max-time 10 "$PUBLIC_WEB_URL" -o /dev/null -w "[deploy] web HTTP %{http_code}\n" 2>&1; then
+    :
+else
+    echo "[deploy] ℹ️  $PUBLIC_WEB_URL injoignable — informatif"
 fi
 
 echo "[deploy] ✅ Deploy complete: $COMMIT_SHA ($COMPONENT)"
