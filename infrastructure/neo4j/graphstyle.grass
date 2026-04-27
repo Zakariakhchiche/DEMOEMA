@@ -1,0 +1,51 @@
+/* DEMOEMA — Neo4j Browser GraphStyle
+ *
+ * Importer dans le Browser : tape `:style` puis colle le contenu de ce
+ * fichier. Ou via la commande `:style reset` puis import du fichier via
+ * la barre d'outils du panneau de style.
+ *
+ * Sans ça, les captions par défaut affichent l'uid hash (Person) ou
+ * juste <id> — illisible pour explorer le graphe des dirigeants
+ * multi-mandats.
+ */
+
+node {
+  diameter: 50px;
+  color: #A5ABB6;
+  border-color: #9AA1AC;
+  border-width: 2px;
+  text-color-internal: #FFFFFF;
+  font-size: 10px;
+}
+
+node.Person {
+  color: #57C7E3;
+  border-color: #23B3D7;
+  text-color-internal: #2A2C34;
+  diameter: 50px;
+  caption: '{full_name}';
+}
+
+node.Company {
+  color: #FFE081;
+  border-color: #FFC354;
+  text-color-internal: #2A2C34;
+  diameter: 60px;
+  caption: '{denomination}';
+}
+
+relationship {
+  color: #A5ABB6;
+  shaft-width: 1px;
+  font-size: 8px;
+  padding: 3px;
+  text-color-external: #000000;
+  text-color-internal: #FFFFFF;
+  caption: '<type>';
+}
+
+relationship.IS_DIRIGEANT {
+  color: #4C8EDA;
+  shaft-width: 2px;
+  caption: '{role}';
+}
