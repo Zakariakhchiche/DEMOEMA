@@ -36,61 +36,14 @@ from data_sources import (
     load_targets_from_papperclip,
 )
 
-
-# ==========================================================================
-# Scoring Engine
-# ==========================================================================
-
-scoring_config = copy.deepcopy(DEFAULT_SCORING_WEIGHTS)
-
-
-def calculate_score(company, weights=None):
-    """Calculate score from active signals with dimension capping."""
-    if weights is None:
-        weights = scoring_config
-    dimensions = {k: 0 for k in weights}
-    signals_detail = []
-    for sig_id in company["active_signals"]:
-        sig = SIGNAL_CATALOG.get(sig_id)
-        if sig:
-            dimensions[sig["dimension"]] += sig["points"]
-            signals_detail.append({**sig, "id": sig_id})
-
-    scored = {}
-    total = 0
-    for dim, raw in dimensions.items():
-        mx = weights[dim]["max"]
-        capped = min(raw, mx)
-        scored[dim] = {
-            "score": capped,
-            "raw": raw,
-            "max": mx,
-            "label": weights[dim]["label"],
-        }
-        total += capped
-
-    if total >= 65:
-        priority = "Action Prioritaire"
-    elif total >= 45:
-        priority = "Qualification"
-    elif total >= 25:
-        priority = "Monitoring"
-    else:
-        priority = "Veille Passive"
-
-    return round(total, 1), priority, scored, signals_detail
-
-
-def enrich_target(company):
-    """Apply scoring and return enriched target dict."""
-    score, priority, scored_dims, signals = calculate_score(company)
-    return {
-        **company,
-        "globalScore": score,
-        "priorityLevel": priority,
-        "scoring_details": scored_dims,
-        "topSignals": signals,
-    }
+# Domain layer — extraite de main.py par audit ARCH-1/5.
+# Aliases conservés pour compat avec tests existants qui import depuis main.
+from domain.scoring import (
+    calculate_score,
+    enrich_target,
+    scoring_config,
+)
+from domain.validators import validate_siren as _validate_siren
 
 
 # Global list populated at startup
@@ -379,14 +332,6 @@ async def get_pappers_dirigeants(siren: str):
         return None
     return {"representants": data.get("representants", []), "siren": siren,
             "nom_entreprise": data.get("nom_entreprise", "")}
-
-
-def _validate_siren(siren: str) -> str:
-    """Valide et nettoie un SIREN. Leve HTTPException si invalide."""
-    siren = siren.strip().replace(" ", "")
-    if not siren.isdigit() or len(siren) != 9:
-        raise HTTPException(status_code=400, detail="SIREN invalide — doit contenir 9 chiffres")
-    return siren
 
 
 def _parse_mcp_json(result) -> Optional[dict]:
