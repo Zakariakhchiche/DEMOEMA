@@ -3,6 +3,8 @@ __pycache__
 *.pyo
 *.pyd
 .pytest_cache
+.coverage
+htmlcov
 .venv
 venv
 env
@@ -10,3 +12,8 @@ env
 .env.*
 *.log
 tests
+# IP métier (méthodologie scoring + targets pré-qualifiées) — ne JAMAIS embarquer
+# dans l'image Docker (audit SEC-10). Le cache se reconstruit via Supabase au boot.
+targets_cache.json
+targets_cache.json.bak
+*.json.bak

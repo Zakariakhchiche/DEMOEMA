@@ -15,8 +15,18 @@ router = APIRouter(prefix="/api/admin", tags=["admin-pipeline"])
 
 
 def _check_secret(secret: str) -> None:
+    """Vérifie le secret cron. **Fail-fast si CRON_SECRET non configuré** :
+    sinon les routes admin (`/run-all`, `/migrate-supabase`, ...) sont
+    publiques et un attaquant peut déclencher pipelines coûteux + migrations
+    SQL. Bug audit SEC-2 (CRITICAL).
+    """
     cron = os.getenv("CRON_SECRET", "")
-    if cron and secret != cron:
+    if not cron:
+        raise HTTPException(
+            status_code=503,
+            detail="Admin endpoints disabled — CRON_SECRET not configured on server",
+        )
+    if secret != cron:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 

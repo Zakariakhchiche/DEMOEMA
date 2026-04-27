@@ -28,7 +28,8 @@ import sys
 import tarfile
 import time
 import urllib.request
-import xml.etree.ElementTree as ET
+# defusedxml — protection XXE/billion-laughs sur les flux BODACC DILA & SIRENE (audit SEC-3)
+from defusedxml import ElementTree as ET
 from datetime import datetime, date
 
 import httpx

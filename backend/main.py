@@ -20,8 +20,10 @@ import json
 from datetime import datetime
 import re
 import urllib.parse
-import xml.etree.ElementTree as ET
 import httpx
+# defusedxml pour parser les flux RSS / XML externes — protège contre billion-laughs
+# et autres XXE / DoS XML sur les réponses Google News / SIRENE / data.gouv (audit SEC-3).
+from defusedxml import ElementTree as ET
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -166,12 +168,26 @@ except Exception as _e:
     import logging as _logging
     _logging.getLogger(__name__).warning("observability setup failed: %s", _e)
 
-# CORS configuration
+# CORS configuration — sécurité importante : ne JAMAIS combiner allow_credentials=True
+# avec un wildcard ou une regex permissive (audit SEC-1). La regex par défaut autorisait
+# *.vercel.app / *.workers.dev / *.pages.dev → n'importe quel sous-domaine pouvait
+# faire des requêtes authentifiées. On scope désormais aux domaines DEMOEMA propres.
 _default_origins = [
     "http://localhost:3000",
     "http://localhost:3001",
+    "https://demoema.fr",
+    "https://www.demoema.fr",
+    "https://app.demoema.fr",
 ]
-_default_origin_regex = r"https://.*\.(vercel\.app|workers\.dev|pages\.dev)$"
+# Regex restreinte : uniquement les déploiements Vercel/CF DEMOEMA (préfixe `demoema-` ou
+# nom exact). Surchargeable via CORS_ORIGIN_REGEX pour les environnements de preview.
+_default_origin_regex = (
+    r"^https://("
+    r"demoema(-[a-z0-9-]+)?\.vercel\.app"
+    r"|demoema(-[a-z0-9-]+)?\.pages\.dev"
+    r"|demoema(-[a-z0-9-]+)?\.workers\.dev"
+    r")$"
+)
 _extra_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 
 app.add_middleware(
@@ -179,8 +195,8 @@ app.add_middleware(
     allow_origins=_default_origins + _extra_origins,
     allow_origin_regex=os.getenv("CORS_ORIGIN_REGEX", _default_origin_regex),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Cron-Secret", "X-Requested-With"],
 )
 
 # Admin pipeline router (Bronze/Silver/BODACC/RNE/Pappers)
@@ -2457,7 +2473,9 @@ async def admin_refresh_db(
     """Cron-safe endpoint: refresh companies from Papperclip + BODACC and save to Supabase.
     Optional: protect with CRON_SECRET env var. count param controls target size (default 200)."""
     cron_secret = os.getenv("CRON_SECRET", "")
-    if cron_secret and secret != cron_secret:
+    if not cron_secret:
+        raise HTTPException(503, "Admin endpoints disabled — CRON_SECRET not configured on server")
+    if secret != cron_secret:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     global enriched_targets, raw_targets
@@ -2490,7 +2508,9 @@ async def admin_load_sector(
     """On-demand: load companies from a specific NAF code and add to the live pool.
     Skips SIRENs already in the pool. Returns the new targets added."""
     cron_secret = os.getenv("CRON_SECRET", "")
-    if cron_secret and secret != cron_secret:
+    if not cron_secret:
+        raise HTTPException(503, "Admin endpoints disabled — CRON_SECRET not configured on server")
+    if secret != cron_secret:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     global enriched_targets, raw_targets
@@ -2547,7 +2567,9 @@ _SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 def _check_admin_secret(secret: str):
     """Vérifie le secret admin. Passe si CRON_SECRET n'est pas configuré."""
     cron_secret = os.getenv("CRON_SECRET", "")
-    if cron_secret and secret != cron_secret:
+    if not cron_secret:
+        raise HTTPException(503, "Admin endpoints disabled — CRON_SECRET not configured on server")
+    if secret != cron_secret:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
