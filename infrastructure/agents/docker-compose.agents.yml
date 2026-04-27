@@ -48,11 +48,12 @@ services:
       DOCS_DIR: /app/docs
       OPENCLAW_VAULT_DIR: /app/.secrets
       # DSN Postgres dérivée d'un seul mot de passe source-of-truth (le même
-      # qui initialise datalake-db). Élimine la duplication DATABASE_URL ↔
-      # POSTGRES_PASSWORD : impossible d'avoir un mismatch, et la migration
-      # VPS n'exige plus qu'une variable .env (DATALAKE_POSTGRES_ROOT_PASSWORD)
-      # pour que silver_engine + agents-platform se connectent.
-      DATABASE_URL: "postgresql://postgres:${DATALAKE_POSTGRES_ROOT_PASSWORD}@datalake-db:5432/datalake"
+      # qui initialise datalake-db). Forme `${VAR:-default}` : si l'opérateur
+      # définit DATABASE_URL dans son .env (ex: Postgres managé externe), sa
+      # valeur est respectée. Sinon, dérivée depuis DATALAKE_POSTGRES_ROOT_PASSWORD.
+      # Sans `:-default`, la valeur du compose OVERRIDE SILENCIEUSEMENT le .env
+      # (precedence Compose : environment > env_file).
+      DATABASE_URL: "${DATABASE_URL:-postgresql://postgres:${DATALAKE_POSTGRES_ROOT_PASSWORD}@datalake-db:5432/datalake}"
     volumes:
       - ./prompts:/app/prompts:ro
       - ./docs:/app/docs:ro

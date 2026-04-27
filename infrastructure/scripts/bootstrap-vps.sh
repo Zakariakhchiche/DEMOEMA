@@ -74,6 +74,16 @@ if [ ! -L "$AGENTS_ENV_LINK" ] && [ ! -f "$AGENTS_ENV_LINK" ]; then
     log "symlink créé : $AGENTS_ENV_LINK -> $ENV_FILE"
 fi
 
+# 2bis. Pré-créer les répertoires montés en bind par les compose. Sans ça,
+# Docker crée silencieusement le dossier vide (root:root) au start, ce qui
+# masque toute mauvaise config — l'INPI ingest reste à 0 lignes sans
+# explication. Idempotent : ne touche pas si déjà peuplé.
+mkdir -p /root/inpi_dumps
+if [ -z "$(ls -A /root/inpi_dumps 2>/dev/null)" ]; then
+    touch /root/inpi_dumps/.placeholder
+    log "⚠️  /root/inpi_dumps vide — INPI ingest restera à 0 jusqu'à dépose des dumps"
+fi
+
 # 3. Compose up
 log "lancement docker compose (stack principale)"
 docker compose up -d --remove-orphans
@@ -102,7 +112,28 @@ else
     log "⚠️  silver_engine status indéterminé — check : docker logs demomea-agents-platform --tail 100"
 fi
 
-# 6. Statut final
+# 6. Cron jobs d'opérations — backup quotidien + healthz monitor (idempotents).
+# Le `backup-datalake.sh` existait depuis longtemps mais n'était jamais branché —
+# preuve par les data perdues sur l'ancien VPS. Le monitor /healthz catch un
+# scheduler=false (cas DATABASE_URL absent qu'on a vécu).
+BACKUP_SCRIPT="$REPO_ROOT/infrastructure/agents/backup-datalake.sh"
+if [ -x "$BACKUP_SCRIPT" ]; then
+    BACKUP_LINE="30 2 * * * cd $REPO_ROOT/infrastructure/agents && ./backup-datalake.sh >> /var/log/datalake-backup.log 2>&1"
+    if ! crontab -l 2>/dev/null | grep -qF 'backup-datalake.sh'; then
+        ( crontab -l 2>/dev/null; echo "$BACKUP_LINE" ) | crontab -
+        log "✅ cron backup-datalake quotidien (02:30) installé"
+    else
+        log "cron backup-datalake déjà présent — skip"
+    fi
+fi
+
+HEALTH_LINE='*/5 * * * * curl -fsS --max-time 5 http://localhost:8100/healthz | grep -q "\"scheduler\":true" || logger -t demoema-health "scheduler down ou unreachable"'
+if ! crontab -l 2>/dev/null | grep -qF 'demoema-health'; then
+    ( crontab -l 2>/dev/null; echo "$HEALTH_LINE" ) | crontab -
+    log "✅ cron healthz monitor (5 min) installé"
+fi
+
+# 7. Statut final
 log "=========================================="
 log "Statut services :"
 docker compose ps 2>/dev/null || true
