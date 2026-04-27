@@ -100,8 +100,11 @@ TGT_PID=$!
 
 wait $SRC_PID $TGT_PID
 
-# Compare via Python pour lisibilité + sortie tabulaire propre
-python3 - "$TMP_SRC" "$TMP_TGT" <<'PYEOF'
+# Compare via Python pour lisibilité + sortie tabulaire propre.
+# Cross-platform : python3 sur Linux/Mac, python sur Windows Git Bash.
+PYTHON_BIN=$(command -v python3 || command -v python)
+[ -n "$PYTHON_BIN" ] || { echo "ERROR: python introuvable (besoin python3 ou python)" >&2; exit 1; }
+"$PYTHON_BIN" - "$TMP_SRC" "$TMP_TGT" <<'PYEOF'
 import sys
 
 src_path, tgt_path = sys.argv[1], sys.argv[2]
