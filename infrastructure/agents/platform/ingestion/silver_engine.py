@@ -125,97 +125,149 @@ def _run_uid(silver_name: str, when: datetime) -> str:
 
 
 async def run_silver_refresh(silver_name: str, trigger_source: str = "scheduler") -> dict:
-    """REFRESH MATERIALIZED VIEW + log audit."""
+    """REFRESH MATERIALIZED VIEW + log audit, sérialisé par silver_name.
+
+    Concurrency model :
+    - advisory lock SESSION-level par silver_name : 2 workers Uvicorn ne
+      peuvent pas refresh le même silver concurremment (gaspillage CPU/IO,
+      double count(*)). Un skip-on-locked retourne `lock_skipped: True`
+      sans incrémenter consecutive_fails.
+    - Autres silvers en parallèle = autorisés, on ne sérialise pas tout.
+
+    Performance :
+    - 2 connexions au lieu de 3 : conn#1 (autocommit) pour heartbeat
+      INSERT 'running' + lock acquisition + pré-count. conn#2 (autocommit
+      mais BEGIN/COMMIT explicite) pour REFRESH + post-count + UPDATE
+      audit + UPSERT freshness DANS LA MÊME TX (ferme la fenêtre de
+      désync où la MV était refreshed mais audit pas mis à jour).
+    - Pré-count via reltuples (rapide), post-count via count(*) exact
+      (utilisé pour delta_pct précis dans la détection anomalie).
+    - ANALYZE après le REFRESH pour rafraîchir les stats (sinon le
+      bootstrap suivant pense que la MV est vide via reltuples=-1).
+    """
     if not settings.database_url:
         return {"error": "no db"}
 
     start_dt = datetime.now(tz=timezone.utc)
     run_uid = _run_uid(silver_name, start_dt)
+    lock_id = _refresh_lock_id_for(silver_name)
 
-    # Compter les rows avant
+    # ─── Conn 1 : lock acquisition + heartbeat 'running' ─────────────
+    schema, table = silver_name.split(".", 1) if "." in silver_name else ("silver", silver_name)
     rows_before: int | None = None
-    with psycopg.connect(settings.database_url, autocommit=True) as conn, conn.cursor() as cur:
-        try:
-            cur.execute(f"SELECT count(*) FROM {silver_name}")
-            rows_before = (cur.fetchone() or [None])[0]
-        except Exception:
-            rows_before = None
-
-        # Insert 'running' row
-        cur.execute(
-            """
-            INSERT INTO audit.silver_runs (run_uid, silver_name, refresh_start, rows_before, status, trigger_source)
-            VALUES (%s, %s, %s, %s, 'running', %s)
-            ON CONFLICT (run_uid) DO NOTHING
-            """,
-            (run_uid, silver_name, start_dt, rows_before, trigger_source),
-        )
-
-    t0 = time.time()
-    error_msg: str | None = None
-    rows_after: int | None = None
-    status = "failed"
-
+    lock_conn = psycopg.connect(settings.database_url, autocommit=True)
     try:
-        with psycopg.connect(settings.database_url, autocommit=True) as conn, conn.cursor() as cur:
-            cur.execute("SET statement_timeout = 0")
-            cur.execute(f"REFRESH MATERIALIZED VIEW {silver_name}")
-            cur.execute(f"SELECT count(*) FROM {silver_name}")
-            rows_after = (cur.fetchone() or [None])[0]
-        status = "ok"
-    except Exception as e:
-        error_msg = f"{type(e).__name__}: {e}"
-        log.exception("[silver] refresh failed %s", silver_name)
+        with lock_conn.cursor() as cur:
+            cur.execute("SELECT pg_try_advisory_lock(%s)", (lock_id,))
+            if not cur.fetchone()[0]:
+                log.info("[silver] %s : refresh skipped (another worker holds the lock)", silver_name)
+                return {
+                    "silver_name": silver_name, "status": "skipped",
+                    "lock_skipped": True, "duration_ms": 0,
+                }
+            # Pré-count rapide via reltuples (estimation suffisante avant refresh)
+            try:
+                cur.execute(
+                    "SELECT c.reltuples::bigint FROM pg_class c JOIN pg_namespace n "
+                    "ON n.oid = c.relnamespace WHERE n.nspname=%s AND c.relname=%s",
+                    (schema, table),
+                )
+                row = cur.fetchone()
+                rows_before = row[0] if row and row[0] is not None and row[0] >= 0 else None
+            except Exception:
+                rows_before = None
+            cur.execute(
+                """
+                INSERT INTO audit.silver_runs (run_uid, silver_name, refresh_start, rows_before, status, trigger_source)
+                VALUES (%s, %s, %s, %s, 'running', %s)
+                ON CONFLICT (run_uid) DO NOTHING
+                """,
+                (run_uid, silver_name, start_dt, rows_before, trigger_source),
+            )
 
-    duration_ms = int((time.time() - t0) * 1000)
-    end_dt = datetime.now(tz=timezone.utc)
-    delta_rows = (rows_after or 0) - (rows_before or 0) if (rows_before is not None and rows_after is not None) else None
-    delta_pct = (100.0 * delta_rows / rows_before) if (delta_rows is not None and rows_before) else None
+        # ─── Conn 2 : REFRESH + post-count exact + audit/freshness atomic ───
+        t0 = time.time()
+        error_msg: str | None = None
+        rows_after: int | None = None
+        status = "failed"
+        try:
+            with psycopg.connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SET statement_timeout = 0")
+                    cur.execute(f"REFRESH MATERIALIZED VIEW {silver_name}")
+                    cur.execute(f"SELECT count(*) FROM {silver_name}")
+                    rows_after = (cur.fetchone() or [None])[0]
+                conn.commit()
+            status = "ok"
+        except Exception as e:
+            error_msg = f"{type(e).__name__}: {e}"
+            log.exception("[silver] refresh failed %s", silver_name)
 
-    # Update audit.silver_runs
-    with psycopg.connect(settings.database_url, autocommit=True) as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            UPDATE audit.silver_runs
-            SET refresh_end=%s, duration_ms=%s, rows_after=%s, delta_rows=%s, delta_pct=%s,
-                status=%s, error=%s
-            WHERE run_uid=%s
-            """,
-            (end_dt, duration_ms, rows_after, delta_rows, delta_pct, status, error_msg, run_uid),
-        )
-        # Update freshness rollup
+        duration_ms = int((time.time() - t0) * 1000)
+        end_dt = datetime.now(tz=timezone.utc)
+        delta_rows = (rows_after or 0) - (rows_before or 0) if (rows_before is not None and rows_after is not None) else None
+        delta_pct = (100.0 * delta_rows / rows_before) if (delta_rows is not None and rows_before) else None
+
+        # Audit UPDATE + freshness UPSERT dans une seule tx, et ANALYZE post-refresh
         spec = SILVERS.get(silver_name) or {}
         sla = int(spec.get("sla_minutes", 1440))
-        cur.execute(
-            """
-            INSERT INTO audit.silver_freshness (silver_name, last_refresh_at, last_status, current_rows,
-                                                 sla_minutes, is_stale, last_delta_pct, consecutive_fails, updated_at)
-            VALUES (%s, %s, %s, %s, %s, false, %s, CASE WHEN %s='ok' THEN 0 ELSE 1 END, now())
-            ON CONFLICT (silver_name) DO UPDATE SET
-              last_refresh_at = EXCLUDED.last_refresh_at,
-              last_status     = EXCLUDED.last_status,
-              current_rows    = EXCLUDED.current_rows,
-              sla_minutes     = EXCLUDED.sla_minutes,
-              is_stale        = false,
-              last_delta_pct  = EXCLUDED.last_delta_pct,
-              consecutive_fails = CASE
-                WHEN EXCLUDED.last_status = 'ok' THEN 0
-                ELSE audit.silver_freshness.consecutive_fails + 1
-              END,
-              updated_at      = now()
-            """,
-            (silver_name, end_dt, status, rows_after, sla, delta_pct, status),
-        )
+        with psycopg.connect(settings.database_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE audit.silver_runs
+                    SET refresh_end=%s, duration_ms=%s, rows_after=%s, delta_rows=%s, delta_pct=%s,
+                        status=%s, error=%s
+                    WHERE run_uid=%s
+                    """,
+                    (end_dt, duration_ms, rows_after, delta_rows, delta_pct, status, error_msg, run_uid),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO audit.silver_freshness (silver_name, last_refresh_at, last_status, current_rows,
+                                                         sla_minutes, is_stale, last_delta_pct, consecutive_fails, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, false, %s, CASE WHEN %s='ok' THEN 0 ELSE 1 END, now())
+                    ON CONFLICT (silver_name) DO UPDATE SET
+                      last_refresh_at = EXCLUDED.last_refresh_at,
+                      last_status     = EXCLUDED.last_status,
+                      current_rows    = EXCLUDED.current_rows,
+                      sla_minutes     = EXCLUDED.sla_minutes,
+                      is_stale        = false,
+                      last_delta_pct  = EXCLUDED.last_delta_pct,
+                      consecutive_fails = CASE
+                        WHEN EXCLUDED.last_status = 'ok' THEN 0
+                        ELSE audit.silver_freshness.consecutive_fails + 1
+                      END,
+                      updated_at      = now()
+                    """,
+                    (silver_name, end_dt, status, rows_after, sla, delta_pct, status),
+                )
+            conn.commit()
 
-    return {
-        "silver_name": silver_name,
-        "status": status,
-        "duration_ms": duration_ms,
-        "rows_before": rows_before,
-        "rows_after": rows_after,
-        "delta_pct": delta_pct,
-        "error": error_msg,
-    }
+        # ANALYZE post-refresh (autocommit, hors tx audit) — rafraîchit reltuples
+        # pour que le bootstrap bronze_sources_all_empty et _silver_state ne
+        # voient pas une vue "vide" alors qu'elle vient d'être refreshed.
+        if status == "ok":
+            try:
+                with psycopg.connect(settings.database_url, autocommit=True) as conn, conn.cursor() as cur:
+                    cur.execute(f"ANALYZE {silver_name}")
+            except Exception:
+                log.warning("[silver] ANALYZE failed for %s (non-fatal)", silver_name)
+
+        return {
+            "silver_name": silver_name,
+            "status": status,
+            "duration_ms": duration_ms,
+            "rows_before": rows_before,
+            "rows_after": rows_after,
+            "delta_pct": delta_pct,
+            "error": error_msg,
+        }
+    finally:
+        try:
+            lock_conn.close()  # auto-release du advisory lock SESSION-level
+        except Exception:
+            pass
 
 
 # ═══════════ Maintainer ═══════════
@@ -224,6 +276,20 @@ ANOMALY_DROP_PCT = -15.0     # if rows drop more than 15 %, treat as anomaly
 MAX_CONSECUTIVE_FAILS = 3
 PARK_AFTER_REGEN_FAILS = 5   # après N régen LLM successives qui restent applied=false → parked
                               # (au-delà = gaspillage budget LLM, intervention humaine requise)
+
+# Postgres advisory lock IDs — DISTINCTS du bootstrap (0x51EA77B05) pour ne
+# pas bloquer mutuellement bootstrap ↔ maintainer ↔ refresh. Chaque sémantique
+# son lock. _MAINTAINER_LOCK_ID est constant (1 maintainer cluster-wide) ;
+# _REFRESH_LOCK_BASE est combiné avec hashtext(silver_name) pour locker
+# par-silver (parallélisme légitime entre silvers, sérialisation par silver).
+_MAINTAINER_LOCK_ID = 0x51EA77B06       # "SILVA77BO6" — incrément du bootstrap
+_REFRESH_LOCK_BASE = 0x51EA77B07         # XOR avec hashtext(silver_name) pour ID unique
+
+
+def _refresh_lock_id_for(silver_name: str) -> int:
+    """ID advisory lock par silver — XOR base + sha1 short pour rester dans int64."""
+    h = int.from_bytes(hashlib.sha1(silver_name.encode()).digest()[:6], "big")
+    return _REFRESH_LOCK_BASE ^ h
 
 
 async def run_silver_maintainer() -> dict:
@@ -243,6 +309,30 @@ async def run_silver_maintainer() -> dict:
     except ImportError as e:
         return {"error": f"silver_codegen unavailable: {e}"}
 
+    # Advisory lock cluster-wide : un seul maintainer tourne à la fois entre
+    # les workers Uvicorn. Distinct du _BOOTSTRAP_LOCK_ID — bootstrap et
+    # maintainer peuvent tourner en parallèle car ils gèrent des choses
+    # différentes (bootstrap = silvers manquants, maintainer = silvers
+    # existants en dérive). Mais 2 maintainers concurrents = double cost LLM.
+    lock_conn = psycopg.connect(settings.database_url, autocommit=True)
+    try:
+        with lock_conn.cursor() as cur:
+            cur.execute("SELECT pg_try_advisory_lock(%s)", (_MAINTAINER_LOCK_ID,))
+            if not cur.fetchone()[0]:
+                log.info("[silver_maintainer] another worker holds the lock — skipping tick")
+                return {"skipped_due_to_lock": True, "candidates": 0, "regen_results": []}
+
+        return await _run_maintainer_locked(generate_silver_sql)
+    finally:
+        try:
+            lock_conn.close()
+        except Exception:
+            pass
+
+
+async def _run_maintainer_locked(generate_silver_sql) -> dict:
+    """Body du maintainer une fois le lock acquis. Extrait pour clarifier
+    le scope du lock dans run_silver_maintainer."""
     to_regen: list[dict] = []
     with psycopg.connect(settings.database_url, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
