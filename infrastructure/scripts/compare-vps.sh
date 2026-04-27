@@ -100,10 +100,17 @@ TGT_PID=$!
 
 wait $SRC_PID $TGT_PID
 
-# Compare via Python pour lisibilité + sortie tabulaire propre.
-# Cross-platform : python3 sur Linux/Mac, python sur Windows Git Bash.
-PYTHON_BIN=$(command -v python3 || command -v python)
-[ -n "$PYTHON_BIN" ] || { echo "ERROR: python introuvable (besoin python3 ou python)" >&2; exit 1; }
+# Compare via Python — détection cross-platform robuste.
+# Sur Windows, `python3` peut être un shim du Microsoft Store qui ouvre
+# l'app au lieu d'exécuter — donc on TESTE chaque binaire avec --version.
+PYTHON_BIN=""
+for bin in python3 python py; do
+    if command -v "$bin" >/dev/null && "$bin" --version >/dev/null 2>&1; then
+        PYTHON_BIN="$bin"
+        break
+    fi
+done
+[ -n "$PYTHON_BIN" ] || { echo "ERROR: python introuvable (besoin python3, python ou py)" >&2; exit 1; }
 "$PYTHON_BIN" - "$TMP_SRC" "$TMP_TGT" <<'PYEOF'
 import sys
 
