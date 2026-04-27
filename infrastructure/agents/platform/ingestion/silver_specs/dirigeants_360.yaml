@@ -1,0 +1,176 @@
+silver_name: silver.dirigeants_360
+goal: >
+  🔑 FEATURE STORE 360° DIRIGEANT pour le scoring M&A. Un row par
+  dirigeant individu (clé person_uid) avec TOUS les signaux croisés :
+  mandats, SCI/patrimoine, financier consolidé, réseau co-mandataires,
+  événements BODACC sur ses sociétés, contentieux, sanctions, presse,
+  présence digitale OSINT. Pendant person-level du silver.entreprises_signals.
+
+source_tables:
+  - silver.inpi_dirigeants
+  - silver.dirigeant_sci_patrimoine
+  - silver.inpi_comptes
+  - silver.bodacc_annonces
+  - silver.cession_events
+  - silver.judilibre_decisions
+  - silver.opensanctions
+  - silver.osint_persons_enriched
+  - silver.press_mentions_matched
+
+grain: "1 row par person_uid (= sha1(slug(nom)|slug(prenoms_sorted)|date_naissance))"
+
+key_columns:
+  - person_uid
+  - nom
+  - prenom
+  - date_naissance
+  - n_mandats_actifs
+
+business_logic: |
+  CTE de base : silver.inpi_dirigeants (8M dirigeants).
+  person_uid = COALESCE(uid, sha1(slug(nom)|slug(sorted(prenoms))|date_naissance))
+
+  FEATURES par catégorie :
+
+  [Identité — 0pts directs, mais clés du graphe]
+  - person_uid, nom, prenom (= prenoms[0]), prenoms (array), full_name (= prenom + nom)
+  - date_naissance (rgpd : year only persisté)
+  - age_2026 = EXTRACT(YEAR FROM AGE(now(), date_naissance::date))
+  - sexe (si dispo INPI)
+
+  [Mandats — 10pts]
+  - n_mandats_actifs (depuis silver.inpi_dirigeants)
+  - sirens_mandats (array — toutes les sociétés où il a un mandat actif)
+  - denominations_mandats (array — noms des sociétés)
+  - is_multi_mandat = (n_mandats_actifs >= 5)
+  - is_pro_ma = (n_mandats_actifs >= 10)
+
+  [Patrimoine SCI — 20pts]
+  - n_sci (depuis silver.dirigeant_sci_patrimoine via JOIN sur nom+prenom+dob)
+  - sci_sirens (array)
+  - total_capital_sci (somme capital social SCI)
+  - first_sci_date
+  - has_holding_patrimoniale = (n_sci >= 2)
+  - patrimoine_estime = total_capital_sci + somme capital_main_companies
+
+  [Financier consolidé — 15pts]
+  - n_companies = array_length(sirens_mandats, 1)
+  - ca_total = SUM(ca dernier exercice de chaque société via silver.inpi_comptes)
+  - capital_total_companies = SUM(montant_capital de ses entreprises)
+  - resultat_net_total
+  - has_bilan_recent = EXISTS bilan < 2 ans
+  - n_exercices_total = count distinct bilans
+
+  [Réseau / Co-mandataires — 10pts]
+  - co_mandataires (array de other_person_uid avec lesquels >= 2 sociétés en commun)
+  - n_co_mandataires = array_length(co_mandataires, 1)
+  - has_strong_network = (n_co_mandataires >= 3)
+  - Calcul : silver.inpi_dirigeants self-join sur intersection sirens_mandats >= 2
+
+  [Événements BODACC — 5pts]
+  - n_bodacc_cessions = count silver.cession_events where siren in sirens_mandats AND is_recent
+  - has_cession_recente = (n_bodacc_cessions > 0)
+  - n_bodacc_difficultes = count silver.bodacc_annonces type='procedure_collective'
+                           sur ses sociétés
+  - has_difficultes_recentes (90j)
+
+  [Légal / Contentieux — -10pts négatif]
+  - n_jugements = count silver.judilibre_decisions WHERE titre ILIKE '%nom prenom%'
+                  OR titre ILIKE '%denomination%' (pour ses sociétés)
+  - has_contentieux_recent (< 2 ans)
+
+  [Sanctions — -20pts négatif]
+  - is_sanctionne = EXISTS silver.opensanctions WHERE name_lower ILIKE '%nom prenom%'
+  - sanction_programs (array si match)
+
+  [Presse — 5pts]
+  - n_press_mentions_90d = count silver.press_mentions_matched
+                           where siren in sirens_mandats AND published_at > now()-90d
+  - has_press_buzz = (n_press_mentions_90d >= 3)
+
+  [Digital / OSINT — 5pts]
+  - has_linkedin (depuis silver.osint_persons_enriched si match)
+  - has_github
+  - n_total_social
+  - digital_presence_score (0-100)
+
+  [Score composite — 0-100]
+  - pro_ma_score = LEAST(100,
+        (CASE WHEN is_pro_ma THEN 10 ELSE 0 END)
+      + (CASE WHEN has_holding_patrimoniale THEN 20 ELSE 0 END)
+      + (LEAST(15, ca_total / 10000000.0))     -- 15pts si CA total > 100M€
+      + (LEAST(10, n_co_mandataires))           -- 1pt par co-mandataire jusqu'à 10
+      + (CASE WHEN has_cession_recente THEN 5 ELSE 0 END)
+      - (CASE WHEN has_difficultes_recentes THEN 10 ELSE 0 END)
+      - (CASE WHEN is_sanctionne THEN 20 ELSE 0 END)
+      + (CASE WHEN has_press_buzz THEN 5 ELSE 0 END)
+      + (LEAST(5, n_total_social))
+    )
+
+transformations: |
+  CTE étagés pour la performance (8M lignes × N joins) :
+
+  WITH base AS (
+    SELECT person_uid, nom, prenom, prenoms, date_naissance,
+           sirens_mandats, denominations_mandats, n_mandats_actifs,
+           array_length(sirens_mandats, 1) AS n_companies
+    FROM silver.inpi_dirigeants
+  ),
+  with_sci AS (
+    SELECT b.*,
+           sci.n_sci, sci.total_capital_sci, sci.sci_sirens, sci.first_sci_date
+    FROM base b
+    LEFT JOIN silver.dirigeant_sci_patrimoine sci
+      ON sci.nom = b.nom AND sci.prenom = b.prenom AND sci.date_naissance = b.date_naissance
+  ),
+  with_finances AS (
+    SELECT ws.*,
+           (SELECT SUM(c.ca_net) FROM silver.inpi_comptes c
+            WHERE c.siren = ANY(ws.sirens_mandats)
+              AND c.date_cloture = (SELECT MAX(c2.date_cloture)
+                                    FROM silver.inpi_comptes c2
+                                    WHERE c2.siren = c.siren)) AS ca_total,
+           (SELECT SUM(c.resultat_net) FROM silver.inpi_comptes c
+            WHERE c.siren = ANY(ws.sirens_mandats)) AS resultat_net_total
+    FROM with_sci ws
+  ),
+  with_network AS (
+    SELECT wf.*,
+           ARRAY(SELECT DISTINCT d2.person_uid
+                 FROM silver.inpi_dirigeants d2
+                 WHERE d2.person_uid != wf.person_uid
+                   AND d2.sirens_mandats && wf.sirens_mandats
+                   AND array_length(
+                     (SELECT array_agg(s) FROM unnest(d2.sirens_mandats) s
+                      WHERE s = ANY(wf.sirens_mandats)), 1
+                   ) >= 2) AS co_mandataires
+    FROM with_finances wf
+  ),
+  with_legal AS (
+    SELECT wn.*,
+           (SELECT count(*) FROM silver.opensanctions s
+            WHERE s.name_lower ILIKE '%' || lower(wn.nom) || '%') AS n_sanction_matches,
+           (SELECT count(*) FROM silver.cession_events ce
+            WHERE ce.siren = ANY(wn.sirens_mandats) AND ce.is_recent) AS n_bodacc_cessions
+    FROM with_network wn
+  )
+  SELECT person_uid, ..., pro_ma_score
+  FROM with_legal;
+
+  Performance attendue : 8M dirigeants × 6 sub-queries = 8M × ~50ms = ~5-7 min refresh.
+  Refresh quotidien suffisant (les mandats changent peu).
+
+indexes:
+  - person_uid
+  - "pro_ma_score DESC"
+  - "n_mandats_actifs DESC"
+  - "total_capital_sci DESC"
+  - "is_sanctionne WHERE is_sanctionne = true"
+  - "has_holding_patrimoniale WHERE has_holding_patrimoniale = true"
+  - "co_mandataires USING gin"
+  - "sirens_mandats USING gin"
+  - nom
+  - "date_naissance"
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 1500
