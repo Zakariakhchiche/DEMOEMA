@@ -56,7 +56,9 @@ jobs:
           python-version: '3.12'
           cache: pip
       - name: Install minimal deps for unit tests
+        # httpx requis par deepseek_client (chargé au top de silver_codegen)
+        # même si les tests stubent les vrais clients réseau.
         run: |
-          pip install pytest pytest-asyncio pyyaml pydantic pydantic-settings
+          pip install pytest pytest-asyncio pyyaml pydantic pydantic-settings httpx frontmatter python-frontmatter
       - name: Pytest agents platform (stubbed psycopg/loader/ollama)
         run: pytest tests/ -q
