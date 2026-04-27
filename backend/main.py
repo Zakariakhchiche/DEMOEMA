@@ -127,6 +127,16 @@ def _load_targets_sync():
 async def lifespan(app):
     global enriched_targets, raw_targets
 
+    # Pool httpx partagé (audit PERF-1) — élimine le handshake TLS de 200-400ms
+    # qui était payé à chaque appel sur 35 sites. Réutilise les connexions
+    # keep-alive sur ollama, pappers, gouv, supabase, deepseek...
+    app.state.http = httpx.AsyncClient(
+        timeout=httpx.Timeout(15.0, connect=5.0),
+        limits=httpx.Limits(max_keepalive_connections=50, max_connections=200),
+        headers={"User-Agent": "EdRCF/6.0 (M&A Origination Platform)"},
+        follow_redirects=True,
+    )
+
     # 1. Supabase first — persistent, survives cold starts (fast)
     db_targets = await load_from_supabase()
     if db_targets:
@@ -134,15 +144,17 @@ async def lifespan(app):
         enriched_targets = [enrich_target(c) for c in db_targets]
         print(f"[EdRCF] Loaded {len(enriched_targets)} targets from Supabase")
     else:
-        # 2. Local JSON cache (warm instances only)
-        _load_targets_sync()
+        # 2. Local JSON cache (warm instances only) — file I/O en thread pour
+        # ne pas bloquer l'event loop (audit PERF-3)
+        await asyncio.to_thread(_load_targets_sync)
 
     # 3. Last resort: fetch companies from free gov APIs (200 target)
     if not enriched_targets:
         try:
             fetched = await load_targets_from_papperclip(count=200)
             if fetched:
-                save_cache(fetched)
+                # save_cache est sync (json.dump) — wrap pour ne pas bloquer
+                await asyncio.to_thread(save_cache, fetched)
                 await save_to_supabase(fetched)
                 raw_targets = fetched
                 enriched_targets = [enrich_target(c) for c in fetched]
@@ -150,7 +162,14 @@ async def lifespan(app):
         except Exception as e:
             print(f"[EdRCF] Papperclip fetch failed: {e}")
 
-    yield
+    try:
+        yield
+    finally:
+        # Cleanup pool httpx au shutdown
+        try:
+            await app.state.http.aclose()
+        except Exception:
+            pass
 
 
 app = FastAPI(
@@ -203,8 +222,10 @@ app.add_middleware(
 from routers.admin import router as _admin_router
 app.include_router(_admin_router)
 
-# Ensure targets are loaded even if lifespan doesn't run (Vercel serverless)
-_load_targets_sync()
+# Note (audit PERF-2) : le _load_targets_sync() au module-level a été retiré.
+# Avant : double load (lifespan + module-level) → 100-500ms cold-start gaspillés.
+# Désormais : le lifespan gère seul. Sur Vercel serverless le lifespan tourne
+# au premier request donc pas de TTFB plus lent — juste 1 load au lieu de 2.
 
 
 @app.get("/api/health")
@@ -2756,7 +2777,10 @@ async def admin_enrich_batch(
         # Skip si déjà en mémoire
         if siren in existing_sirens:
             results["skipped"] += 1
-            _mark_enriched_in_index(siren)  # corriger l'index
+            # Bug audit PERF-6 : sans create_task la coroutine était jetée
+            # (RuntimeWarning + PATCH Supabase jamais envoyé) → SIRENs
+            # re-pickés en boucle infinie au prochain tick enrich-batch.
+            asyncio.create_task(_mark_enriched_in_index(siren))
             continue
 
         try:

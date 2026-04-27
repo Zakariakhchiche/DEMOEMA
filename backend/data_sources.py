@@ -399,17 +399,31 @@ async def enrich_with_cross_mandates(siren: str, representants: list) -> list:
 async def get_full_company_info(siren: str) -> dict | None:
     """Fetch and aggregate data from all free sources for a given SIREN.
     Returns a complete company_info dict compatible with build_target()
-    and detect_signals()."""
-    # Primary: identification + dirigeants + finances
-    company_info = await fetch_company_from_gouv(siren)
-    if not company_info:
+    and detect_signals().
+
+    Performance (audit PERF-5) : les 3 fetches indépendants (gouv, BODACC,
+    INPI) sont parallélisés via asyncio.gather — gain p95 ~1-2s sur les
+    chaînes /api/pappers/* et /copilot/*. cross-mandates reste séquentiel
+    car dépend des representants retournés par fetch_company_from_gouv.
+    """
+    import asyncio
+
+    # 3 fetches indépendants en parallèle (chacun a son propre timeout)
+    results = await asyncio.gather(
+        fetch_company_from_gouv(siren),
+        fetch_bodacc(siren),
+        fetch_inpi_rne(siren),
+        return_exceptions=True,
+    )
+    company_info, bodacc, inpi_data = results
+
+    # gouv est la source primaire — sans elle on abandonne
+    if not company_info or isinstance(company_info, Exception):
         return None
 
-    # Secondary: BODACC legal announcements (enriches signals)
-    bodacc = await fetch_bodacc(siren)
-    if bodacc:
+    # BODACC : enrichit signaux + détecte procédures collectives
+    if bodacc and not isinstance(bodacc, Exception):
         company_info["publications_bodacc"] = bodacc
-        # Check for procedures collectives in BODACC
         for pub in bodacc:
             desc = (pub.get("description") or "").lower()
             pub_type = (pub.get("type") or "").lower()
@@ -421,16 +435,17 @@ async def get_full_company_info(siren: str) -> dict | None:
                 company_info["procedure_collective_existe"] = True
                 company_info["procedures_collectives"] = [pub]
                 break
+    else:
+        bodacc = []  # pour le print final ne pas crasher
 
-    # INPI RNE enrichment (optional — requires INPI_USER + INPI_PASSWORD)
-    inpi_data = await fetch_inpi_rne(siren)
-    if inpi_data and company_info.get("representants"):
+    # INPI RNE : enrichissement representants (optionnel — requires creds)
+    if inpi_data and not isinstance(inpi_data, Exception) and company_info.get("representants"):
         company_info["representants"] = _enrich_representants_from_inpi(
             company_info["representants"], inpi_data
         )
-        company_info["inpi_rne_raw"] = inpi_data  # Store for audit
+        company_info["inpi_rne_raw"] = inpi_data  # store for audit
 
-    # Cross-mandate enrichment (free, uses API Recherche Entreprises)
+    # Cross-mandate enrichment (séquentiel : a besoin des representants enrichis ci-dessus)
     if company_info.get("representants"):
         company_info["representants"] = await enrich_with_cross_mandates(
             siren, company_info["representants"]
