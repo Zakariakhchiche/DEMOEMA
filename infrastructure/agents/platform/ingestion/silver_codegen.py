@@ -133,7 +133,13 @@ async def _llm_chat(model: str, system: str, user: str,
 # ═══════════ Bronze introspection ═══════════
 
 def introspect_schema(conn, tables: list[str]) -> dict[str, list[dict]]:
-    """Return {'bronze.foo': [{'column': 'x', 'type': 'text'}, ...]}."""
+    """Return {'bronze.foo': [{'column': 'x', 'type': 'text'}, ...]}.
+
+    Lit pg_attribute plutôt qu'information_schema.columns parce que ce dernier
+    ne voit pas les colonnes des MATERIALIZED VIEW. C'est ce qui empêchait
+    silver.entreprises_signals (silver-of-silver) d'être généré : ses sources
+    silver.* renvoyaient toujours 0 colonnes → fail "bronze tables missing".
+    """
     result: dict[str, list[dict]] = {}
     with conn.cursor() as cur:
         for full_name in tables:
@@ -143,10 +149,21 @@ def introspect_schema(conn, tables: list[str]) -> dict[str, list[dict]]:
                 schema, table = "bronze", full_name
             cur.execute(
                 """
-                SELECT column_name, data_type, udt_name, character_maximum_length
-                FROM information_schema.columns
-                WHERE table_schema = %s AND table_name = %s
-                ORDER BY ordinal_position
+                SELECT a.attname AS column_name,
+                       format_type(a.atttypid, a.atttypmod) AS data_type,
+                       t.typname AS udt_name,
+                       CASE WHEN a.atttypmod > 0 AND t.typname IN ('varchar','bpchar')
+                            THEN a.atttypmod - 4 ELSE NULL END AS char_max_length
+                FROM pg_attribute a
+                JOIN pg_class c ON a.attrelid = c.oid
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                JOIN pg_type t ON t.oid = a.atttypid
+                WHERE n.nspname = %s
+                  AND c.relname = %s
+                  AND c.relkind IN ('r','v','m','p','f')
+                  AND a.attnum > 0
+                  AND NOT a.attisdropped
+                ORDER BY a.attnum
                 """,
                 (schema, table),
             )
