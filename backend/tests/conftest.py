@@ -159,12 +159,25 @@ def test_client(sample_enriched_target):
 
 @pytest.fixture(autouse=True)
 def reset_globals():
-    """Reset global state between tests."""
-    from main import enriched_targets, raw_targets
-    original_et = enriched_targets.copy()
-    original_rt = raw_targets.copy()
+    """Reset global state between tests.
+
+    Audit QA-fix : on snapshote AUSSI scoring_config et _next_idx, sinon un
+    test qui POST /api/scoring/config ou ajoute des targets contamine tous
+    les tests suivants silencieusement.
+    """
+    import copy as _copy
+    import main as _main
+    original_et = _main.enriched_targets.copy()
+    original_rt = _main.raw_targets.copy()
+    original_scoring = _copy.deepcopy(_main.scoring_config)
+    original_next_idx = _main._next_idx
     yield
-    enriched_targets.clear()
-    enriched_targets.extend(original_et)
-    raw_targets.clear()
-    raw_targets.extend(original_rt)
+    _main.enriched_targets.clear()
+    _main.enriched_targets.extend(original_et)
+    _main.raw_targets.clear()
+    _main.raw_targets.extend(original_rt)
+    # Restore scoring_config keys (mutable nested dicts)
+    for k in list(_main.scoring_config.keys()):
+        if k in original_scoring:
+            _main.scoring_config[k] = original_scoring[k]
+    _main._next_idx = original_next_idx

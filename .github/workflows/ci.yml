@@ -1,0 +1,62 @@
+name: CI — lint + tests
+
+# Se déclenche sur PR et push pour catch les régressions AVANT le deploy.
+# Audit QA-9 : avant cette PR, aucun workflow n'exécutait les tests / lint
+# avant le deploy IONOS — on pouvait shipper du code cassé.
+
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'infrastructure/agents/platform/**'
+      - 'pyproject.toml'
+      - '.github/workflows/ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'infrastructure/agents/platform/**'
+      - 'pyproject.toml'
+      - '.github/workflows/ci.yml'
+
+jobs:
+  test-backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install deps
+        run: |
+          pip install -r requirements.txt
+          pip install pytest-cov ruff
+      - name: Ruff lint (warning-only — raise threshold progressivement)
+        run: ruff check . || true
+      - name: Pytest backend
+        # Coverage threshold 21% (état initial post-audit) — à incrémenter
+        # par paliers : 21 → 30 → 45 → 60 selon plan QA M1-M6.
+        run: pytest tests/ --cov=. --cov-report=term --cov-fail-under=20 -q
+
+  test-agents-platform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: infrastructure/agents/platform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install minimal deps for unit tests
+        run: |
+          pip install pytest pytest-asyncio pyyaml pydantic pydantic-settings
+      - name: Pytest agents platform (stubbed psycopg/loader/ollama)
+        run: pytest tests/ -q
