@@ -64,7 +64,7 @@ jobs:
 
       - name: Notify Slack on failure
         if: failure() && env.SLACK_WEBHOOK_URL != ''
-        uses: slackapi/slack-github-action@v1.27.0
+        uses: slackapi/slack-github-action@v3.0.2
         with:
           payload: |
             {"text": "🚨 Deploy IONOS failed on ${{ github.sha }}"}
