@@ -38,17 +38,25 @@ log = logging.getLogger("demoema.agents")
 async def lifespan(app: FastAPI):
     load_agents()
     app.state.ollama = OllamaClient()
+    app.state.scheduler_started = False
     if settings.database_url:
         try:
             start_scheduler()
-            log.info("Ingestion scheduler démarré (%d sources)", len(SOURCES))
+            app.state.scheduler_started = True
+            log.info("Ingestion scheduler démarré (%d sources bronze + silver bootstrap)", len(SOURCES))
         except Exception:
-            log.exception("Scheduler start failed (non-fatal)")
+            log.exception("Scheduler start failed")
     else:
-        log.warning("DATABASE_URL vide — ingestion scheduler non démarré")
-    log.info("Platform démarrée (%d agents)", len(list_agents()))
+        log.error(
+            "DATABASE_URL vide ET DATALAKE_POSTGRES_ROOT_PASSWORD non set — "
+            "ingestion + silver pipelines INACTIFS. Set au moins l'un des deux "
+            "dans .env pour activer."
+        )
+    log.info("Platform démarrée (%d agents, scheduler=%s)",
+             len(list_agents()), app.state.scheduler_started)
     yield
-    stop_scheduler()
+    if app.state.scheduler_started:
+        stop_scheduler()
     await app.state.ollama.close()
 
 
@@ -62,8 +70,18 @@ def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
 
 
 @app.get("/healthz")
-async def healthz() -> dict:
-    return {"status": "ok", "agents_loaded": len(list_agents())}
+async def healthz(request: Request) -> dict:
+    """Health-check exposé via Caddy. `scheduler` est False si le pipeline
+    silver/bronze n'a pas démarré — c'est le signal externe pour qu'un monitor
+    page l'opérateur (sinon un container "up" peut tourner muet pendant des
+    jours, comme c'est arrivé avec le DATABASE_URL manquant)."""
+    state = request.app.state
+    return {
+        "status": "ok",
+        "agents_loaded": len(list_agents()),
+        "scheduler": getattr(state, "scheduler_started", False),
+        "database_url_set": bool(settings.database_url),
+    }
 
 
 @app.get("/agents", dependencies=[Depends(require_api_key)])

@@ -40,6 +40,12 @@ services:
       PROMPTS_DIR: /app/prompts
       DOCS_DIR: /app/docs
       OPENCLAW_VAULT_DIR: /app/.secrets
+      # DSN Postgres dérivée d'un seul mot de passe source-of-truth (le même
+      # qui initialise datalake-db). Élimine la duplication DATABASE_URL ↔
+      # POSTGRES_PASSWORD : impossible d'avoir un mismatch, et la migration
+      # VPS n'exige plus qu'une variable .env (DATALAKE_POSTGRES_ROOT_PASSWORD)
+      # pour que silver_engine + agents-platform se connectent.
+      DATABASE_URL: "postgresql://postgres:${DATALAKE_POSTGRES_ROOT_PASSWORD}@datalake-db:5432/datalake"
     volumes:
       - ./prompts:/app/prompts:ro
       - ./docs:/app/docs:ro

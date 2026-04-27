@@ -1,6 +1,6 @@
 """Configuration agents platform DEMOEMA."""
 from pathlib import Path
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -21,8 +21,18 @@ class Settings(BaseSettings):
     inpi_username: str = Field(default="", description="Email du compte INPI (login RNE)")
     inpi_password: str = Field(default="", description="Password du compte INPI (login RNE)")
 
-    # Postgres (via réseau shared-supabase si déployé sur VPS)
-    database_url: str = Field(default="", description="DSN Postgres read-only pour tools")
+    # Postgres datalake. La DSN peut être fournie explicitement (DATABASE_URL),
+    # ou dérivée des composantes (DATALAKE_POSTGRES_ROOT_PASSWORD + host/db
+    # par défaut qui matchent docker-compose.agents.yml). Cette dérivation est
+    # le filet : si l'opérateur set juste le password (le strict minimum déjà
+    # nécessaire pour Postgres), tout fonctionne — pas besoin de maintenir
+    # deux secrets en miroir.
+    database_url: str = Field(default="", description="DSN Postgres (auto-dérivée si vide)")
+    datalake_postgres_root_password: str = Field(default="", description="Password root Postgres datalake")
+    datalake_host: str = Field(default="datalake-db", description="Hostname Postgres datalake (service compose)")
+    datalake_port: int = Field(default=5432, description="Port Postgres datalake")
+    datalake_db: str = Field(default="datalake", description="Nom de la base Postgres datalake")
+    datalake_user: str = Field(default="postgres", description="Rôle Postgres pour la DSN auto-dérivée")
 
     # Redis (cache sessions agent)
     redis_url: str = Field(default="redis://redis:6379/0")
@@ -45,6 +55,23 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+
+    @model_validator(mode="after")
+    def _derive_database_url(self):
+        """Construire DATABASE_URL depuis le password si elle n'est pas fournie.
+
+        Permet à un nouveau VPS de démarrer en ne configurant qu'une seule
+        variable (DATALAKE_POSTGRES_ROOT_PASSWORD). Si la DSN explicite est
+        définie elle gagne — utile pour pointer vers un Postgres externe.
+        """
+        if not self.database_url and self.datalake_postgres_root_password:
+            from urllib.parse import quote
+            pw = quote(self.datalake_postgres_root_password, safe="")
+            self.database_url = (
+                f"postgresql://{self.datalake_user}:{pw}"
+                f"@{self.datalake_host}:{self.datalake_port}/{self.datalake_db}"
+            )
+        return self
 
 
 settings = Settings()

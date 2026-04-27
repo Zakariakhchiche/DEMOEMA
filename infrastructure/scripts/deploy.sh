@@ -25,7 +25,7 @@ cd /root/DEMOEMA
 
 echo "[deploy] current=$(git rev-parse --short HEAD) target=$SHA component=$COMPONENT"
 git fetch --all --tags --prune
-git reset --hard origin/develop
+git reset --hard origin/main
 
 echo "[deploy] new_head=$(git rev-parse --short HEAD)"
 
