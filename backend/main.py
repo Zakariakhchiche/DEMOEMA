@@ -173,7 +173,15 @@ app.add_middleware(
 
 # Admin pipeline router (Bronze/Silver/BODACC/RNE/Pappers)
 from routers.admin import router as _admin_router
+from routers.news import router as _news_router
+from routers.scoring import router as _scoring_router
+from routers.signals import router as _signals_router
+from routers.pipeline import router as _pipeline_router
 app.include_router(_admin_router)
+app.include_router(_news_router)
+app.include_router(_scoring_router)
+app.include_router(_signals_router)
+app.include_router(_pipeline_router)
 
 # Note (audit PERF-2) : le _load_targets_sync() au module-level a été retiré.
 # Avant : double load (lifespan + module-level) → 100-500ms cold-start gaspillés.
@@ -1066,169 +1074,9 @@ async def get_target(target_id: str):
     raise HTTPException(status_code=404, detail="Target not found")
 
 
-@app.get("/api/news/{siren}")
-async def get_news_for_company(siren: str):
-    """
-    Fetch recent press articles from Google News RSS for a company.
-    Returns articles with M&A signal detection.
-    Optimised: Pappers name lookup + Google News run concurrently with 8s guard.
-    """
-    siren = siren.strip().replace(" ", "")
-    # Fast path: target already in memory
-    target = next((t for t in enriched_targets if t.get("siren") == siren), None)
-    if target:
-        company_name = target["name"]
-        articles = await asyncio.wait_for(get_google_news(company_name), timeout=8)
-    else:
-        # Slow path: need Pappers lookup — run concurrently with a generous timeout
-        async def _resolve_and_fetch():
-            try:
-                pappers_data = await asyncio.wait_for(get_pappers_company(siren), timeout=6)
-                name = (pappers_data or {}).get("nom_entreprise") or siren
-            except Exception:
-                name = siren
-            return name, await get_google_news(name)
-
-        try:
-            company_name, articles = await asyncio.wait_for(_resolve_and_fetch(), timeout=9)
-        except asyncio.TimeoutError:
-            company_name, articles = siren, []
-
-    # Aggregate detected signals across all articles
-    detected_signals: set = set()
-    for a in articles:
-        for sig in a.get("signals", []):
-            detected_signals.add(sig)
-
-    return {
-        "data": {
-            "company": company_name,
-            "siren": siren,
-            "articles": articles,
-            "signals_detected": list(detected_signals),
-        }
-    }
-
-
-@app.get("/api/infogreffe/{siren}")
-async def get_infogreffe_endpoint(siren: str):
-    """
-    Fetch recent actes RCS from Infogreffe open data for a SIREN.
-    """
-    siren = _validate_siren(siren)
-    try:
-        actes = await asyncio.wait_for(get_infogreffe_actes(siren), timeout=8)
-    except asyncio.TimeoutError:
-        actes = []
-    # Detect signals from actes
-    detected_signals: set = set()
-    for acte in actes:
-        acte_type = (acte.get("type") or "").lower()
-        if any(w in acte_type for w in ["nomination", "gerant", "president", "directeur"]):
-            detected_signals.add("infogreffe_nouveau_dirigeant")
-        if any(w in acte_type for w in ["capital", "augmentation", "reduction"]):
-            detected_signals.add("infogreffe_capital_change")
-        if any(w in acte_type for w in ["fusion", "absorption", "scission"]):
-            detected_signals.add("infogreffe_fusion_absorption")
-        if any(w in acte_type for w in ["transfert", "siege"]):
-            detected_signals.add("infogreffe_transfert_siege")
-
-    return {
-        "data": {
-            "siren": siren,
-            "actes": actes,
-            "signals_detected": list(detected_signals),
-        }
-    }
-
-
-@app.get("/api/signals")
-def get_signals(severity: Optional[str] = Query(None)):
-    signals_feed = []
-    for t in enriched_targets:
-        for sig in t["topSignals"]:
-            if severity and sig["severity"] != severity:
-                continue
-            signals_feed.append(
-                {
-                    "id": f"{t['id']}-{sig['id']}",
-                    "type": sig["family"],
-                    "title": f"{sig['label']} — {t['name']}",
-                    "time": "Recent",
-                    "source": sig["source"],
-                    "source_url": sig["source_url"],
-                    "severity": sig["severity"],
-                    "location": f"{t['city']}, {t['region']}",
-                    "tags": [sig["family"], t["sector"]],
-                    "target_id": t["id"],
-                    "target_name": t["name"],
-                    "dimension": sig["dimension"],
-                    "points": sig["points"],
-                }
-            )
-    # Sort: high first, then medium, then low
-    order = {"high": 0, "medium": 1, "low": 2}
-    signals_feed.sort(key=lambda s: order.get(s["severity"], 3))
-    return {"data": signals_feed, "total": len(signals_feed), "catalog": SIGNAL_CATALOG}
-
-
-@app.get("/api/pipeline")
-def get_pipeline():
-    """5 M&A stages pipeline"""
-    pipeline = [
-        {"id": "origination", "title": "Origination", "color": "indigo", "cards": []},
-        {"id": "qualification", "title": "Qualification", "color": "purple", "cards": []},
-        {"id": "pitch", "title": "Pitch", "color": "amber", "cards": []},
-        {"id": "execution", "title": "Execution", "color": "emerald", "cards": []},
-        {"id": "closing", "title": "Closing", "color": "green", "cards": []},
-    ]
-    for t in enriched_targets:
-        card = {
-            "id": t["id"],
-            "name": t["name"],
-            "sector": t["sector"],
-            "score": t["globalScore"],
-            "priority": t["priorityLevel"],
-            "tags": [t["analysis"]["type"]],
-            "window": t["analysis"]["window"],
-            "ebitda": t["financials"]["ebitda"],
-        }
-        if t["globalScore"] >= 65:
-            pipeline[1]["cards"].append(card)  # Qualification (already scored high)
-        elif t["globalScore"] >= 45:
-            pipeline[0]["cards"].append(card)  # Origination
-
-    return {"data": pipeline}
-
-
-@app.post("/api/pipeline/move")
-def move_pipeline_card(
-    card_id: str = Query(...),
-    from_stage: str = Query(...),
-    to_stage: str = Query(...),
-):
-    return {
-        "success": True,
-        "message": f"Carte {card_id} deplacee de {from_stage} vers {to_stage}",
-    }
-
-
-@app.get("/api/scoring/config")
-def get_scoring_config():
-    return {"data": scoring_config}
-
-
-@app.post("/api/scoring/config")
-def update_scoring_config(config: Dict[str, Any]):
-    global enriched_targets
-    for key, val in config.items():
-        if key in scoring_config:
-            scoring_config[key].update(val)
-    enriched_targets = [enrich_target(c) for c in raw_targets]
-    return {
-        "data": scoring_config,
-        "message": "Ponderations mises a jour. Scores recalcules.",
-    }
+# Routes /api/news, /api/infogreffe, /api/signals, /api/pipeline*,
+# /api/scoring/config* extraites dans backend/routers/{news,signals,
+# pipeline,scoring}.py (audit ARCH-1, ARCH-5, QA-8).
 
 
 def build_target_from_search(idx, search_result, search_context=None):

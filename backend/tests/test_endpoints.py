@@ -193,7 +193,9 @@ async def test_news_endpoint_with_mock():
         "date_cessation": None,
     })
 
-    with patch("main.get_google_news", new_callable=AsyncMock) as mock_news:
+    # Le router news a été extrait de main.py (refacto archi PR-4) — patch
+    # directement dans le namespace du routeur où l'import vit.
+    with patch("routers.news.get_google_news", new_callable=AsyncMock) as mock_news:
         mock_news.return_value = [
             {"title": "Test article about cession", "link": "http://test.com", "date": "2024-01-01", "source": "Test", "signals": ["presse_cession"]}
         ]
