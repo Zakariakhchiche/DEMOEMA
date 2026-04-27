@@ -483,6 +483,15 @@ def _topo_sort_specs() -> list[str]:
     return ordered
 
 
+# Postgres advisory lock id for bootstrap mutual exclusion.
+# Uvicorn workers > 1 each run the FastAPI lifespan separately, which fired
+# bootstrap N times in parallel — observed on prod with 2 workers racing on
+# silver.bodacc_annonces (29M rows) and burning LLM credits twice. A
+# session-level pg_try_advisory_lock with a constant id ensures at most one
+# bootstrap runs at any moment cluster-wide.
+_BOOTSTRAP_LOCK_ID = 0x51EA77B05  # "SILVA77BO5" mnemonic — arbitrary 64-bit
+
+
 async def bootstrap_missing_silvers(force_empty: bool = True) -> dict:
     """Walk every silver spec YAML and ensure the matching MV exists with rows.
 
@@ -492,47 +501,67 @@ async def bootstrap_missing_silvers(force_empty: bool = True) -> dict:
       - MV exists but 0 rows (and force_empty=True) → regenerate + apply
       - MV exists with rows           → leave alone (refresh job handles it)
 
+    Mutual exclusion is enforced via a Postgres session-level advisory lock so
+    multiple Uvicorn workers don't race on the same spec.
+
     Specs are processed in topological order so silver-of-silver dependencies
     are built before their consumers. Returns a per-spec report.
     """
     if not settings.database_url:
         return {"error": "no database_url"}
 
-    specs = _topo_sort_specs()
-    results: list[dict] = []
+    # Hold the lock for the whole bootstrap. Closing this connection
+    # auto-releases (Postgres rule for advisory locks).
+    lock_conn = psycopg.connect(settings.database_url, autocommit=True)
+    try:
+        with lock_conn.cursor() as cur:
+            cur.execute("SELECT pg_try_advisory_lock(%s)", (_BOOTSTRAP_LOCK_ID,))
+            got_lock = cur.fetchone()[0]
+        if not got_lock:
+            log.info("[silver_bootstrap] another worker holds the lock — skipping")
+            return {"built": 0, "failed": 0, "skipped": 0,
+                    "skipped_due_to_lock": True, "details": []}
 
-    with psycopg.connect(settings.database_url) as conn:
-        existing = _silver_state(conn)
+        specs = _topo_sort_specs()
+        results: list[dict] = []
 
-    for silver_name in specs:
-        rows = existing.get(silver_name)
-        needs_build = (rows is None) or (force_empty and rows == 0)
-        if not needs_build:
-            results.append({"silver_name": silver_name, "action": "skip", "rows": rows})
-            continue
+        with psycopg.connect(settings.database_url) as conn:
+            existing = _silver_state(conn)
 
-        reason = "missing" if rows is None else "empty"
-        log.info("[silver_bootstrap] building %s (%s)", silver_name, reason)
+        for silver_name in specs:
+            rows = existing.get(silver_name)
+            needs_build = (rows is None) or (force_empty and rows == 0)
+            if not needs_build:
+                results.append({"silver_name": silver_name, "action": "skip", "rows": rows})
+                continue
+
+            reason = "missing" if rows is None else "empty"
+            log.info("[silver_bootstrap] building %s (%s)", silver_name, reason)
+            try:
+                r = await generate_silver_sql(silver_name, apply_immediately=True)
+                results.append({
+                    "silver_name": silver_name,
+                    "action": "build",
+                    "reason": reason,
+                    "valid": r.get("valid"),
+                    "applied": r.get("applied"),
+                    "validation_msg": r.get("validation_msg"),
+                    "error": r.get("error") or r.get("apply_error"),
+                })
+            except Exception as e:
+                log.exception("[silver_bootstrap] failed %s", silver_name)
+                results.append({
+                    "silver_name": silver_name, "action": "build",
+                    "reason": reason, "applied": False, "error": str(e),
+                })
+
+        built = sum(1 for r in results if r["action"] == "build" and r.get("applied"))
+        failed = sum(1 for r in results if r["action"] == "build" and not r.get("applied"))
+        skipped = sum(1 for r in results if r["action"] == "skip")
+        log.info("[silver_bootstrap] %d built / %d failed / %d skipped", built, failed, skipped)
+        return {"built": built, "failed": failed, "skipped": skipped, "details": results}
+    finally:
         try:
-            r = await generate_silver_sql(silver_name, apply_immediately=True)
-            results.append({
-                "silver_name": silver_name,
-                "action": "build",
-                "reason": reason,
-                "valid": r.get("valid"),
-                "applied": r.get("applied"),
-                "validation_msg": r.get("validation_msg"),
-                "error": r.get("error") or r.get("apply_error"),
-            })
-        except Exception as e:
-            log.exception("[silver_bootstrap] failed %s", silver_name)
-            results.append({
-                "silver_name": silver_name, "action": "build",
-                "reason": reason, "applied": False, "error": str(e),
-            })
-
-    built = sum(1 for r in results if r["action"] == "build" and r.get("applied"))
-    failed = sum(1 for r in results if r["action"] == "build" and not r.get("applied"))
-    skipped = sum(1 for r in results if r["action"] == "skip")
-    log.info("[silver_bootstrap] %d built / %d failed / %d skipped", built, failed, skipped)
-    return {"built": built, "failed": failed, "skipped": skipped, "details": results}
+            lock_conn.close()
+        except Exception:
+            pass
