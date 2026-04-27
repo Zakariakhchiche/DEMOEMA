@@ -14,20 +14,9 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 router = APIRouter(prefix="/api/admin", tags=["admin-pipeline"])
 
 
-def _check_secret(secret: str) -> None:
-    """Vérifie le secret cron. **Fail-fast si CRON_SECRET non configuré** :
-    sinon les routes admin (`/run-all`, `/migrate-supabase`, ...) sont
-    publiques et un attaquant peut déclencher pipelines coûteux + migrations
-    SQL. Bug audit SEC-2 (CRITICAL).
-    """
-    cron = os.getenv("CRON_SECRET", "")
-    if not cron:
-        raise HTTPException(
-            status_code=503,
-            detail="Admin endpoints disabled — CRON_SECRET not configured on server",
-        )
-    if secret != cron:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+# Auth centralisée dans backend/auth/cron_secret.py (audit ARCH-7) — 3 sites
+# de _check_*_secret dédupliqués. Alias conservé pour compat des callers.
+from auth.cron_secret import verify_cron_secret as _check_secret
 
 
 # =============================================================================

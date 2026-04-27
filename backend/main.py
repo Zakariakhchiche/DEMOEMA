@@ -2232,11 +2232,7 @@ async def admin_refresh_db(
 ):
     """Cron-safe endpoint: refresh companies from Papperclip + BODACC and save to Supabase.
     Optional: protect with CRON_SECRET env var. count param controls target size (default 200)."""
-    cron_secret = os.getenv("CRON_SECRET", "")
-    if not cron_secret:
-        raise HTTPException(503, "Admin endpoints disabled — CRON_SECRET not configured on server")
-    if secret != cron_secret:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+    _check_admin_secret(secret)
 
     global enriched_targets, raw_targets
     try:
@@ -2267,11 +2263,7 @@ async def admin_load_sector(
 ):
     """On-demand: load companies from a specific NAF code and add to the live pool.
     Skips SIRENs already in the pool. Returns the new targets added."""
-    cron_secret = os.getenv("CRON_SECRET", "")
-    if not cron_secret:
-        raise HTTPException(503, "Admin endpoints disabled — CRON_SECRET not configured on server")
-    if secret != cron_secret:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+    _check_admin_secret(secret)
 
     global enriched_targets, raw_targets
 
@@ -2324,13 +2316,8 @@ _SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
 _SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 
 
-def _check_admin_secret(secret: str):
-    """Vérifie le secret admin. Passe si CRON_SECRET n'est pas configuré."""
-    cron_secret = os.getenv("CRON_SECRET", "")
-    if not cron_secret:
-        raise HTTPException(503, "Admin endpoints disabled — CRON_SECRET not configured on server")
-    if secret != cron_secret:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+# Auth admin centralisée (audit ARCH-7 + SEC-2) — alias compat
+from auth.cron_secret import verify_cron_secret as _check_admin_secret
 
 
 def _supabase_headers_main() -> dict:
