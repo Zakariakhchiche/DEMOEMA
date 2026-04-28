@@ -19,6 +19,31 @@ services:
       POSTGRES_PASSWORD: ${DATALAKE_POSTGRES_ROOT_PASSWORD}
       DATALAKE_AGENTS_PASSWORD: ${DATALAKE_AGENTS_PASSWORD}
       DATALAKE_RO_PASSWORD: ${DATALAKE_RO_PASSWORD}
+    # Tuning Postgres calé sur le VPS IONOS post-migration (16 vCPU / 62 GB / NVMe).
+    # Sans ces flags, l'image alpine tourne avec les defaults (shared_buffers=128MB,
+    # maintenance_work_mem=64MB) — sur ce hardware ça gaspille 95% de la RAM
+    # disponible et fait spiller chaque CREATE INDEX / REFRESH MV sur disque.
+    # Mesuré : pg_restore à 7 GB/h en defaults vs 30+ GB/h avec ces flags.
+    #
+    # Les ALTER SYSTEM live (ALTER SYSTEM SET ... ; pg_reload_conf()) ont la même
+    # effet pour les params SIGHUP-able, mais shared_buffers nécessite restart →
+    # on bake les flags ici pour qu'ils survivent au prochain redémarrage.
+    command: >
+      postgres
+      -c shared_buffers=16GB
+      -c effective_cache_size=46GB
+      -c work_mem=256MB
+      -c maintenance_work_mem=4GB
+      -c max_worker_processes=16
+      -c max_parallel_workers=12
+      -c max_parallel_workers_per_gather=4
+      -c max_parallel_maintenance_workers=4
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c checkpoint_completion_target=0.9
+      -c wal_compression=on
+      -c jit=on
+      -c log_min_duration_statement=10000
     volumes:
       - datalake-data:/var/lib/postgresql/data
       - ./datalake-init:/docker-entrypoint-initdb.d:ro
@@ -26,7 +51,10 @@ services:
       - "5432"
     networks:
       - agents-net
-    shm_size: 256mb
+    # 1 GB shared memory — utilisé par parallel workers (hash join, sort).
+    # Default 64 MB est trop petit pour `max_parallel_workers_per_gather=4`
+    # sur des big tables 30M+ rows.
+    shm_size: 1gb
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d datalake"]
       interval: 10s
