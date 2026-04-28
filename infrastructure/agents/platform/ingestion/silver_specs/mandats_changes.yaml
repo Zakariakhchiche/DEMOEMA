@@ -1,0 +1,110 @@
+silver_name: silver.mandats_changes
+goal: >
+  🔑 CHRONOLOGIE DES CHANGEMENTS DE MANDATS — détecte les rotations dirigeants
+  via inpi_formalites_historique : nominations, démissions, cooptations.
+  Permet de repérer les "rotations précédant cession" (signal pré-M&A) ou
+  les "stabilisations" post-acquisition.
+
+source_tables:
+  - bronze.inpi_formalites_historique
+  - bronze.inpi_formalites_personnes
+  - silver.inpi_dirigeants
+
+grain: "1 row par changement de mandat (siren × person_uid × type_evenement × date)"
+
+key_columns:
+  - change_uid
+  - siren
+  - person_uid
+  - type_evenement
+  - date_evenement
+  - role_avant
+  - role_apres
+
+business_logic: |
+  Itère bronze.inpi_formalites_historique pour identifier les événements
+  affectant les mandats :
+
+  type_evenement (depuis le payload formalite) :
+  - 'nomination'         : nouvelle entrée d'un dirigeant
+  - 'demission'          : démission volontaire
+  - 'revocation'         : révocation
+  - 'cooptation'         : nomination provisoire en remplacement
+  - 'fin_mandat'         : terme du mandat
+  - 'changement_role'    : changement de fonction (président → DG par ex.)
+  - 'autre'              : default
+
+  person_uid récupéré via JOIN sur silver.inpi_dirigeants
+  (nom + prenoms + date_naissance match).
+
+  date_evenement = formalite.date_creation (date de dépôt INPI)
+
+  Cas d'usage scoring :
+  - n_changes_recent_par_siren = count WHERE siren = X AND
+    date_evenement > now() - interval '12 months'
+  - is_rotation_dirigeants = (n_changes_recent >= 3 dans 90 jours)
+  - has_demission_recent = EXISTS WHERE type_evenement = 'demission' AND
+    date_evenement > now() - interval '6 months'
+
+transformations: |
+  WITH formalites AS (
+    SELECT formalite_id,
+           siren,
+           coalesce(payload->>'date_creation', ingested_at::text)::date AS date_evenement,
+           payload->>'type_evenement' AS type_raw,
+           payload AS raw_payload
+    FROM bronze.inpi_formalites_historique
+    WHERE payload->>'type_evenement' IS NOT NULL
+       OR payload->>'libelle' ILIKE '%nomination%'
+       OR payload->>'libelle' ILIKE '%démission%'
+       OR payload->>'libelle' ILIKE '%cooptation%'
+       OR payload->>'libelle' ILIKE '%révocation%'
+  ),
+  classified AS (
+    SELECT f.*,
+           CASE
+             WHEN f.type_raw ILIKE '%nomination%' THEN 'nomination'
+             WHEN f.type_raw ILIKE '%démission%' OR f.type_raw ILIKE '%demission%' THEN 'demission'
+             WHEN f.type_raw ILIKE '%révocation%' OR f.type_raw ILIKE '%revocation%' THEN 'revocation'
+             WHEN f.type_raw ILIKE '%cooptation%' THEN 'cooptation'
+             WHEN f.type_raw ILIKE '%fin de mandat%' OR f.type_raw ILIKE '%terme%' THEN 'fin_mandat'
+             WHEN f.type_raw ILIKE '%changement%' THEN 'changement_role'
+             ELSE 'autre'
+           END AS type_evenement
+    FROM formalites f
+  ),
+  with_person AS (
+    SELECT c.*,
+           p.nom, p.prenom, p.date_naissance,
+           d.person_uid,
+           p.role AS role_apres,
+           lag(p.role) OVER (PARTITION BY c.siren, p.nom, p.prenom
+                             ORDER BY c.date_evenement) AS role_avant
+    FROM classified c
+    LEFT JOIN bronze.inpi_formalites_personnes p
+      ON p.formalite_id = c.formalite_id
+    LEFT JOIN silver.inpi_dirigeants d
+      ON d.nom = p.nom AND d.prenom = p.prenom AND d.date_naissance = p.date_naissance
+  )
+  SELECT
+    md5(siren || '|' || coalesce(person_uid, '') || '|' || type_evenement || '|' || date_evenement::text) AS change_uid,
+    siren,
+    person_uid,
+    type_evenement,
+    date_evenement,
+    role_avant,
+    role_apres,
+    raw_payload
+  FROM with_person
+  WHERE siren IS NOT NULL;
+
+indexes:
+  - "siren"
+  - "person_uid WHERE person_uid IS NOT NULL"
+  - "type_evenement"
+  - "date_evenement DESC"
+  - "(siren, date_evenement DESC)"
+  - "(person_uid, date_evenement DESC) WHERE person_uid IS NOT NULL"
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 2880

@@ -1,0 +1,120 @@
+silver_name: silver.amf_signals
+goal: >
+  🔑 SIGNAL COMPLIANCE FINANCIÈRE pour due diligence : décisions, sanctions,
+  avertissements, listes noires AMF par siren/dirigeant. Consolidation des
+  4 sources AMF disponibles (DILA bulk + GECO + BDIF + listes noires).
+  Critère red-flag pour scoring M&A : `is_amf_sanctioned`,
+  `n_amf_decisions_recent`.
+
+source_tables:
+  - bronze.amf_dila_raw
+  - bronze.amf_geco_raw
+  - bronze.amf_bdif_raw
+  - bronze.amf_listes_noires_raw
+
+grain: "1 row par signal AMF (decision_id ou nom_entité)"
+
+key_columns:
+  - amf_signal_uid
+  - source_table
+  - entity_name
+  - siren
+  - signal_type
+  - severity
+  - date_signal
+
+business_logic: |
+  Unifie 4 schémas AMF en un schéma commun :
+
+  [Décisions DILA AMF — sanctions formelles, severity HIGH]
+  - source_table = 'amf_dila'
+  - entity_name extrait via regex sur payload (nom partie sanctionnée)
+  - signal_type = 'sanction' (default DILA AMF)
+  - severity = 'HIGH'
+
+  [GECO — opérations société cotées, severity LOW (informational)]
+  - source_table = 'amf_geco'
+  - entity_name = denomination du payload
+  - siren extracted via payload->>'siren'
+  - signal_type = 'operation_listed' (déclaration franchissement seuil etc.)
+  - severity = 'LOW'
+
+  [BDIF — base décisions individuelles, severity MEDIUM]
+  - source_table = 'amf_bdif'
+  - signal_type = 'decision_individuelle' (sanction, agrément, etc.)
+  - severity dérivé du type (sanctions = HIGH, agréments = LOW)
+
+  [Listes noires — alertes consommateurs, severity HIGH]
+  - source_table = 'amf_listes_noires'
+  - signal_type = 'liste_noire'
+  - severity = 'HIGH' (entités ne respectant pas la régulation)
+
+  Aggregation possible côté query : compter n_amf_signals par siren via
+  LEFT JOIN dans dirigeants_360.
+
+transformations: |
+  WITH dila AS (
+    SELECT decision_id || '|dila' AS amf_signal_uid,
+           'amf_dila' AS source_table,
+           coalesce(payload->>'TITRE', payload->>'PARTIE') AS entity_name,
+           NULL::text AS siren,
+           'sanction' AS signal_type,
+           'HIGH' AS severity,
+           coalesce((payload->>'DATE_DEC')::date,
+                    (payload->>'DATE_PUBLI')::date,
+                    ingested_at::date) AS date_signal,
+           payload AS raw_payload
+    FROM bronze.amf_dila_raw
+  ),
+  geco AS (
+    SELECT (payload->>'id') || '|geco' AS amf_signal_uid,
+           'amf_geco' AS source_table,
+           payload->>'denomination' AS entity_name,
+           payload->>'siren' AS siren,
+           'operation_listed' AS signal_type,
+           'LOW' AS severity,
+           coalesce((payload->>'date_publication')::date, ingested_at::date) AS date_signal,
+           payload AS raw_payload
+    FROM bronze.amf_geco_raw
+  ),
+  bdif AS (
+    SELECT (payload->>'id') || '|bdif' AS amf_signal_uid,
+           'amf_bdif' AS source_table,
+           payload->>'partie' AS entity_name,
+           NULL::text AS siren,
+           coalesce(payload->>'type', 'decision_individuelle') AS signal_type,
+           CASE
+             WHEN payload->>'type' ILIKE '%sanction%' THEN 'HIGH'
+             WHEN payload->>'type' ILIKE '%agrément%' THEN 'LOW'
+             ELSE 'MEDIUM'
+           END AS severity,
+           coalesce((payload->>'date_decision')::date, ingested_at::date) AS date_signal,
+           payload AS raw_payload
+    FROM bronze.amf_bdif_raw
+  ),
+  noires AS (
+    SELECT (payload->>'id') || '|noires' AS amf_signal_uid,
+           'amf_listes_noires' AS source_table,
+           payload->>'denomination' AS entity_name,
+           NULL::text AS siren,
+           'liste_noire' AS signal_type,
+           'HIGH' AS severity,
+           coalesce((payload->>'date_inscription')::date, ingested_at::date) AS date_signal,
+           payload AS raw_payload
+    FROM bronze.amf_listes_noires_raw
+  )
+  SELECT * FROM dila
+  UNION ALL SELECT * FROM geco
+  UNION ALL SELECT * FROM bdif
+  UNION ALL SELECT * FROM noires;
+
+indexes:
+  - "siren WHERE siren IS NOT NULL"
+  - "lower(entity_name)"
+  - "severity"
+  - "signal_type"
+  - "date_signal DESC"
+  - "(severity, date_signal DESC) WHERE severity = 'HIGH'"
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 1440

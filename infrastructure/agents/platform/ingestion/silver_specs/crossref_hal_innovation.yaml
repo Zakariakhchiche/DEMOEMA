@@ -1,0 +1,123 @@
+silver_name: silver.crossref_hal_innovation
+goal: >
+  🔑 SCORE INNOVATION / DEEPTECH — publications scientifiques (Crossref + HAL)
+  attribuées aux dirigeants. Permet de scorer l'expertise scientifique d'une
+  cible (deeptech, biotech, R&D-intensive). Croise authorFullName avec
+  dirigeants INPI pour matcher.
+
+source_tables:
+  - bronze.crossref_works_raw
+  - bronze.hal_publications_raw
+  - silver.inpi_dirigeants
+
+grain: "1 row par publication × auteur (avec match person_uid si possible)"
+
+key_columns:
+  - publication_author_uid
+  - person_uid
+  - publication_id
+  - source_db
+  - title
+  - year
+  - venue
+  - is_dirigeant_match
+
+business_logic: |
+  Pour chaque publication (Crossref ou HAL) :
+  - Extract auteurs (array depuis payload)
+  - Pour chaque auteur, tenter de matcher avec silver.inpi_dirigeants
+    sur lower(prenom + ' ' + nom)
+  - Si match : person_uid + is_dirigeant_match = true
+
+  source_db :
+  - 'crossref' : crossref_works_raw (DOI-based, international)
+  - 'hal'      : hal_publications_raw (FR principalement, archives ouvertes)
+
+  Cas d'usage scoring :
+  - n_publications_par_dirigeant
+  - n_publications_recent_par_dirigeant (5 ans)
+  - h_index_proxy = log(n_publications_total) — proxy simple
+  - has_publications_recent = (n_recent >= 1) — signal R&D actif
+
+  Limites :
+  - Matching nom strict → faux positifs si homonymes (filtre via age vs date_pub)
+  - Filtre exclusion : si publication > 1990 ET dirigeant né < 1965 = OK
+    Si publication récente et dirigeant ancien (>80 ans) = exclu
+
+transformations: |
+  WITH crossref AS (
+    SELECT
+      payload->>'DOI' AS publication_id,
+      'crossref' AS source_db,
+      payload->>'title' AS title,
+      jsonb_array_elements(coalesce(payload->'author', '[]'::jsonb)) AS author_obj,
+      NULLIF(payload->'published-print'->'date-parts'->0->>0, '')::int AS year,
+      coalesce(payload->>'container-title', '') AS venue,
+      payload AS raw_payload
+    FROM bronze.crossref_works_raw
+  ),
+  hal AS (
+    SELECT
+      payload->>'halId_s' AS publication_id,
+      'hal' AS source_db,
+      payload->>'title_s' AS title,
+      jsonb_array_elements(
+        to_jsonb(string_to_array(coalesce(payload->>'authFullName_s', ''), ', '))
+      ) AS author_obj,
+      NULLIF(left(payload->>'producedDate_tdate', 4), '')::int AS year,
+      coalesce(payload->>'labStructName_s', '') AS venue,
+      payload AS raw_payload
+    FROM bronze.hal_publications_raw
+  ),
+  unified AS (
+    SELECT publication_id, source_db, title,
+           CASE
+             WHEN source_db = 'crossref' THEN
+               coalesce(author_obj->>'family', '') || '|' || coalesce(author_obj->>'given', '')
+             ELSE author_obj::text
+           END AS author_raw,
+           year, venue, raw_payload
+    FROM crossref
+    UNION ALL
+    SELECT publication_id, source_db, title,
+           author_obj::text AS author_raw,
+           year, venue, raw_payload
+    FROM hal
+  ),
+  parsed AS (
+    SELECT *,
+           split_part(author_raw, '|', 2) AS author_prenom,
+           split_part(author_raw, '|', 1) AS author_nom
+    FROM unified
+    WHERE author_raw IS NOT NULL AND author_raw != ''
+  )
+  SELECT
+    md5(coalesce(p.publication_id, '') || '|' || p.author_raw) AS publication_author_uid,
+    d.person_uid,
+    p.publication_id,
+    p.source_db,
+    p.title,
+    p.year,
+    p.venue,
+    (d.person_uid IS NOT NULL) AS is_dirigeant_match,
+    p.author_nom,
+    p.author_prenom
+  FROM parsed p
+  LEFT JOIN silver.inpi_dirigeants d
+    ON lower(d.nom) = lower(trim(p.author_nom))
+   AND lower(d.prenom) = lower(trim(p.author_prenom))
+   -- Anti-faux-positif : exclure si dirigeant trop âgé pour publication récente
+   AND (p.year IS NULL OR
+        (EXTRACT(YEAR FROM d.date_naissance::date) IS NULL OR
+         p.year - EXTRACT(YEAR FROM d.date_naissance::date) BETWEEN 18 AND 90));
+
+indexes:
+  - "person_uid WHERE person_uid IS NOT NULL"
+  - "source_db"
+  - "year DESC"
+  - "is_dirigeant_match WHERE is_dirigeant_match = true"
+  - "(person_uid, year DESC) WHERE person_uid IS NOT NULL"
+  - "lower(author_nom)"
+
+refresh_trigger: "interval_hours=48"
+sla_minutes: 2880

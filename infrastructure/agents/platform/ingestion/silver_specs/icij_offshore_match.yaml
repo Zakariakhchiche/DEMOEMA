@@ -1,0 +1,114 @@
+silver_name: silver.icij_offshore_match
+goal: >
+  🔑 DUE DILIGENCE ANTI-BLANCHIMENT — match dirigeants/sociétés FR ↔ entités
+  offshore ICIJ (Panama, Pandora, Paradise, Bahamas, Offshore Leaks). Critère
+  red-flag majeur en M&A : présence dans les leaks fiscaux internationaux.
+
+source_tables:
+  - bronze.icij_offshore_raw
+  - silver.inpi_dirigeants
+
+grain: "1 row par match_uid (entité ICIJ × person_uid candidat)"
+
+key_columns:
+  - match_uid
+  - person_uid
+  - icij_entity_id
+  - icij_entity_name
+  - icij_database
+  - jurisdiction
+  - match_confidence
+
+business_logic: |
+  ICIJ Offshore Leaks expose ~750K entités offshore avec leurs officers
+  (directors, shareholders, beneficiaries). On match :
+
+  1. Sur dénomination personne physique :
+     - lower(officer_name) ILIKE '%' || lower(prenom || ' ' || nom) || '%'
+     - OU lower(officer_name) ILIKE '%' || lower(nom || ', ' || prenom) || '%'
+
+  2. Sur dénomination entreprise :
+     - inpi_dirigeants.denominations_mandats[] ↔ ICIJ entity name
+
+  match_confidence :
+  - 'HIGH'   : exact match prenom+nom+date_naissance partielle
+  - 'MEDIUM' : exact match nom+prenom (sans date naissance)
+  - 'LOW'    : fuzzy match nom uniquement (homonyme possible)
+
+  icij_database :
+  - 'panama'      : Panama Papers (2016)
+  - 'paradise'    : Paradise Papers (2017)
+  - 'pandora'     : Pandora Papers (2021)
+  - 'bahamas'     : Bahamas Leaks
+  - 'offshore'    : Offshore Leaks (consolidated)
+
+  jurisdiction : pays de l'entité offshore (BVI, Cayman, Panama, etc.)
+
+  ⚠️ Données ICIJ sont brutes — un match nom ne prouve pas l'identité.
+  Pour due diligence, valider via :
+  - Date de naissance (si disponible dans payload)
+  - Nationalité
+  - Adresse (si fournie)
+
+transformations: |
+  WITH icij_officers AS (
+    SELECT
+      payload->>'node_id' AS icij_entity_id,
+      payload->>'name' AS officer_name,
+      payload->>'jurisdiction_description' AS jurisdiction,
+      payload->>'sourceID' AS icij_database_raw,
+      payload->>'address' AS officer_address,
+      NULLIF(payload->>'incorporation_date', '')::date AS incorporation_date,
+      payload AS raw_payload
+    FROM bronze.icij_offshore_raw
+    WHERE payload->>'name' IS NOT NULL
+  ),
+  matches AS (
+    SELECT
+      o.icij_entity_id,
+      o.officer_name AS icij_entity_name,
+      lower(o.icij_database_raw) AS icij_database,
+      o.jurisdiction,
+      o.officer_address,
+      o.raw_payload,
+      d.person_uid,
+      d.nom,
+      d.prenom,
+      d.date_naissance,
+      CASE
+        WHEN lower(o.officer_name) = lower(d.prenom || ' ' || d.nom) THEN 'HIGH'
+        WHEN lower(o.officer_name) = lower(d.nom || ', ' || d.prenom) THEN 'HIGH'
+        WHEN lower(o.officer_name) ILIKE '%' || lower(d.prenom || ' ' || d.nom) || '%' THEN 'MEDIUM'
+        WHEN lower(o.officer_name) ILIKE '%' || lower(d.nom) || '%'
+          AND lower(o.officer_name) ILIKE '%' || lower(d.prenom) || '%' THEN 'LOW'
+        ELSE NULL
+      END AS match_confidence
+    FROM icij_officers o
+    JOIN silver.inpi_dirigeants d
+      ON lower(o.officer_name) ILIKE '%' || lower(d.nom) || '%'
+      AND length(d.nom) >= 4  -- évite les noms trop courts (homonymes)
+  )
+  SELECT
+    md5(icij_entity_id || '|' || person_uid) AS match_uid,
+    person_uid,
+    icij_entity_id,
+    icij_entity_name,
+    icij_database,
+    jurisdiction,
+    match_confidence,
+    nom,
+    prenom,
+    date_naissance,
+    officer_address,
+    raw_payload
+  FROM matches
+  WHERE match_confidence IS NOT NULL;
+
+indexes:
+  - "person_uid"
+  - "match_confidence"
+  - "icij_database"
+  - "(person_uid, match_confidence)"
+
+refresh_trigger: "interval_hours=168"
+sla_minutes: 10080

@@ -1,0 +1,96 @@
+silver_name: silver.balo_operations
+goal: >
+  🔑 SIGNAL CAPITALISTIQUE M&A pour sociétés cotées : OPA, augmentations
+  de capital, distributions de dividendes, convocations AG, comptes annuels
+  publiés, rachats actions. Catégorise les annonces BALO en types d'opérations
+  via regex sur le payload XML. Critique pour détection événements M&A en
+  temps quasi-réel (BALO publié quotidiennement).
+
+source_tables:
+  - bronze.balo_announcements_raw
+
+grain: "1 row par announcement_id BALO"
+
+key_columns:
+  - announcement_id
+  - siren
+  - denomination
+  - date_publication
+  - operation_type
+
+business_logic: |
+  Catégorisation des annonces par mots-clés sur payload XML (TITRE, CORPS) :
+
+  [Types d'opérations capitalistiques M&A — 100% pertinent]
+  - 'opa'                : "offre publique" ou "OPA" ou "OPRA" ou "tender offer"
+  - 'opra'               : "offre publique de rachat"
+  - 'augmentation_capital': "augmentation de capital"
+  - 'rachat_actions'     : "programme de rachat" ou "buyback"
+  - 'fusion'             : "fusion" ou "absorption" ou "scission"
+  - 'cession'            : "cession" ou "vente de bloc" ou "désinvestissement"
+
+  [Événements gouvernance — pertinents pour timeline M&A]
+  - 'convocation_ag'     : "convocation" ou "assemblée générale"
+  - 'dividende'          : "dividende" ou "acompte sur dividende"
+  - 'comptes_annuels'    : "comptes annuels" ou "résultats annuels"
+  - 'changement_dirigeant': "nomination" ou "démission" ou "cooptation"
+
+  [Émissions / refinancements — signal capacité financière]
+  - 'emission_obligations': "obligation" ou "ORNANE" ou "OCEANE"
+  - 'placement_prive'    : "placement privé"
+  - 'note_information'   : "note d'information"
+
+  [Default]
+  - 'autre'              : aucun match
+
+  Extraction siren/denomination via regex (les annonces BALO comportent souvent
+  le siren en clair dans le payload). Stockage payload_keywords pour debug.
+
+transformations: |
+  WITH base AS (
+    SELECT announcement_id,
+           payload->>'TITRE' AS titre,
+           payload->>'CORPS' AS corps,
+           (payload->>'DATE_PUBLI')::date AS date_publication,
+           payload->'siren_extracted' AS siren_array,  -- via regex \d{9}
+           payload->>'denomination' AS denomination_extracted,
+           payload AS raw_payload
+    FROM bronze.balo_announcements_raw
+  ),
+  enriched AS (
+    SELECT b.*,
+           -- Extract siren via regex sur titre+corps (1er match \d{9})
+           (regexp_match(coalesce(b.titre,'') || ' ' || coalesce(b.corps,''),
+                        '(\d{9})'))[1] AS siren,
+           CASE
+             WHEN (b.titre || ' ' || coalesce(b.corps,'')) ~* 'offre publique|tender offer|OPA|OPRA' THEN 'opa'
+             WHEN (b.titre || ' ' || coalesce(b.corps,'')) ~* 'augmentation de capital' THEN 'augmentation_capital'
+             WHEN (b.titre || ' ' || coalesce(b.corps,'')) ~* 'rachat|buyback' THEN 'rachat_actions'
+             WHEN (b.titre || ' ' || coalesce(b.corps,'')) ~* 'fusion|absorption|scission' THEN 'fusion'
+             WHEN (b.titre || ' ' || coalesce(b.corps,'')) ~* 'cession|vente de bloc' THEN 'cession'
+             WHEN (b.titre || ' ' || coalesce(b.corps,'')) ~* 'convocation|assemblée générale' THEN 'convocation_ag'
+             WHEN (b.titre || ' ' || coalesce(b.corps,'')) ~* 'dividende' THEN 'dividende'
+             WHEN (b.titre || ' ' || coalesce(b.corps,'')) ~* 'comptes annuels|résultats annuels' THEN 'comptes_annuels'
+             WHEN (b.titre || ' ' || coalesce(b.corps,'')) ~* 'nomination|démission|cooptation' THEN 'changement_dirigeant'
+             WHEN (b.titre || ' ' || coalesce(b.corps,'')) ~* 'obligation|ORNANE|OCEANE' THEN 'emission_obligations'
+             WHEN (b.titre || ' ' || coalesce(b.corps,'')) ~* 'placement privé' THEN 'placement_prive'
+             WHEN (b.titre || ' ' || coalesce(b.corps,'')) ~* 'note d''information' THEN 'note_information'
+             ELSE 'autre'
+           END AS operation_type,
+           (b.titre || ' ' || coalesce(b.corps,'')) ~* 'opa|fusion|cession|augmentation de capital' AS is_event_ma
+    FROM base b
+  )
+  SELECT announcement_id, siren, denomination_extracted AS denomination,
+         date_publication, operation_type, is_event_ma,
+         titre, raw_payload
+  FROM enriched;
+
+indexes:
+  - "siren WHERE siren IS NOT NULL"
+  - "operation_type"
+  - "date_publication DESC"
+  - "is_event_ma WHERE is_event_ma = true"
+  - "(siren, date_publication DESC) WHERE siren IS NOT NULL"
+
+refresh_trigger: "interval_hours=12"
+sla_minutes: 720

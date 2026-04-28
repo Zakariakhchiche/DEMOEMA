@@ -1,0 +1,110 @@
+silver_name: silver.legi_jorf_secteurs
+goal: >
+  🔑 VEILLE RÉGLEMENTAIRE PAR SECTEUR APE — index thématique des codes
+  (LEGI) et textes du Journal Officiel (JORF) par mots-clés sectoriels.
+  Permet d'identifier les réformes en cours impactant la cible M&A
+  (santé, énergie, finance, immobilier, etc.).
+
+source_tables:
+  - bronze.legifrance_textes_raw
+  - bronze.jorf_textes_raw
+
+grain: "1 row par texte juridique × secteur (peut être multi-secteur)"
+
+key_columns:
+  - texte_uid
+  - source_db
+  - texte_id
+  - title
+  - secteur_code
+  - secteur_nom
+  - date_publication
+
+business_logic: |
+  Pour chaque texte (LEGI ou JORF) :
+  - Extract title + résumé du payload
+  - Match sur dictionnaire de mots-clés par secteur APE :
+
+  Secteurs prioritaires M&A :
+  - 'sante'        : médicament, pharmacie, hôpital, AMM, ANSM, biotech
+  - 'finance'      : banque, AMF, ACPR, assurance, crédit, OPC
+  - 'immobilier'   : urbanisme, PLU, foncier, locatif, copropriété
+  - 'energie'      : électricité, gaz, énergie, ENR, CRE, décarbonation
+  - 'numerique'    : RGPD, cyber, IA, plateforme, AI Act, données
+  - 'transport'    : transport, ferroviaire, aérien, automobile, électrique
+  - 'agroalim'     : agriculture, alimentation, AOP, IGP, PAC
+  - 'industrie'    : ICPE, environnement, déchets, REACH
+  - 'social'       : code travail, retraite, sécurité sociale, syndicats
+  - 'fiscal'       : impôt, CGI, BIC, IS, TVA, douane
+  - 'concurrence'  : concurrence, pratiques anticoncurrentielles, ADLC
+  - 'numerique_eu' : DSA, DMA, AI Act, GDPR
+
+  Un texte peut matcher plusieurs secteurs (multi-row).
+
+  Cas d'usage :
+  - filter dirigeants_360.secteur_principal → silver.legi_jorf_secteurs
+    pour la cible
+  - n_textes_recent_par_secteur (12 mois)
+  - has_reforme_majeure = EXISTS dans 6 derniers mois
+
+transformations: |
+  WITH all_textes AS (
+    SELECT 'legi' AS source_db, text_id AS texte_id,
+           coalesce(payload->>'TITRE', payload->>'NUM') AS title,
+           coalesce(
+             (payload->>'DATE_PUBLI')::date,
+             (payload->>'DATE_DEBUT')::date,
+             ingested_at::date
+           ) AS date_publication,
+           coalesce(payload->>'TEXTE', payload->>'CONTENU', '') AS body,
+           payload AS raw_payload
+    FROM bronze.legifrance_textes_raw
+    UNION ALL
+    SELECT 'jorf' AS source_db, text_id AS texte_id,
+           coalesce(payload->>'TITRE', payload->>'NATURE') AS title,
+           coalesce(
+             (payload->>'DATE_PUBLI')::date,
+             ingested_at::date
+           ) AS date_publication,
+           coalesce(payload->>'TEXTE', '') AS body,
+           payload AS raw_payload
+    FROM bronze.jorf_textes_raw
+  ),
+  scored AS (
+    SELECT t.*,
+           lower(coalesce(t.title, '') || ' ' || coalesce(t.body, '')) AS searchable
+    FROM all_textes t
+  ),
+  expanded AS (
+    SELECT s.source_db, s.texte_id, s.title, s.date_publication, s.raw_payload, sec.code, sec.nom
+    FROM scored s
+    CROSS JOIN (VALUES
+      ('sante', 'Santé / pharmacie', 'médicament|pharmaci|hôpital|AMM|ANSM|biotech|santé publique|HAS|CNAM'),
+      ('finance', 'Finance', 'banque|AMF|ACPR|assurance|crédit|OPC|FCPR|trading|trésor'),
+      ('immobilier', 'Immobilier', 'urbanisme|PLU|foncier|locatif|copropriété|construction|bâtiment'),
+      ('energie', 'Énergie', 'électricit|gaz naturel|énergie|ENR|CRE|décarbon|hydrogène|éolien|solaire'),
+      ('numerique', 'Numérique / data', 'RGPD|cyber|IA|plateforme|donnée|algorithme|réseaux sociaux'),
+      ('transport', 'Transport', 'transport|ferroviaire|aérien|automobile|véhicule électrique|mobilité'),
+      ('agroalim', 'Agroalimentaire', 'agricultur|alimentation|AOP|IGP|PAC|filière'),
+      ('industrie', 'Industrie / environnement', 'ICPE|environnement|déchets|REACH|chimique|industrie'),
+      ('social', 'Droit social', 'code du travail|retraite|sécurité sociale|syndicat|salarié|conventions collective'),
+      ('fiscal', 'Fiscal', 'impôt|CGI|TVA|fiscalité|douane|crédit d''impôt'),
+      ('concurrence', 'Concurrence', 'concurrence|anticoncurrentiel|ADLC|cartels|abus de position'),
+      ('numerique_eu', 'Numérique UE', 'DSA|DMA|AI Act|RGPD européen|règlement européen.*données')
+    ) AS sec(code, nom, regex)
+    WHERE s.searchable ~ sec.regex
+  )
+  SELECT
+    md5(source_db || '|' || coalesce(texte_id, '') || '|' || code) AS texte_uid,
+    source_db, texte_id, title, code AS secteur_code, nom AS secteur_nom,
+    date_publication, raw_payload
+  FROM expanded;
+
+indexes:
+  - "secteur_code"
+  - "date_publication DESC"
+  - "(secteur_code, date_publication DESC)"
+  - "source_db"
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 1440

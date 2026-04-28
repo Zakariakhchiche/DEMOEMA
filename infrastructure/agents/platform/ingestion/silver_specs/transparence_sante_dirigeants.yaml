@@ -1,0 +1,98 @@
+silver_name: silver.transparence_sante_dirigeants
+goal: >
+  🔑 LIENS LABO PHARMA ↔ DIRIGEANTS BIOTECH/SANTÉ — base Transparence Santé
+  publie tous les avantages déclarés par les industries de santé (médicaments,
+  dispositifs médicaux) à des bénéficiaires (médecins, sociétés savantes,
+  associations). Pertinent pour M&A pharma/biotech : conflits, dépendance.
+
+source_tables:
+  - bronze.transparence_sante_raw
+  - silver.inpi_dirigeants
+
+grain: "1 row par avantage_uid"
+
+key_columns:
+  - avantage_uid
+  - beneficiaire_person_uid
+  - beneficiaire_siren
+  - laboratoire_denomination
+  - laboratoire_siren
+  - type_avantage
+  - montant_eur
+  - date_avantage
+
+business_logic: |
+  Transparence Santé publie 4 types d'avantages :
+  - 'rémunération' : honoraires expert/conseil
+  - 'avantage'     : repas, transport, hospitalité, dons
+  - 'convention'   : contrats consultance/recherche
+  - 'commande'     : achats matériels
+
+  Pour chaque ligne du raw :
+  - laboratoire_denomination + siren (déclarant)
+  - beneficiaire (médecin / asso / société)
+    → Si bénéficiaire = personne physique (médecin) : person_uid = sha1(nom+prenom)
+    → Si bénéficiaire = personne morale (société savante / asso) : siren
+
+  Croisement final :
+  - JOIN avec silver.inpi_dirigeants sur beneficiaire_person_uid
+    → un médecin peut être dirigeant d'une biotech (associé minoritaire,
+       ou consultant scientifique)
+  - JOIN avec inpi_dirigeants sur beneficiaire_siren
+    → entreprise du domaine santé recevant des avantages
+
+  Cas d'usage scoring :
+  - total_avantages_par_dirigeant_par_an
+  - n_laboratoires_partenaires_par_dirigeant
+  - is_kol_pharma = (total_avantages >= 50K€/an) — Key Opinion Leader
+
+transformations: |
+  WITH base AS (
+    SELECT
+      payload->>'id' AS avantage_id,
+      payload->>'declarant_denomination' AS laboratoire_denomination,
+      payload->>'declarant_siren' AS laboratoire_siren,
+      payload->>'beneficiaire_nom' AS beneficiaire_nom,
+      payload->>'beneficiaire_prenom' AS beneficiaire_prenom,
+      payload->>'beneficiaire_type' AS beneficiaire_type,
+      payload->>'beneficiaire_siren' AS beneficiaire_siren,
+      payload->>'type_avantage' AS type_avantage,
+      NULLIF(payload->>'montant', '')::numeric AS montant_eur,
+      coalesce((payload->>'date_avantage')::date,
+               (payload->>'date_publication')::date) AS date_avantage,
+      payload AS raw_payload
+    FROM bronze.transparence_sante_raw
+  ),
+  enriched AS (
+    SELECT
+      md5(avantage_id || '|' || coalesce(beneficiaire_nom, '') || '|' ||
+          coalesce(beneficiaire_prenom, '')) AS avantage_uid,
+      laboratoire_denomination,
+      laboratoire_siren,
+      beneficiaire_nom,
+      beneficiaire_prenom,
+      beneficiaire_type,
+      beneficiaire_siren,
+      CASE
+        WHEN beneficiaire_nom IS NOT NULL AND beneficiaire_prenom IS NOT NULL
+        THEN md5(lower(beneficiaire_prenom || '|' || beneficiaire_nom))
+        ELSE NULL
+      END AS beneficiaire_person_uid,
+      type_avantage,
+      montant_eur,
+      date_avantage,
+      raw_payload
+    FROM base
+  )
+  SELECT * FROM enriched;
+
+indexes:
+  - "beneficiaire_person_uid WHERE beneficiaire_person_uid IS NOT NULL"
+  - "beneficiaire_siren WHERE beneficiaire_siren IS NOT NULL"
+  - "laboratoire_siren"
+  - "type_avantage"
+  - "date_avantage DESC"
+  - "montant_eur DESC NULLS LAST"
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 1440

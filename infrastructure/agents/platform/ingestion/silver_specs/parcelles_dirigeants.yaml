@@ -1,0 +1,110 @@
+silver_name: silver.parcelles_dirigeants
+goal: >
+  🔑 PATRIMOINE IMMOBILIER CONSOLIDÉ DIRIGEANTS — joint cadastre IGN + DVF
+  (transactions immobilières) + dirigeant_sci_patrimoine (SCI possédées par
+  dirigeants). Étend `total_capital_sci` du `dirigeants_360` avec les biens
+  réels (parcelles + transactions valorisées).
+
+source_tables:
+  - bronze.api_cadastre_ign_raw
+  - bronze.dvf_transactions_raw
+  - silver.dirigeant_sci_patrimoine
+
+grain: "1 row par parcelle_uid × person_uid"
+
+key_columns:
+  - parcelle_person_uid
+  - person_uid
+  - sci_siren
+  - parcelle_id
+  - commune_insee
+  - surface_m2
+  - valeur_estimee_eur
+
+business_logic: |
+  Pour chaque dirigeant ayant des SCI (silver.dirigeant_sci_patrimoine), on
+  cherche les parcelles cadastrales appartenant à ses SCI :
+
+  Step 1 : SCI_SIREN → adresses (depuis bronze.inpi_formalites_etablissements)
+  Step 2 : Adresse → commune_insee (matching exact ou approximatif)
+  Step 3 : Commune_insee + propriétaire_nom (= denomination SCI) →
+           bronze.api_cadastre_ign_raw → parcelles
+
+  Pour chaque parcelle :
+  - surface_m2 (depuis cadastre)
+  - valeur_estimee_eur via DVF :
+    SELECT AVG(valeur_fonciere) FROM bronze.dvf_transactions_raw
+    WHERE commune_insee = parcelle.commune_insee
+      AND surface_terrain BETWEEN parcelle.surface * 0.8 AND parcelle.surface * 1.2
+      AND date_mutation > now() - interval '5 years'
+
+  Si pas de DVF match, valeur_estimee = NULL.
+
+  Cas d'usage scoring :
+  - patrimoine_immo_total_par_dirigeant = SUM(valeur_estimee_eur)
+  - n_parcelles_par_dirigeant = count
+  - has_patrimoine_immobilier_significatif = (total >= 1M€)
+
+transformations: |
+  WITH sci_dirigeants AS (
+    SELECT person_uid, nom, prenom, date_naissance,
+           sci_sirens, total_capital_sci
+    FROM silver.dirigeant_sci_patrimoine
+    WHERE sci_sirens IS NOT NULL AND array_length(sci_sirens, 1) > 0
+  ),
+  sci_etablissements AS (
+    SELECT siren,
+           payload->>'denomination' AS denomination,
+           payload->>'adresse_complete' AS adresse,
+           payload->>'code_postal' AS code_postal,
+           payload->>'commune' AS commune,
+           payload->>'commune_insee' AS commune_insee
+    FROM bronze.inpi_formalites_etablissements
+    WHERE siren = ANY(SELECT unnest(sci_sirens) FROM sci_dirigeants)
+  ),
+  parcelles_match AS (
+    SELECT c.payload->>'parcelle_id' AS parcelle_id,
+           c.payload->>'commune_insee' AS commune_insee,
+           NULLIF(c.payload->>'contenance', '')::numeric AS surface_m2,
+           c.payload->>'proprietaire_nom' AS proprietaire_raw,
+           se.siren AS sci_siren,
+           se.denomination AS sci_denomination
+    FROM bronze.api_cadastre_ign_raw c
+    JOIN sci_etablissements se
+      ON c.payload->>'commune_insee' = se.commune_insee
+     AND lower(c.payload->>'proprietaire_nom') ILIKE '%' || lower(se.denomination) || '%'
+  ),
+  with_dvf AS (
+    SELECT pm.*,
+           (SELECT AVG(NULLIF(d.payload->>'valeur_fonciere', '')::numeric)
+            FROM bronze.dvf_transactions_raw d
+            WHERE d.payload->>'commune_insee' = pm.commune_insee
+              AND NULLIF(d.payload->>'surface_terrain', '')::numeric
+                  BETWEEN pm.surface_m2 * 0.8 AND pm.surface_m2 * 1.2
+              AND (d.payload->>'date_mutation')::date > now() - interval '5 years'
+           ) AS valeur_estimee_eur
+    FROM parcelles_match pm
+  )
+  SELECT
+    md5(d.person_uid || '|' || w.parcelle_id) AS parcelle_person_uid,
+    d.person_uid,
+    w.sci_siren,
+    w.parcelle_id,
+    w.commune_insee,
+    w.surface_m2,
+    w.valeur_estimee_eur,
+    w.proprietaire_raw,
+    w.sci_denomination
+  FROM with_dvf w
+  JOIN sci_dirigeants d
+    ON w.sci_siren = ANY(d.sci_sirens);
+
+indexes:
+  - "person_uid"
+  - "sci_siren"
+  - "commune_insee"
+  - "valeur_estimee_eur DESC NULLS LAST"
+  - "(person_uid, valeur_estimee_eur DESC NULLS LAST)"
+
+refresh_trigger: "interval_hours=48"
+sla_minutes: 2880

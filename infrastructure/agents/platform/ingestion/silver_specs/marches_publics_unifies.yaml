@@ -1,0 +1,100 @@
+silver_name: silver.marches_publics_unifies
+goal: >
+  🔑 INTELLIGENCE ÉCONOMIQUE — marchés publics gagnés par siren via BOAMP
+  (avis publiés) + DECP (données essentielles consolidées). Permet de calculer
+  la dépendance commande publique d'une cible (red flag si > 50% CA) ou son
+  positionnement secteur (cibles forts B2G).
+
+source_tables:
+  - bronze.boamp_avis_raw
+  - bronze.decp_marches_raw
+
+grain: "1 row par marché_uid (boamp_id ou decp_id)"
+
+key_columns:
+  - marche_uid
+  - source_type
+  - siren_titulaire
+  - acheteur_public
+  - date_notification
+  - montant_eur
+  - cpv_code
+
+business_logic: |
+  Unifie BOAMP (avis d'attribution) + DECP (données essentielles 2018+) en
+  un schéma commun :
+
+  source_type :
+  - 'boamp' : avis d'attribution publiés (depuis bronze.boamp_avis_raw)
+  - 'decp'  : données essentielles consolidées (depuis bronze.decp_marches_raw)
+              — plus fiable, contient siren + montant explicites
+
+  Pour BOAMP, extraction siren via regex sur payload XML (titulaire mentionné
+  en clair). DECP a le siren en champ structuré.
+
+  Champs unifiés :
+  - siren_titulaire : siren entreprise gagnante
+  - acheteur_public : nom de l'organisme adjudicateur (mairie, ministère, etc.)
+  - date_notification : date d'attribution
+  - montant_eur : montant TTC en euros (NULL si non précisé)
+  - cpv_code : code CPV (Common Procurement Vocabulary) → secteur
+
+  Cas d'usage scoring :
+  - n_marches_publics_par_siren = count(*) groupé
+  - total_montant_marches_par_siren = SUM(montant_eur)
+  - is_dependant_commande_publique = (montant > 50% CA — à croiser avec inpi_comptes)
+  - top_acheteurs_par_siren = top 5 acheteurs (concentration risk)
+
+transformations: |
+  WITH boamp AS (
+    SELECT (payload->>'id') || '|boamp' AS marche_uid,
+           'boamp' AS source_type,
+           -- Extract siren via regex sur payload TITULAIRE/raw
+           (regexp_match(coalesce(payload->>'titulaire', '') || ' ' ||
+                        coalesce(payload->>'raw', ''),
+                        '\b(\d{9})\b'))[1] AS siren_titulaire,
+           payload->>'acheteur' AS acheteur_public,
+           coalesce((payload->>'date_attribution')::date,
+                    (payload->>'date_publication')::date,
+                    ingested_at::date) AS date_notification,
+           NULLIF(payload->>'montant', '')::numeric AS montant_eur,
+           payload->>'cpv' AS cpv_code,
+           payload AS raw_payload
+    FROM bronze.boamp_avis_raw
+  ),
+  decp AS (
+    SELECT (payload->>'id') || '|decp' AS marche_uid,
+           'decp' AS source_type,
+           coalesce(
+             payload->>'titulaire_id_titulaire',
+             payload->>'siret_titulaire'::text
+           ) AS siren_titulaire_raw,
+           coalesce(payload->>'acheteur_nom', payload->>'acheteur_id') AS acheteur_public,
+           NULLIF(payload->>'datenotification', '')::date AS date_notification,
+           NULLIF(payload->>'montant', '')::numeric AS montant_eur,
+           payload->>'codecpv' AS cpv_code,
+           payload AS raw_payload
+    FROM bronze.decp_marches_raw
+  ),
+  decp_clean AS (
+    SELECT marche_uid, source_type,
+           -- siret 14 chars → siren 9 premiers chars
+           CASE WHEN siren_titulaire_raw ~ '^\d{14}$' THEN left(siren_titulaire_raw, 9)
+                WHEN siren_titulaire_raw ~ '^\d{9}$' THEN siren_titulaire_raw
+                ELSE NULL END AS siren_titulaire,
+           acheteur_public, date_notification, montant_eur, cpv_code, raw_payload
+    FROM decp
+  )
+  SELECT * FROM boamp WHERE siren_titulaire IS NOT NULL
+  UNION ALL
+  SELECT * FROM decp_clean WHERE siren_titulaire IS NOT NULL;
+
+indexes:
+  - "siren_titulaire"
+  - "date_notification DESC"
+  - "cpv_code"
+  - "(siren_titulaire, date_notification DESC)"
+  - "lower(acheteur_public)"
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 1440

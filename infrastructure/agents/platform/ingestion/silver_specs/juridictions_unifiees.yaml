@@ -1,0 +1,115 @@
+silver_name: silver.juridictions_unifiees
+goal: >
+  🔑 CONTENTIEUX UNIFIÉ — toutes décisions justice (cassation + cours d'appel
+  + Conseil d'État + Conseil constitutionnel) par denomination ou nom dirigeant.
+  Étend la couverture `n_jugements` de `silver.dirigeants_360` (qui n'utilisait
+  que silver.judilibre_decisions) à 4x plus de sources juridictionnelles.
+
+source_tables:
+  - bronze.judilibre_decisions_raw
+  - bronze.juri_capp_raw
+  - bronze.juri_jade_raw
+  - bronze.juri_constit_raw
+
+grain: "1 row par decision_id (clé naturelle DILA)"
+
+key_columns:
+  - decision_id
+  - juridiction_type
+  - juridiction
+  - chamber
+  - date_decision
+  - parties_extracted
+  - sirens_mentioned
+
+business_logic: |
+  Unifie les 4 schémas DILA juri (META_COMMUN/META_JURI/META_JURI_JUDI/_ADMIN/_CONSTIT)
+  en un schéma commun + extraction des sirens et noms parties via regex sur le
+  contenu textuel (TEXTE/CORPS).
+
+  juridiction_type :
+  - 'cassation'  : silver.judilibre_decisions_raw (Cour de cassation)
+  - 'cours_appel': bronze.juri_capp_raw
+  - 'admin'      : bronze.juri_jade_raw (CE + CAA + TA)
+  - 'constit'    : bronze.juri_constit_raw
+
+  Extraction siren via regex \d{9} sur TEXTE complet — capture toutes les
+  mentions (parties + tiers cités). Stockage en array (sirens_mentioned[]).
+
+  Extraction nom parties : regex sur PARTIE/_TITRE patterns + parsing
+  "Société X contre Société Y" / "M. Dupont contre Mme Martin".
+
+  Cas d'usage scoring :
+  - n_jugements_par_siren = count silver.juridictions_unifiees WHERE
+    siren = ANY(sirens_mentioned)
+  - has_contentieux_recent_par_dirigeant = EXISTS WHERE
+    parties_extracted ILIKE '%nom prenom%' AND date_decision > now()-interval '2 years'
+
+transformations: |
+  WITH cassation AS (
+    SELECT decision_id, 'cassation' AS juridiction_type,
+           coalesce(payload->>'JURIDICTION', 'Cour de cassation') AS juridiction,
+           NULL::text AS chamber,
+           coalesce((payload->>'DATE_DEC')::date, ingested_at::date) AS date_decision,
+           payload->>'TITRE' AS titre,
+           payload->>'TEXTE' AS texte,
+           payload AS raw_payload
+    FROM bronze.judilibre_decisions_raw
+  ),
+  cours_appel AS (
+    SELECT decision_id, 'cours_appel' AS juridiction_type,
+           coalesce(payload->>'JURIDICTION', 'Cour d''appel') AS juridiction,
+           NULL::text AS chamber,
+           coalesce((payload->>'DATE_DEC')::date, ingested_at::date) AS date_decision,
+           payload->>'TITRE' AS titre,
+           payload->>'TEXTE' AS texte,
+           payload AS raw_payload
+    FROM bronze.juri_capp_raw
+  ),
+  jade AS (
+    SELECT decision_id, 'admin' AS juridiction_type,
+           coalesce(payload->>'JURIDICTION', 'Conseil d''État') AS juridiction,
+           NULL::text AS chamber,
+           coalesce((payload->>'DATE_DEC')::date, ingested_at::date) AS date_decision,
+           payload->>'TITRE' AS titre,
+           payload->>'TEXTE' AS texte,
+           payload AS raw_payload
+    FROM bronze.juri_jade_raw
+  ),
+  constit AS (
+    SELECT decision_id, 'constit' AS juridiction_type,
+           'Conseil constitutionnel' AS juridiction,
+           NULL::text AS chamber,
+           coalesce((payload->>'DATE_DEC')::date, ingested_at::date) AS date_decision,
+           payload->>'TITRE' AS titre,
+           payload->>'TEXTE' AS texte,
+           payload AS raw_payload
+    FROM bronze.juri_constit_raw
+  ),
+  unified AS (
+    SELECT * FROM cassation
+    UNION ALL SELECT * FROM cours_appel
+    UNION ALL SELECT * FROM jade
+    UNION ALL SELECT * FROM constit
+  )
+  SELECT decision_id, juridiction_type, juridiction, chamber, date_decision,
+         titre,
+         -- Extract sirens (toutes les séquences \d{9} dans le texte)
+         ARRAY(
+           SELECT DISTINCT m[1]
+           FROM regexp_matches(coalesce(texte, ''), '\b(\d{9})\b', 'g') m
+         ) AS sirens_mentioned,
+         -- Extract parties (heuristique : tronqué pour rapidité)
+         left(coalesce(titre, ''), 500) AS parties_extracted,
+         raw_payload
+  FROM unified;
+
+indexes:
+  - "juridiction_type"
+  - "date_decision DESC"
+  - "sirens_mentioned USING gin"
+  - "lower(parties_extracted)"
+  - "(juridiction_type, date_decision DESC)"
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 2880

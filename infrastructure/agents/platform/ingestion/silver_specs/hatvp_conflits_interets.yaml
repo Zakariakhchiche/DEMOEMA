@@ -1,0 +1,112 @@
+silver_name: silver.hatvp_conflits_interets
+goal: >
+  🔑 CONFLITS D'INTÉRÊTS POLITIQUES — HATVP croise mandats publics et privés
+  (déclarations légales obligatoires des élus, hauts fonctionnaires, dirigeants
+  d'entreprises publiques). Detection : ancien ministre actionnaire de société
+  cible, parlementaire au CA, etc.
+
+source_tables:
+  - bronze.hatvp_representants_raw
+  - silver.inpi_dirigeants
+
+grain: "1 row par déclarant × entité privée mentionnée"
+
+key_columns:
+  - declaration_uid
+  - declarant_person_uid
+  - declarant_function_publique
+  - entreprise_siren
+  - entreprise_denomination
+  - role_dans_entreprise
+
+business_logic: |
+  HATVP publie déclarations d'intérêts pour :
+  - Membres du gouvernement
+  - Députés, sénateurs, eurodéputés
+  - Conseillers régionaux/départementaux
+  - Hauts fonctionnaires (préfets, directeurs centraux)
+  - Dirigeants d'entreprises publiques (SNCF, EDF, etc.)
+
+  Chaque déclaration contient (selon section) :
+  - Activités professionnelles (rémunérées)
+  - Activités bénévoles
+  - Participations financières (siren + part)
+  - Mandats sociaux (filiales, GIE, etc.)
+  - Activités antérieures (5 ans)
+
+  Pour chaque déclarant × entreprise mentionnée :
+  - declarant_person_uid : sha1(nom+prenom) du déclarant
+  - declarant_function_publique : 'depute', 'senateur', 'ministre', etc.
+  - entreprise_siren : extracted depuis payload (champ structuré ou regex)
+  - role_dans_entreprise : 'actionnaire', 'mandataire', 'salarie', 'consultant'
+  - is_active : (date_fin IS NULL OR date_fin > now())
+
+  Croisement final via JOIN sur silver.inpi_dirigeants pour matcher
+  declarant_person_uid avec d'éventuels mandats privés actuels.
+
+transformations: |
+  WITH hatvp_base AS (
+    SELECT
+      payload->>'id' AS declaration_id,
+      payload->>'nom' AS declarant_nom,
+      payload->>'prenom' AS declarant_prenom,
+      payload->>'fonction' AS declarant_function_publique,
+      payload AS raw_payload,
+      ingested_at
+    FROM bronze.hatvp_representants_raw
+  ),
+  -- Pour chaque déclaration, on explose les mentions d'entreprises (depuis
+  -- les sections activites/participations/mandats)
+  entreprises_mentions AS (
+    SELECT h.declaration_id,
+           h.declarant_nom,
+           h.declarant_prenom,
+           h.declarant_function_publique,
+           jsonb_array_elements(coalesce(h.raw_payload->'activites', '[]'::jsonb)) AS mention,
+           'activite' AS section
+    FROM hatvp_base h
+    UNION ALL
+    SELECT h.declaration_id, h.declarant_nom, h.declarant_prenom,
+           h.declarant_function_publique,
+           jsonb_array_elements(coalesce(h.raw_payload->'participations', '[]'::jsonb)) AS mention,
+           'participation' AS section
+    FROM hatvp_base h
+    UNION ALL
+    SELECT h.declaration_id, h.declarant_nom, h.declarant_prenom,
+           h.declarant_function_publique,
+           jsonb_array_elements(coalesce(h.raw_payload->'mandats', '[]'::jsonb)) AS mention,
+           'mandat' AS section
+    FROM hatvp_base h
+  )
+  SELECT
+    md5(declaration_id || '|' || coalesce(mention->>'denomination', '') || '|' || section) AS declaration_uid,
+    md5(lower(declarant_prenom || '|' || declarant_nom)) AS declarant_person_uid,
+    declarant_nom,
+    declarant_prenom,
+    declarant_function_publique,
+    -- Extract siren via regex sur denomination ou champ direct
+    coalesce(mention->>'siren',
+             (regexp_match(coalesce(mention->>'denomination', '') || ' ' ||
+                          coalesce(mention->>'description', ''),
+                          '\b(\d{9})\b'))[1]) AS entreprise_siren,
+    mention->>'denomination' AS entreprise_denomination,
+    coalesce(mention->>'role', section) AS role_dans_entreprise,
+    section,
+    NULLIF(mention->>'date_debut', '')::date AS date_debut,
+    NULLIF(mention->>'date_fin', '')::date AS date_fin,
+    (NULLIF(mention->>'date_fin', '')::date IS NULL
+     OR NULLIF(mention->>'date_fin', '')::date > now()) AS is_active,
+    mention AS mention_payload
+  FROM entreprises_mentions
+  WHERE mention->>'denomination' IS NOT NULL
+     OR mention->>'siren' IS NOT NULL;
+
+indexes:
+  - "declarant_person_uid"
+  - "entreprise_siren WHERE entreprise_siren IS NOT NULL"
+  - "declarant_function_publique"
+  - "is_active WHERE is_active = true"
+  - "(entreprise_siren, is_active) WHERE entreprise_siren IS NOT NULL"
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 1440
