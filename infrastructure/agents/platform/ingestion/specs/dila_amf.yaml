@@ -1,0 +1,30 @@
+source_id: dila_amf
+name: DILA AMF — Décisions Autorité des Marchés Financiers
+layer: bronze
+pattern: bulk_archive_xml
+format: tar_gz_xml
+
+endpoint: https://echanges.dila.gouv.fr/OPENDATA/AMF/
+
+description: >
+  Décisions, sanctions, avis et publications de l'AMF (Autorité des Marchés
+  Financiers). Source DILA OpenData. ESSENTIEL POUR M&A : sanctions
+  financières → due diligence sociétés cotées.
+
+  Format archives : amf-gz_DDMMYYYY_HHMM.tar.gz (date européenne sans dash).
+
+table: bronze.amf_dila_raw
+key_field: decision_id
+
+template_vars:
+  bulk_url_pattern: 'amf-gz_\d{8}_\d{4}\.tar\.gz'
+  xml_member_pattern: '\.xml$'
+  xml_xpath_id: ".//META_COMMUN/ID"
+  max_archives: 50
+  max_rows: 100000
+  batch_size: 500
+  archive_parallelism: 4
+
+refresh_trigger: "cron=30 7 * * 1"
+sla_minutes: 4320
+licence: Etalab 2.0

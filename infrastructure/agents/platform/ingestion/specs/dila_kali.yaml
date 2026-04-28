@@ -1,0 +1,29 @@
+source_id: dila_kali
+name: DILA KALI — Conventions collectives (textes nationaux et étendus)
+layer: bronze
+pattern: bulk_archive_xml
+format: tar_gz_xml
+
+endpoint: https://echanges.dila.gouv.fr/OPENDATA/KALI/
+
+description: >
+  Conventions collectives nationales (CCN) avec leurs avenants. Permet de
+  classer les entreprises par CCN (variable secteur dans le scoring).
+
+  Format : KALI_YYYYMMDD-HHMMSS.tar.gz + Freemium_kali_global_*.tar.gz.
+
+table: bronze.kali_ccn_raw
+key_field: convention_id
+
+template_vars:
+  bulk_url_pattern: 'KALI_\d{8}-\d{6}\.tar\.gz|Freemium_kali_global_\d{8}-\d{6}\.tar\.gz'
+  xml_member_pattern: '\.xml$'
+  xml_xpath_id: ".//META_COMMUN/ID"
+  max_archives: 10
+  max_rows: 100000
+  batch_size: 500
+  archive_parallelism: 2
+
+refresh_trigger: "cron=0 10 * * 1"
+sla_minutes: 4320
+licence: Etalab 2.0

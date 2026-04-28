@@ -1,0 +1,30 @@
+source_id: dila_dole
+name: DILA DOLE — Dossiers législatifs (parcours d'une loi)
+layer: bronze
+pattern: bulk_archive_xml
+format: tar_gz_xml
+
+endpoint: https://echanges.dila.gouv.fr/OPENDATA/DOLE/
+
+description: >
+  Dossiers législatifs : projets de loi, propositions, exposés des motifs,
+  amendements. Permet d'anticiper les changements réglementaires impactant
+  les secteurs.
+
+  Format : DOLE_YYYYMMDD-HHMMSS.tar.gz (pas de Freemium global visible).
+
+table: bronze.dole_dossiers_raw
+key_field: dossier_id
+
+template_vars:
+  bulk_url_pattern: 'DOLE_\d{8}-\d{6}\.tar\.gz'
+  xml_member_pattern: '\.xml$'
+  xml_xpath_id: ".//META_COMMUN/ID"
+  max_archives: 20
+  max_rows: 50000
+  batch_size: 500
+  archive_parallelism: 2
+
+refresh_trigger: "cron=30 10 * * 1"
+sla_minutes: 4320
+licence: Etalab 2.0

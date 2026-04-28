@@ -1,0 +1,30 @@
+source_id: dila_jorf
+name: DILA JORF — Journal Officiel République Française
+layer: bronze
+pattern: bulk_archive_xml
+format: tar_gz_xml
+
+endpoint: https://echanges.dila.gouv.fr/OPENDATA/JORF/
+
+description: >
+  Journal Officiel : lois, décrets, arrêtés, nominations, décorations
+  (Légion d'honneur, Mérite). Utile pour profiler les dirigeants
+  (anciens ministres, distinctions) et tracer changements réglementaires.
+
+  Format : JORF_YYYYMMDD-HHMMSS.tar.gz + Freemium_jorf_global_*.tar.gz.
+
+table: bronze.jorf_textes_raw
+key_field: text_id
+
+template_vars:
+  bulk_url_pattern: 'JORF_\d{8}-\d{6}\.tar\.gz|Freemium_jorf_global_\d{8}-\d{6}\.tar\.gz'
+  xml_member_pattern: '\.xml$'
+  xml_xpath_id: ".//META_COMMUN/ID"
+  max_archives: 20
+  max_rows: 500000
+  batch_size: 500
+  archive_parallelism: 4
+
+refresh_trigger: "cron=30 9 * * 1"
+sla_minutes: 4320
+licence: Etalab 2.0

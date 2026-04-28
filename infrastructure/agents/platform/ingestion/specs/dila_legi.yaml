@@ -1,0 +1,31 @@
+source_id: dila_legi
+name: DILA LEGI — Légifrance codes et textes en vigueur
+layer: bronze
+pattern: bulk_archive_xml
+format: tar_gz_xml
+
+endpoint: https://echanges.dila.gouv.fr/OPENDATA/LEGI/
+
+description: >
+  Codes français (civil, commerce, travail, etc.) + textes consolidés (lois,
+  décrets, ordonnances, arrêtés). Source DILA OpenData. Permet l'analyse
+  réglementaire pour les contextes M&A (réformes en cours, secteur réglementé).
+
+  Format archives : LEGI_YYYYMMDD-HHMMSS.tar.gz (incrément quotidien)
+  + Freemium_legi_global_YYYYMMDD-HHMMSS.tar.gz (corpus complet).
+
+table: bronze.legifrance_textes_raw
+key_field: text_id
+
+template_vars:
+  bulk_url_pattern: 'LEGI_\d{8}-\d{6}\.tar\.gz|Freemium_legi_global_\d{8}-\d{6}\.tar\.gz'
+  xml_member_pattern: '\.xml$'
+  xml_xpath_id: ".//META_COMMUN/ID"
+  max_archives: 30
+  max_rows: 500000
+  batch_size: 500
+  archive_parallelism: 4
+
+refresh_trigger: "cron=0 9 * * 1"
+sla_minutes: 4320
+licence: Etalab 2.0
