@@ -4,20 +4,18 @@ layer: bronze
 pattern: bulk_archive_xml
 format: tar_gz_xml
 
-endpoint: https://echanges.dila.gouv.fr/OPENDATA/CAPP/FluxHistorique/
-
-secondary_endpoints:
-  - https://echanges.dila.gouv.fr/OPENDATA/CAPP/FluxAnneeCourante/
+endpoint: https://echanges.dila.gouv.fr/OPENDATA/CAPP/
 
 description: >
   Décisions des Cours d'appel judiciaires françaises. Source DILA OpenData.
-  ~200K décisions historiques. Les noms d'archives suivent CAPP_YYYYMMDD.tar.gz.
+  ~200K décisions historiques. Les noms d'archives suivent
+  CAPP_YYYYMMDD-HHMMSS.tar.gz + Freemium_capp_global_*.tar.gz.
 
 table: bronze.juri_capp_raw
 key_field: decision_id
 
 template_vars:
-  bulk_url_pattern: 'CAPP_\d{8}\.tar\.gz'
+  bulk_url_pattern: 'CAPP_\d{8}-\d{6}\.tar\.gz|Freemium_capp_global_\d{8}-\d{6}\.tar\.gz'
   xml_member_pattern: '\.xml$'
   xml_xpath_id: ".//META_COMMUN/ID"
   max_archives: 100

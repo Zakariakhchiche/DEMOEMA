@@ -55,8 +55,8 @@ from config import settings
 log = logging.getLogger(__name__)
 
 # À SURCHARGER dans le fetcher concret
-INDEX_URL = "https://echanges.dila.gouv.fr/OPENDATA/JADE/FluxHistorique/"
-BULK_URL_PATTERN = r"JADE_\d{8}\.tar\.gz"
+INDEX_URL = "https://echanges.dila.gouv.fr/OPENDATA/JADE/"
+BULK_URL_PATTERN = r"JADE_\d{8}-\d{6}\.tar\.gz"
 XML_MEMBER_PATTERN = r"\.xml$"
 XML_XPATH_ID = ".//META_COMMUN/ID"
 TABLE_NAME = "bronze.juri_jade_raw"

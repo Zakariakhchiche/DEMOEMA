@@ -4,20 +4,19 @@ layer: bronze
 pattern: bulk_archive_xml
 format: tar_gz_xml
 
-endpoint: https://echanges.dila.gouv.fr/OPENDATA/CONSTIT/FluxHistorique/
-
-secondary_endpoints:
-  - https://echanges.dila.gouv.fr/OPENDATA/CONSTIT/FluxAnneeCourante/
+endpoint: https://echanges.dila.gouv.fr/OPENDATA/CONSTIT/
 
 description: >
   Décisions du Conseil constitutionnel (DC, QPC, etc.). Source DILA OpenData.
   ~10K décisions historiques. Volume plus modeste mais corpus complet.
 
+  Format archives : CONSTIT_YYYYMMDD-HHMMSS.tar.gz + Freemium_constit_global_*.tar.gz.
+
 table: bronze.juri_constit_raw
 key_field: decision_id
 
 template_vars:
-  bulk_url_pattern: 'CONSTIT_\d{8}\.tar\.gz'
+  bulk_url_pattern: 'CONSTIT_\d{8}-\d{6}\.tar\.gz|Freemium_constit_global_\d{8}-\d{6}\.tar\.gz'
   xml_member_pattern: '\.xml$'
   xml_xpath_id: ".//META_COMMUN/ID"
   max_archives: 50

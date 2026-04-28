@@ -4,24 +4,24 @@ layer: bronze
 pattern: bulk_archive_xml
 format: tar_gz_xml
 
-# URL d'index HTTP listant les archives .tar.gz par date
-endpoint: https://echanges.dila.gouv.fr/OPENDATA/JADE/FluxHistorique/
-
-# Fallback non-paginé : flux courant pour les nouveautés (re-fetch hebdo)
-secondary_endpoints:
-  - https://echanges.dila.gouv.fr/OPENDATA/JADE/FluxAnneeCourante/
+# URL d'index HTTP listant les archives .tar.gz directement à la racine /OPENDATA/JADE/
+# (DILA a abandonné les sous-dossiers FluxHistorique/FluxAnneeCourante en 2025)
+endpoint: https://echanges.dila.gouv.fr/OPENDATA/JADE/
 
 description: >
   Décisions de justice administrative (Conseil d'État, Cours administratives
   d'appel, Tribunaux administratifs). Source DILA OpenData. ~400K décisions
-  historiques + flux hebdomadaire. Pas d'authentification.
+  historiques. Pas d'authentification.
+
+  Format archives : JADE_YYYYMMDD-HHMMSS.tar.gz (incrément quotidien)
+  + Freemium_jade_global_YYYYMMDD-HHMMSS.tar.gz (archive globale).
 
 table: bronze.juri_jade_raw
 key_field: decision_id
 
 # Variables de customisation pour le pattern tar_gz_xml
 template_vars:
-  bulk_url_pattern: 'JADE_\d{8}\.tar\.gz'
+  bulk_url_pattern: 'JADE_\d{8}-\d{6}\.tar\.gz|Freemium_jade_global_\d{8}-\d{6}\.tar\.gz'
   xml_member_pattern: '\.xml$'
   xml_xpath_id: ".//META_COMMUN/ID"
   max_archives: 100        # 100 derniers en historique
