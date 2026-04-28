@@ -22,8 +22,11 @@ log = logging.getLogger("demoema.format_detect")
 EXT_MAP = {
     ".csv": "csv", ".tsv": "csv",
     ".json": "rest_json", ".jsonl": "jsonl", ".ndjson": "jsonl",
-    ".xml": "xml", ".rdf": "xml",
-    ".zip": "zip", ".tar.gz": "targz", ".tgz": "targz",
+    ".jsonl.gz": "jsonl", ".ndjson.gz": "jsonl",
+    ".xml": "xml_single", ".rdf": "xml_single",
+    ".xml.gz": "xml_single",
+    ".zip": "zip",
+    ".tar.gz": "tar_gz_xml", ".tgz": "tar_gz_xml", ".tar": "tar_xml",
     ".parquet": "parquet", ".pq": "parquet",
     ".shp": "shapefile", ".geojson": "geojson",
     ".xlsx": "xlsx", ".xls": "xls",
@@ -52,10 +55,11 @@ METADATA_NORMALIZE = {
     "json": "rest_json",
     "jsonl": "jsonl", "ndjson": "jsonl",
     "zip": "zip",
+    "tar.gz": "tar_gz_xml", "tgz": "tar_gz_xml", "tar": "tar_xml",
     "parquet": "parquet",
     "geojson": "geojson",
     "shp": "shapefile", "shapefile": "shapefile",
-    "xml": "xml",
+    "xml": "xml_single",
     "xlsx": "xlsx", "xls": "xls",
 }
 

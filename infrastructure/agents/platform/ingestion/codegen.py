@@ -42,34 +42,46 @@ SOURCES_DIR = Path(__file__).parent / "sources"
 REFERENCE_FETCHER = SOURCES_DIR / "bodacc.py"
 
 # Références par format — chaque format pointe vers un fetcher existant à mimer.
-# Si absent → fallback sur bodacc.py (REST JSON delta + bulk CSV section).
+# Les fichiers `_xxx_ref.py` sont des références SPECIFIQUES non-exécutables (gardées
+# hors auto-discovery via le préfixe `_`). Ils servent uniquement de modèle au LLM.
+# Si la référence dédiée n'existe pas → fallback sur bodacc.py (LLM adapte).
 REFERENCE_BY_FORMAT = {
-    "rest_json": SOURCES_DIR / "bodacc.py",              # pattern delta REST + pagination
-    "csv":       SOURCES_DIR / "bodacc.py",              # pattern bodacc_full (stream CSV)
-    "csv_gz":    SOURCES_DIR / "bodacc.py",              # CSV gzippé
-    "zip":       SOURCES_DIR / "_zip_csv_ref.py",        # ZIP-of-CSV dédié (DVF, BAN, SIRENE stock)
-    "jsonl":     SOURCES_DIR / "opensanctions.py",       # JSON Lines streaming
-    "geojson":   SOURCES_DIR / "bodacc.py",              # générique (LLM adapte)
-    "parquet":   SOURCES_DIR / "bodacc.py",              # LLM adapte (pyarrow)
-    "xml":       SOURCES_DIR / "bodacc.py",              # LLM adapte (lxml streaming)
+    "rest_json":  SOURCES_DIR / "bodacc.py",              # pattern delta REST + pagination
+    "csv":        SOURCES_DIR / "bodacc.py",              # pattern bodacc_full (stream CSV)
+    "csv_gz":     SOURCES_DIR / "bodacc.py",              # CSV gzippé
+    "zip":        SOURCES_DIR / "_zip_csv_ref.py",        # ZIP-of-CSV (DVF, BAN, SIRENE stock)
+    "jsonl":      SOURCES_DIR / "_jsonl_ref.py",          # JSONL streaming (gz auto-detect)
+    "ndjson":     SOURCES_DIR / "_jsonl_ref.py",          # alias jsonl
+    "tar_gz_xml": SOURCES_DIR / "_tar_gz_xml_ref.py",     # DILA juri archives multi-XML
+    "tar_xml":    SOURCES_DIR / "_tar_gz_xml_ref.py",     # variante tar non-gz
+    "xml_single": SOURCES_DIR / "_xml_single_ref.py",     # gros XML monobloc (iterparse)
+    "xml":        SOURCES_DIR / "_xml_single_ref.py",     # alias xml_single (default safe)
+    "parquet":    SOURCES_DIR / "_parquet_ref.py",        # parquet via pyarrow
+    "geojson":    SOURCES_DIR / "bodacc.py",              # LLM adapte (.features[] iter)
 }
 
 FORMAT_HINTS = {
-    "rest_json": "REST API JSON paginée. Utilise le pattern bodacc.fetch_bodacc_delta : loop de pages avec offset+limit, insert par page.",
-    "csv":       "CSV à streamer (dump file ou API avec format CSV). Utilise le pattern bodacc.fetch_bodacc_full : client.stream('GET', url), aiter_text(1MB chunks), csv.reader par ligne, batch 1000 → executemany.",
-    "zip":       "ZIP contenant un ou plusieurs CSV/JSON. Télécharge avec streaming, utilise zipfile.ZipFile pour extraire, puis traite chaque membre comme CSV.",
-    "jsonl":     "JSON Lines (1 objet JSON par ligne). Stream le fichier, split par '\\n', json.loads par ligne, batch insert.",
-    "geojson":   "GeoJSON FeatureCollection. Récupère .features[], chaque feature a .properties + .geometry. Stocke payload JSONB complet + extract coords si utile.",
-    "parquet":   "Parquet binary. Utilise pyarrow.parquet.ParquetFile avec iter_batches(batch_size=1000). Si grosses tables, streamer colonne-à-colonne.",
-    "xml":       "XML. Utilise lxml.etree.iterparse(source) pour streaming events. Parse element par element, extraire les champs clés.",
+    "rest_json":  "REST API JSON paginée. Utilise le pattern bodacc.fetch_bodacc_delta : loop de pages avec offset+limit, insert par page.",
+    "csv":        "CSV à streamer (dump file ou API avec format CSV). Utilise le pattern bodacc.fetch_bodacc_full : client.stream('GET', url), aiter_text(1MB chunks), csv.reader par ligne, batch 1000 → executemany.",
+    "zip":        "ZIP contenant un ou plusieurs CSV/JSON. Télécharge avec streaming, utilise zipfile.ZipFile pour extraire, puis traite chaque membre comme CSV.",
+    "jsonl":      "JSON Lines (1 objet JSON par ligne). Stream le fichier, split par '\\n', json.loads par ligne, batch insert. Auto-décompresse .gz via gzip.decompress.",
+    "ndjson":     "Identique JSONL. Voir _jsonl_ref.py.",
+    "tar_gz_xml": "INDEX HTTP (Apache directory listing) listant des .tar.gz, chaque archive contient des XML (1 par record). Pattern DILA OpenData : (1) GET index → regex pour extraire noms d'archives, (2) parallèle Semaphore(4) sur les archives, (3) tarfile.open(mode='r:gz') + member par member, (4) lxml.etree.fromstring sur chaque XML, (5) extract record_id via xpath spec.template_vars.xml_xpath_id, (6) ON CONFLICT DO UPDATE.",
+    "tar_xml":    "Variante tar non-compressé. Idem tar_gz_xml mais mode='r:'.",
+    "xml_single": "Gros fichier XML monobloc (>10 MB) — DOIT utiliser lxml.etree.iterparse(events=('end',), tag=RECORD_TAG) + element.clear() après chaque record sinon RAM blow-up. Voir _xml_single_ref.py.",
+    "xml":        "Voir xml_single. Iterparse + clear() obligatoire pour gros fichiers.",
+    "geojson":    "GeoJSON FeatureCollection. Récupère .features[], chaque feature a .properties + .geometry. Stocke payload JSONB complet + extract coords si utile.",
+    "parquet":    "Parquet binary. Utilise pyarrow.parquet.ParquetFile + iter_batches(batch_size=10000) pour streamer. batch.to_pylist() puis executemany. Voir _parquet_ref.py.",
 }
 
 ALLOWED_IMPORTS = {
     "__future__",
     "asyncio", "datetime", "json", "logging", "re", "os", "typing", "time", "hashlib", "collections",
-    "csv", "io", "zipfile", "gzip", "shutil", "tempfile",
+    "csv", "io", "zipfile", "gzip", "shutil", "tempfile", "tarfile",
+    "urllib", "urllib.parse",
     "httpx", "psycopg", "lxml", "feedparser", "yaml",
     "pyarrow", "pyarrow.parquet",
+    "openpyxl",  # xlsx
     "config", "psycopg.types.json", "psycopg.types",
 }
 
@@ -266,11 +278,18 @@ async def _validate_endpoints_in_code(code: str) -> tuple[bool, str, list[dict]]
 
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+# Templates DÉTERMINISTES (string substitution, pas de LLM) — pour les formats
+# où la spec YAML peut fournir tous les paramètres (endpoint, table, key_field).
+# Pour les autres formats, fallback LLM avec REFERENCE_BY_FORMAT.
 TEMPLATE_BY_FORMAT = {
     "rest_json": "rest_json_ods.py.tmpl",
     "csv":       "csv_dump.py.tmpl",
     "csv_gz":    "csv_dump.py.tmpl",   # gunzip auto-detect
     "zip":       "zip_csv.py.tmpl",
+    # tar_gz_xml, xml_single, parquet, jsonl → pas de template statique
+    # parce qu'ils nécessitent des params custom (xpath, key_field_in_parquet,
+    # bulk_url_pattern...) qui dépendent fortement de la source. Le LLM
+    # génère via le pattern de _xxx_ref.py.
 }
 
 # Vars avec valeurs par défaut : si la spec YAML ne les fournit pas, on utilise ces defaults

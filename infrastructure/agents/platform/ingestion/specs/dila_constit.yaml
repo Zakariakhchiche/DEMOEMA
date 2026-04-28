@@ -1,0 +1,30 @@
+source_id: dila_constit
+name: DILA Constit — Conseil constitutionnel
+layer: bronze
+pattern: bulk_archive_xml
+format: tar_gz_xml
+
+endpoint: https://echanges.dila.gouv.fr/OPENDATA/CONSTIT/FluxHistorique/
+
+secondary_endpoints:
+  - https://echanges.dila.gouv.fr/OPENDATA/CONSTIT/FluxAnneeCourante/
+
+description: >
+  Décisions du Conseil constitutionnel (DC, QPC, etc.). Source DILA OpenData.
+  ~10K décisions historiques. Volume plus modeste mais corpus complet.
+
+table: bronze.juri_constit_raw
+key_field: decision_id
+
+template_vars:
+  bulk_url_pattern: 'CONSTIT_\d{8}\.tar\.gz'
+  xml_member_pattern: '\.xml$'
+  xml_xpath_id: ".//META_COMMUN/ID"
+  max_archives: 50
+  max_rows: 50000
+  batch_size: 500
+  archive_parallelism: 2  # corpus plus petit
+
+refresh_trigger: "cron=0 9 * * 1"
+sla_minutes: 1440
+licence: Etalab 2.0

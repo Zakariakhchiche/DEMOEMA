@@ -1,0 +1,35 @@
+source_id: dila_jade
+name: DILA Jade — Jurisprudence administrative (Conseil d'État + tribunaux administratifs)
+layer: bronze
+pattern: bulk_archive_xml
+format: tar_gz_xml
+
+# URL d'index HTTP listant les archives .tar.gz par date
+endpoint: https://echanges.dila.gouv.fr/OPENDATA/JADE/FluxHistorique/
+
+# Fallback non-paginé : flux courant pour les nouveautés (re-fetch hebdo)
+secondary_endpoints:
+  - https://echanges.dila.gouv.fr/OPENDATA/JADE/FluxAnneeCourante/
+
+description: >
+  Décisions de justice administrative (Conseil d'État, Cours administratives
+  d'appel, Tribunaux administratifs). Source DILA OpenData. ~400K décisions
+  historiques + flux hebdomadaire. Pas d'authentification.
+
+table: bronze.juri_jade_raw
+key_field: decision_id
+
+# Variables de customisation pour le pattern tar_gz_xml
+template_vars:
+  bulk_url_pattern: 'JADE_\d{8}\.tar\.gz'
+  xml_member_pattern: '\.xml$'
+  xml_xpath_id: ".//META_COMMUN/ID"
+  max_archives: 100        # 100 derniers en historique
+  max_rows: 500000         # safety cap
+  batch_size: 500
+  archive_parallelism: 4
+
+# Cron : refresh hebdomadaire (DILA publie weekly dimanche)
+refresh_trigger: "cron=0 6 * * 1"  # lundi 6h Paris
+sla_minutes: 4320  # 3 jours toléré (gros download)
+licence: Etalab 2.0

@@ -1,0 +1,32 @@
+source_id: dila_cass
+name: DILA Cass — Cour de cassation (toutes chambres)
+layer: bronze
+pattern: bulk_archive_xml
+format: tar_gz_xml
+
+endpoint: https://echanges.dila.gouv.fr/OPENDATA/CASS/FluxHistorique/
+
+secondary_endpoints:
+  - https://echanges.dila.gouv.fr/OPENDATA/CASS/FluxAnneeCourante/
+
+description: >
+  Décisions de la Cour de cassation : civile, criminelle, commerciale, sociale,
+  pénale, mixte. Source DILA OpenData. ~500K décisions historiques. Le path
+  XML inclut /civile/, /criminelle/ etc. — la chambre est dérivée du chemin
+  via _chamber_from_path() dans le fetcher.
+
+table: bronze.judilibre_decisions_raw
+key_field: decision_id
+
+template_vars:
+  bulk_url_pattern: 'CASS_\d{8}\.tar\.gz'
+  xml_member_pattern: '\.xml$'
+  xml_xpath_id: ".//META_COMMUN/ID"
+  max_archives: 100
+  max_rows: 500000
+  batch_size: 500
+  archive_parallelism: 4
+
+refresh_trigger: "cron=0 7 * * 1"
+sla_minutes: 4320
+licence: Etalab 2.0
