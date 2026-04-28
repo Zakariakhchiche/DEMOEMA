@@ -281,10 +281,10 @@ def start_scheduler() -> None:
                 run_bronze_bootstrap_tick,
                 trigger=IntervalTrigger(minutes=5),
                 id="bronze_bootstrap_tick",
-                name=f"Bronze bootstrap (génère 1 fetcher manquant / 5min, {n_missing} en attente)",
+                name=f"Bronze bootstrap (parallèle, {n_missing} fetchers à générer)",
                 max_instances=1, coalesce=True, replace_existing=True,
             )
-            log.info("Bronze bootstrap registered — %d fetchers à générer", n_missing)
+            log.info("Bronze bootstrap registered — %d fetchers à générer (parallèle)", n_missing)
         else:
             log.info("Bronze bootstrap : aucun fetcher manquant, pas de job programmé")
     except Exception as e:

@@ -69,6 +69,23 @@ class Settings(BaseSettings):
         default=4,
         description="Codegen silver par niveau topologique : N agents LLM + N applies concurrents",
     )
+    # Bronze codegen — parallélisme du tick bronze_bootstrap qui génère les
+    # fetchers .py à partir des specs YAML orphelines. Avant : 1 spec / tick
+    # de 5 min → ~2h pour 21 specs. Avec 4 // : ~30 min total. Limité par les
+    # rate limits LLM (Ollama Cloud 10 req/s, DeepSeek 50 req/min) — 4 est
+    # safe sur les 2 providers.
+    bronze_codegen_parallelism: int = Field(
+        default=4,
+        description="Bronze codegen parallèle : N discover_and_generate concurrents par tick",
+    )
+    # Bronze fetch — parallélisme du backfill manuel (run_all_sources). Cap les
+    # fetchers HTTP simultanés. Limité par rate limit des APIs externes :
+    # GitHub 5K req/h, INPI 100 req/min, OpenCorporates 50K req/jour. 8 est OK
+    # pour les fetchers populaires (DVF, INSEE, BODACC) sans rate limit.
+    bronze_fetch_parallelism: int = Field(
+        default=8,
+        description="Bronze fetch parallèle : N fetchers HTTP concurrents en backfill one-shot",
+    )
 
     class Config:
         env_file = ".env"
