@@ -457,6 +457,7 @@ from clients.deepseek import (
     DEEPSEEK_API_KEY,
     copilot_ai_query,
     copilot_ai_query_stream,
+    copilot_ai_query_stream_with_tools,
 )
 
 
@@ -1333,9 +1334,14 @@ async def copilot_stream_endpoint(q: str = Query(...)):
             except Exception as e:
                 print(f"[Stream] SIREN lookup error: {e}")
 
-        # Stream AI response
+        # Stream AI response avec tool-calling activé
+        # Le LLM peut maintenant appeler search_cibles, get_fiche_entreprise,
+        # get_dirigeant, get_scoring_detail, search_sanctions, search_signaux_bodacc
+        # → fini les "TotalEnergies pas dans la base" / hallucinations
         ai_streamed = False
-        async for chunk in copilot_ai_query_stream(q, context):
+        # base URL interne — backend appelle ses propres endpoints datalake
+        datalake_base = "http://localhost:8000"
+        async for chunk in copilot_ai_query_stream_with_tools(q, datalake_base):
             ai_streamed = True
             yield f"data: {json.dumps({'chunk': chunk})}\n\n"
 
