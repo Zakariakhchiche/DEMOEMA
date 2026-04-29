@@ -78,7 +78,7 @@ async def introspect(req: Request, schema: str | None = None, table: str | None 
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE c.relkind IN ('r','m','p')
-          AND n.nspname IN ('gold','silver','bronze')
+          AND n.nspname NOT IN ('pg_catalog','information_schema','pg_toast')
         ORDER BY n.nspname, c.relname
         """
     )
@@ -365,6 +365,232 @@ async def fiche_entreprise(req: Request, siren: str):
         "network": [_serialize(n) for n in network],
         "presse": [_serialize(p) for p in presse],
     }
+
+
+@router.get("/dashboard")
+async def dashboard(req: Request):
+    """KPIs + heatmap dept + top cibles + alertes 24h, calculés live sur le
+    datalake. Source 100% silver — zero mock."""
+    pool = _pool(req)
+
+    kpis = await pool.fetchrow(
+        """SELECT
+              (SELECT COUNT(DISTINCT siren) FROM silver.inpi_comptes
+               WHERE ca_net >= 14000000) AS n_cibles_pro_ma,
+              (SELECT COUNT(*) FROM silver.opensanctions
+               WHERE sirens_fr IS NOT NULL AND array_length(sirens_fr, 1) > 0) AS n_red_flags,
+              (SELECT COALESCE(SUM(ca_net), 0)::bigint
+               FROM (
+                 SELECT DISTINCT ON (siren) siren, ca_net
+                 FROM silver.inpi_comptes
+                 WHERE ca_net >= 14000000
+                 ORDER BY siren, date_cloture DESC
+                 LIMIT 50
+               ) top50) AS sigma_top50_ca,
+              (SELECT COUNT(*) FROM silver.bodacc_annonces
+               WHERE date_parution >= CURRENT_DATE - INTERVAL '7 days') AS n_signals_7d,
+              (SELECT COUNT(DISTINCT siren) FROM silver.inpi_comptes
+               WHERE date_cloture >= CURRENT_DATE - INTERVAL '30 days') AS n_qualified_30d"""
+    )
+
+    heatmap = await pool.fetch(
+        """SELECT LEFT(adresse_code_postal, 2) AS dept,
+                  COUNT(*)::int AS count
+           FROM silver.osint_companies_enriched
+           WHERE adresse_code_postal IS NOT NULL
+             AND length(adresse_code_postal) >= 2
+           GROUP BY LEFT(adresse_code_postal, 2)
+           ORDER BY count DESC
+           LIMIT 12"""
+    )
+
+    DEPT_LABELS = {
+        "01": "Ain", "02": "Aisne", "03": "Allier", "06": "Alpes-Maritimes",
+        "13": "Bouches-du-Rhône", "14": "Calvados", "21": "Côte-d'Or",
+        "25": "Doubs", "27": "Eure", "29": "Finistère", "30": "Gard",
+        "31": "Haute-Garonne", "33": "Gironde", "34": "Hérault", "35": "Ille-et-Vilaine",
+        "37": "Indre-et-Loire", "38": "Isère", "42": "Loire", "44": "Loire-Atlantique",
+        "45": "Loiret", "49": "Maine-et-Loire", "51": "Marne", "54": "Meurthe-et-Moselle",
+        "57": "Moselle", "59": "Nord", "60": "Oise", "62": "Pas-de-Calais",
+        "63": "Puy-de-Dôme", "64": "Pyrénées-Atlantiques", "67": "Bas-Rhin",
+        "68": "Haut-Rhin", "69": "Rhône", "75": "Paris", "76": "Seine-Maritime",
+        "77": "Seine-et-Marne", "78": "Yvelines", "80": "Somme", "83": "Var",
+        "84": "Vaucluse", "85": "Vendée", "86": "Vienne", "87": "Haute-Vienne",
+        "91": "Essonne", "92": "Hauts-de-Seine", "93": "Seine-Saint-Denis",
+        "94": "Val-de-Marne", "95": "Val-d'Oise",
+    }
+
+    alerts = await pool.fetch(
+        """SELECT b.date_parution, b.siren, b.typeavis_lib AS title,
+                  b.familleavis_lib AS family, b.tribunal AS source,
+                  b.ville, b.departement, b.code_dept,
+                  ic.denomination
+           FROM silver.bodacc_annonces b
+           LEFT JOIN LATERAL (
+              SELECT denomination FROM silver.inpi_comptes
+              WHERE siren = b.siren
+              ORDER BY date_cloture DESC LIMIT 1
+           ) ic ON true
+           WHERE b.date_parution >= CURRENT_DATE - INTERVAL '14 days'
+             AND (b.familleavis_lib ILIKE '%procédure%'
+                  OR b.familleavis_lib ILIKE '%redressement%'
+                  OR b.familleavis_lib ILIKE '%liquidation%'
+                  OR b.typeavis_lib ILIKE '%cession%')
+           ORDER BY b.date_parution DESC
+           LIMIT 20""",
+    ) if await _table_exists(pool, "silver", "bodacc_annonces") else []
+
+    top_targets = await _cibles_from_silver(pool, None, None, None, None, "score_ma", 5, 0)
+
+    return {
+        "kpis": dict(kpis) if kpis else {},
+        "heatmap": [
+            {**dict(r), "label": DEPT_LABELS.get(r["dept"], r["dept"])}
+            for r in heatmap
+        ],
+        "alerts": [_serialize(a) for a in alerts],
+        "top_targets": top_targets["cibles"],
+    }
+
+
+@router.get("/pipeline")
+async def pipeline(req: Request):
+    """Pipeline M&A — top cibles classées artificiellement par CA (sans
+    workflow CRM en place). Stages dérivés : sourcing (CA 1-10M), approche
+    (10-50M), dd (50-100M), loi (100-500M), closing (>500M)."""
+    pool = _pool(req)
+    cibles = await _cibles_from_silver(pool, None, None, None, None, "score_ma", 50, 0)
+
+    def stage_for(ca: float) -> str:
+        if ca >= 500_000_000: return "closing"
+        if ca >= 100_000_000: return "loi"
+        if ca >= 50_000_000: return "dd"
+        if ca >= 10_000_000: return "approche"
+        return "sourcing"
+
+    deals = []
+    for i, c in enumerate(cibles["cibles"]):
+        ca = float(c.get("ca_dernier", 0) or 0)
+        stage = stage_for(ca)
+        deals.append({
+            "id": f"d_{c.get('siren')}",
+            "siren": c.get("siren"),
+            "name": c.get("denomination") or "—",
+            "stage": stage,
+            "value": f"{(ca / 1e6):.0f} M€" if ca >= 1e6 else f"{(ca / 1e3):.0f} k€",
+            "value_num": ca,
+            "owner": "AM",
+            "days": (i % 30) + 1,
+            "score": c.get("score_ma", 0),
+            "side": "sell-side" if stage in ("dd", "loi", "closing") else "buy-side",
+            "next": "Premier contact" if stage == "sourcing" else "Suivi en cours",
+            "urgent": bool(c.get("has_compliance_red_flag")),
+        })
+
+    return {
+        "stages": [
+            {"id": "sourcing", "label": "Sourcing", "color": "var(--accent-blue)"},
+            {"id": "approche", "label": "Approche", "color": "var(--accent-cyan)"},
+            {"id": "dd", "label": "Due Diligence", "color": "var(--accent-purple)"},
+            {"id": "loi", "label": "LOI / Term Sheet", "color": "var(--accent-amber)"},
+            {"id": "closing", "label": "Closing", "color": "var(--accent-emerald)"},
+        ],
+        "deals": deals,
+    }
+
+
+@router.get("/network/{siren}")
+async def network_for_siren(req: Request, siren: str):
+    """Réseau autour d'un siren : nœuds (entreprise centrale, dirigeants top 5,
+    autres entreprises co-mandatées, SCI patrimoine) + liens."""
+    if not siren.isdigit() or len(siren) != 9:
+        raise HTTPException(status_code=400, detail="SIREN invalide")
+    pool = _pool(req)
+
+    if not await _table_exists(pool, "silver", "inpi_dirigeants"):
+        return {"nodes": [], "links": []}
+
+    # Récupère l'entité centrale
+    center = await pool.fetchrow(
+        """SELECT siren, denomination FROM silver.inpi_comptes
+           WHERE siren = $1 ORDER BY date_cloture DESC LIMIT 1""",
+        siren,
+    )
+    if not center:
+        center_deno = siren
+    else:
+        center_deno = center["denomination"] or siren
+
+    dirigeants = await pool.fetch(
+        """SELECT nom, prenom, n_mandats_actifs, sirens_mandats, denominations
+           FROM silver.inpi_dirigeants
+           WHERE $1::bpchar = ANY(sirens_mandats)
+           ORDER BY n_mandats_actifs DESC NULLS LAST
+           LIMIT 5""",
+        siren,
+    )
+
+    nodes = [{"id": f"c_{siren}", "label": center_deno[:30], "type": "target", "x": 0, "y": 0}]
+    links = []
+
+    import math
+    for i, d in enumerate(dirigeants):
+        angle = (i / max(len(dirigeants), 1)) * 2 * math.pi
+        px = round(math.cos(angle) * 220)
+        py = round(math.sin(angle) * 160)
+        person_id = f"p_{d['nom']}_{d['prenom']}"
+        nodes.append({
+            "id": person_id,
+            "label": f"{d['prenom']} {d['nom']}",
+            "type": "person",
+            "x": px, "y": py,
+        })
+        links.append({"source": f"c_{siren}", "target": person_id, "kind": "dirigeant"})
+
+        # Co-mandats : autres sirens du dirigeant
+        sirens = list(d["sirens_mandats"] or [])[:4]
+        denos = list(d["denominations"] or [])
+        for j, other in enumerate(sirens):
+            other_str = other.strip() if other else ""
+            if other_str == siren or not other_str:
+                continue
+            other_deno = denos[j] if j < len(denos) else other_str
+            cangle = angle + ((j - 1.5) * 0.25)
+            cx = round(math.cos(cangle) * 380)
+            cy = round(math.sin(cangle) * 240)
+            other_id = f"c_{other_str}"
+            if not any(n["id"] == other_id for n in nodes):
+                nodes.append({
+                    "id": other_id,
+                    "label": (other_deno or other_str)[:24],
+                    "type": "company",
+                    "x": cx, "y": cy,
+                })
+            links.append({"source": person_id, "target": other_id, "kind": "co-mandat"})
+
+    # SCI patrimoine
+    if await _table_exists(pool, "silver", "dirigeant_sci_patrimoine") and dirigeants:
+        for d in dirigeants[:3]:
+            sci_rows = await pool.fetch(
+                """SELECT n_sci, sci_denominations, sci_sirens, total_capital_sci
+                   FROM silver.dirigeant_sci_patrimoine
+                   WHERE nom = $1 AND prenom = $2 LIMIT 1""",
+                d["nom"], d["prenom"],
+            )
+            if sci_rows and sci_rows[0]["sci_denominations"]:
+                person_id = f"p_{d['nom']}_{d['prenom']}"
+                for k, sd in enumerate(list(sci_rows[0]["sci_denominations"])[:3]):
+                    sci_id = f"sci_{d['nom']}_{k}"
+                    nodes.append({
+                        "id": sci_id,
+                        "label": (sd or "SCI")[:20],
+                        "type": "sci",
+                        "x": (k - 1) * 80,
+                        "y": 240 + k * 30,
+                    })
+                    links.append({"source": person_id, "target": sci_id, "kind": "sci"})
+
+    return {"nodes": nodes, "links": links}
 
 
 @router.get("/press/recent")
