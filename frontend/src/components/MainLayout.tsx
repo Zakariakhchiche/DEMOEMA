@@ -11,7 +11,7 @@ import InstallPrompt from "@/components/ui/InstallPrompt";
 
 // Routes en mode "fullscreen autonome" — bypass sidebar/header/widgets
 // (typiquement les modes Chat-driven AI ou Data Explorer plein écran).
-const FULLSCREEN_ROUTES = ["/copilot", "/explorer"];
+const FULLSCREEN_PREFIXES = ["/copilot", "/explorer"];
 
 export default function MainLayout({
   children,
@@ -19,7 +19,10 @@ export default function MainLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const isFullscreen = FULLSCREEN_ROUTES.some((r) => pathname?.startsWith(r));
+  // `/` (shell DEMOEMA full design) + sous-routes fullscreen ⇒ pas de wrap EDRCF.
+  const isFullscreen =
+    pathname === "/" ||
+    FULLSCREEN_PREFIXES.some((r) => pathname?.startsWith(r));
 
   if (isFullscreen) {
     // Mode fullscreen : juste les enfants, pas de sidebar/header/widgets EDRCF
