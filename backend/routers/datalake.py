@@ -1666,14 +1666,15 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
             LIMIT {int(limit) * 4}
         ),
         enriched AS (
-            -- Enrichissement minimal et rapide : seul osint_companies_enriched (3k
-            -- rows, indexed siren) + bodacc (75k indexed siren). Skip insee_*
-            -- (29M et 43M) car silver_bootstrap les lock pendant 30min.
+            -- silver.osint_companies_enriched et silver.insee_* peuvent être
+            -- lockes pendant silver_bootstrap (rebuild). Le JOIN osint est tente
+            -- via _safe en dehors. Ici on garde uniquement ce qui est rapide :
+            -- inpi_comptes + bodacc (indexes sur siren).
             SELECT lc.*,
-                   oce.code_ape AS naf,
-                   oce.forme_juridique AS forme_juridique,
-                   oce.date_immatriculation AS date_creation_unite,
-                   oce.adresse_code_postal AS adresse_code_postal,
+                   NULL::text AS naf,
+                   NULL::text AS forme_juridique,
+                   NULL::date AS date_creation_unite,
+                   NULL::text AS adresse_code_postal,
                    (SELECT b.code_dept FROM silver.bodacc_annonces b
                     WHERE b.siren = lc.siren AND b.code_dept IS NOT NULL
                     ORDER BY b.date_parution DESC LIMIT 1) AS dept_bodacc,
@@ -1681,7 +1682,6 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
                     WHERE b.siren = lc.siren AND b.ville IS NOT NULL
                     ORDER BY b.date_parution DESC LIMIT 1) AS ville_bodacc
             FROM last_compte lc
-            LEFT JOIN silver.osint_companies_enriched oce ON oce.siren = lc.siren::char(9)
         )
         SELECT siren,
                denomination,
