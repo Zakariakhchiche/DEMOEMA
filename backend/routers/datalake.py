@@ -92,7 +92,7 @@ async def list_tables(req: Request):
     rows = await pool.fetch(
         """SELECT n.nspname || '.' || c.relname AS name
            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-           WHERE c.relkind IN ('r','m','p') AND n.nspname IN ('gold','silver')"""
+           WHERE c.relkind IN ('r','m','p') AND n.nspname IN ('gold','silver','bronze')"""
     )
     existing = {r["name"] for r in rows}
     out = []
