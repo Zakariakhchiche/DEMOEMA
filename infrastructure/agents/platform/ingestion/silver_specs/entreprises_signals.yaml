@@ -41,13 +41,15 @@ business_logic: |
   FEATURES par SIREN:
 
   [Identité — depuis bronze.inpi_formalites_entreprises]
-  - siren, denomination, forme_juridique, code_ape (NAF), code_ape_libelle (NAF libellé)
+  - siren, denomination, forme_juridique, code_ape (NAF)
   - sigle, nom_commercial
   - adresse_code_postal, adresse_commune (ville), adresse_dept (LEFT 2 du CP)
   - adresse_voie, adresse_pays
   - date_immatriculation, date_debut_activite
   - age_entreprise = EXTRACT(YEAR FROM AGE(now(), date_immatriculation))
   - effectif_salarie (tranche INSEE)
+  ⚠️ NE PAS utiliser code_ape_libelle (n'existe pas dans bronze.inpi_formalites_entreprises)
+  ⚠️ NE PAS faire EXISTS sur bronze.inpi_brevets_raw avec b.siren — verifier que la colonne siren existe
 
   [Maturité dirigeant - 20pts scoring]
   - age_dirigeant_max = MAX(age_2026) parmi dirigeants (via silver.inpi_dirigeants joint sur sirens_mandats @> siren)

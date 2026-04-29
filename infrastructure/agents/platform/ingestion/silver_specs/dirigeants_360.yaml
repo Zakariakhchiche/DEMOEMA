@@ -17,10 +17,9 @@ source_tables:
   - silver.osint_persons_enriched
   - silver.press_mentions_matched
 
-grain: "1 row par person_uid (= sha1(slug(nom)|slug(prenoms_sorted)|date_naissance))"
+grain: "1 row par (nom, prenom, date_naissance) — clé naturelle dirigeant"
 
 key_columns:
-  - person_uid
   - nom
   - prenom
   - date_naissance
@@ -28,15 +27,24 @@ key_columns:
 
 business_logic: |
   CTE de base : silver.inpi_dirigeants (8M dirigeants).
-  person_uid = COALESCE(uid, sha1(slug(nom)|slug(sorted(prenoms))|date_naissance))
+
+  IMPORTANT — silver.inpi_dirigeants colonnes existantes (verifie via introspect) :
+    nom (text), prenom (text), date_naissance (varchar 10),
+    n_mandats_total, n_mandats_actifs (bigint),
+    sirens_mandats (bpchar[]), denominations (text[]), formes_juridiques (text[]),
+    n_sci, sci_sirens (bpchar[]), total_capital_sci (numeric),
+    is_multi_mandat (boolean), roles (text[]), age_2026 (integer),
+    first_mandat_date, last_mandat_date (date), materialized_at.
+  ⚠️ PAS de colonne person_uid, ni prenoms (pluriel), ni denominations_mandats.
 
   FEATURES par catégorie :
 
   [Identité — 0pts directs, mais clés du graphe]
-  - person_uid, nom, prenom (= prenoms[0]), prenoms (array), full_name (= prenom + nom)
-  - date_naissance (rgpd : year only persisté)
-  - age_2026 = EXTRACT(YEAR FROM AGE(now(), date_naissance::date))
-  - sexe (si dispo INPI)
+  - nom, prenom, date_naissance — clé composite
+  - person_uid_calc = md5(coalesce(nom,'') || '|' || coalesce(prenom,'') || '|' || coalesce(date_naissance,''))
+    (calcule a la volee — pas une colonne source)
+  - age_2026 (deja present comme colonne)
+  - full_name = prenom || ' ' || nom
 
   [Mandats — 10pts]
   - n_mandats_actifs (depuis silver.inpi_dirigeants)
@@ -108,69 +116,105 @@ business_logic: |
     )
 
 transformations: |
-  CTE étagés pour la performance (8M lignes × N joins) :
+  CTE etages pour la performance. Utilise UNIQUEMENT les colonnes
+  existantes de silver.inpi_dirigeants (cf. introspect + section au-dessus).
 
   WITH base AS (
-    SELECT person_uid, nom, prenom, prenoms, date_naissance,
-           sirens_mandats, denominations_mandats, n_mandats_actifs,
-           array_length(sirens_mandats, 1) AS n_companies
+    SELECT
+      md5(coalesce(nom,'') || '|' || coalesce(prenom,'') || '|' || coalesce(date_naissance,'')) AS person_uid_calc,
+      nom, prenom, date_naissance, age_2026,
+      sirens_mandats, denominations, formes_juridiques, roles,
+      n_mandats_actifs, n_mandats_total, is_multi_mandat,
+      first_mandat_date, last_mandat_date,
+      n_sci, sci_sirens, total_capital_sci,
+      array_length(sirens_mandats, 1) AS n_companies
     FROM silver.inpi_dirigeants
+    WHERE nom IS NOT NULL AND prenom IS NOT NULL
   ),
   with_sci AS (
+    -- silver.dirigeant_sci_patrimoine join sur (nom, prenom, date_naissance)
     SELECT b.*,
-           sci.n_sci, sci.total_capital_sci, sci.sci_sirens, sci.first_sci_date
+           sci.n_sci AS sci_n_sci,
+           sci.total_capital_sci AS sci_total_capital,
+           sci.sci_denominations,
+           sci.sci_code_postaux,
+           sci.first_sci_date
     FROM base b
     LEFT JOIN silver.dirigeant_sci_patrimoine sci
-      ON sci.nom = b.nom AND sci.prenom = b.prenom AND sci.date_naissance = b.date_naissance
+      ON UPPER(unaccent(sci.nom)) = UPPER(unaccent(b.nom))
+     AND UPPER(unaccent(sci.prenom)) = UPPER(unaccent(b.prenom))
+     AND COALESCE(sci.date_naissance,'') = COALESCE(b.date_naissance,'')
   ),
   with_finances AS (
     SELECT ws.*,
            (SELECT SUM(c.ca_net) FROM silver.inpi_comptes c
-            WHERE c.siren = ANY(ws.sirens_mandats)
-              AND c.date_cloture = (SELECT MAX(c2.date_cloture)
-                                    FROM silver.inpi_comptes c2
-                                    WHERE c2.siren = c.siren)) AS ca_total,
+            WHERE c.siren = ANY(ws.sirens_mandats)) AS ca_total,
            (SELECT SUM(c.resultat_net) FROM silver.inpi_comptes c
-            WHERE c.siren = ANY(ws.sirens_mandats)) AS resultat_net_total
+            WHERE c.siren = ANY(ws.sirens_mandats)) AS resultat_net_total,
+           (SELECT count(DISTINCT c.siren) FROM silver.inpi_comptes c
+            WHERE c.siren = ANY(ws.sirens_mandats)
+              AND c.date_cloture > CURRENT_DATE - INTERVAL '24 months') AS n_companies_avec_bilan_recent
     FROM with_sci ws
   ),
-  with_network AS (
+  with_sanctions AS (
     SELECT wf.*,
-           ARRAY(SELECT DISTINCT d2.person_uid
-                 FROM silver.inpi_dirigeants d2
-                 WHERE d2.person_uid != wf.person_uid
-                   AND d2.sirens_mandats && wf.sirens_mandats
-                   AND array_length(
-                     (SELECT array_agg(s) FROM unnest(d2.sirens_mandats) s
-                      WHERE s = ANY(wf.sirens_mandats)), 1
-                   ) >= 2) AS co_mandataires
+           EXISTS(
+             SELECT 1 FROM silver.opensanctions s
+             WHERE s.schema = 'Person'
+               AND UPPER(unaccent(s.name)) ILIKE '%' || UPPER(unaccent(wf.nom)) || '%'
+               AND UPPER(unaccent(s.name)) ILIKE '%' || UPPER(unaccent(wf.prenom)) || '%'
+               AND LENGTH(wf.nom) > 2 AND LENGTH(wf.prenom) > 2
+           ) AS is_sanctionne
     FROM with_finances wf
   ),
-  with_legal AS (
-    SELECT wn.*,
-           (SELECT count(*) FROM silver.opensanctions s
-            WHERE s.name_lower ILIKE '%' || lower(wn.nom) || '%') AS n_sanction_matches,
-           (SELECT count(*) FROM silver.cession_events ce
-            WHERE ce.siren = ANY(wn.sirens_mandats) AND ce.is_recent) AS n_bodacc_cessions
-    FROM with_network wn
+  with_osint AS (
+    SELECT ws.*,
+           os.has_linkedin, os.has_github, os.has_any_social,
+           os.n_linkedin, os.n_github, os.n_twitter,
+           os.n_total_social,
+           os.denomination_main_company AS osint_main_deno,
+           os.last_scanned_at AS osint_scanned_at
+    FROM with_sanctions ws
+    LEFT JOIN silver.osint_persons_enriched os
+      ON UPPER(unaccent(os.nom)) = UPPER(unaccent(ws.nom))
+     AND ws.prenom = ANY(os.prenoms)
+     AND COALESCE(os.date_naissance,'') = COALESCE(ws.date_naissance,'')
   )
-  SELECT person_uid, ..., pro_ma_score
-  FROM with_legal;
+  SELECT
+    person_uid_calc AS person_uid,
+    nom, prenom, date_naissance, age_2026,
+    sirens_mandats, denominations, formes_juridiques, roles,
+    n_mandats_actifs, n_mandats_total, is_multi_mandat,
+    first_mandat_date, last_mandat_date,
+    sci_n_sci AS n_sci, sci_total_capital AS total_capital_sci,
+    sci_denominations, sci_code_postaux, first_sci_date,
+    n_companies, n_companies_avec_bilan_recent,
+    ca_total, resultat_net_total,
+    is_sanctionne,
+    has_linkedin, has_github, has_any_social,
+    n_linkedin, n_github, n_twitter, n_total_social,
+    osint_main_deno, osint_scanned_at,
+    -- Score composite simplifie (sans sub-queries qui pourraient timeout)
+    LEAST(100,
+      (CASE WHEN n_mandats_actifs >= 10 THEN 10 ELSE 0 END) +
+      (CASE WHEN sci_n_sci >= 2 THEN 20 ELSE 0 END) +
+      LEAST(15, COALESCE(ca_total, 0) / 10000000.0)::int +
+      (CASE WHEN n_total_social >= 3 THEN 5 ELSE 0 END) -
+      (CASE WHEN is_sanctionne THEN 20 ELSE 0 END)
+    )::int AS pro_ma_score,
+    NOW() AS materialized_at
+  FROM with_osint;
 
-  Performance attendue : 8M dirigeants × 6 sub-queries = 8M × ~50ms = ~5-7 min refresh.
-  Refresh quotidien suffisant (les mandats changent peu).
+  Performance : 8M dirigeants × 4 sub-queries simples = 5-10 min refresh.
 
 indexes:
-  - person_uid
+  - "(nom, prenom, date_naissance)"
   - "pro_ma_score DESC"
   - "n_mandats_actifs DESC"
   - "total_capital_sci DESC"
   - "is_sanctionne WHERE is_sanctionne = true"
-  - "has_holding_patrimoniale WHERE has_holding_patrimoniale = true"
-  - "co_mandataires USING gin"
   - "sirens_mandats USING gin"
   - nom
-  - "date_naissance"
 
 refresh_trigger: "interval_hours=24"
 sla_minutes: 1500
