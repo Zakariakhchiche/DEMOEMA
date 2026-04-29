@@ -349,13 +349,22 @@ async def generate_silver_sql(
     silver_name: str,
     feedback: str | None = None,
     apply_immediately: bool = False,
+    max_retries: int = 2,
 ) -> dict:
-    """Generate silver SQL via LLM. Returns dict with keys:
+    """Generate silver SQL via LLM with retry-on-apply-failure.
+
+    Returns dict with keys:
     - sql: generated SQL (or None on failure)
     - valid: bool
     - msg: validation msg
     - version_uid: audit reference
     - applied: bool (True if apply_immediately + valid + successful apply)
+    - retries: nombre de retries effectués
+
+    Retry strategy : si _apply_sql échoue avec UndefinedColumn / SyntaxError /
+    DataError côté Postgres, on relance generate_silver_sql avec un feedback qui
+    contient l'erreur exacte. Le LLM corrige son SQL au tour suivant.
+    Bornage à max_retries pour ne pas boucler indéfiniment + cap budget LLM.
     """
     spec = load_silver_spec(silver_name)
     if not spec:
@@ -408,12 +417,53 @@ async def generate_silver_sql(
         "validation_msg": msg,
         "path": str(target_path),
         "applied": False,
+        "retries": 0,
     }
 
     if ok and apply_immediately:
         applied = _apply_sql(silver_name, sql, version_uid)
         result["applied"] = applied["applied"]
         result.update({f"apply_{k}": v for k, v in applied.items() if k != "applied"})
+
+        # Retry-with-feedback : si apply a échoué avec une erreur SQL
+        # corrigeable (column inexistant, syntax error, etc.), on regénère le
+        # SQL avec l'erreur exacte en feedback. Le LLM produit alors une
+        # version corrigée qui ne fait plus la même bévue.
+        apply_err = applied.get("error", "") if not applied["applied"] else ""
+        retry_indicators = (
+            "UndefinedColumn", "SyntaxError", "DataError",
+            "DatatypeMismatch", "InvalidTextRepresentation",
+            "UndefinedTable", "DuplicateColumn", "WrongObjectType",
+        )
+        should_retry = (
+            not applied["applied"]
+            and any(ind in apply_err for ind in retry_indicators)
+            and max_retries > 0
+        )
+        if should_retry:
+            log.warning(
+                "[silver_codegen] %s : apply failed (%s) — retry %d/%d avec feedback LLM",
+                silver_name, apply_err[:120],
+                (max_retries if feedback is None else max_retries - 1) - max_retries + 1,
+                max_retries,
+            )
+            new_feedback = (
+                (feedback + "\n\n---\n" if feedback else "")
+                + f"Le SQL généré au tour précédent a échoué à l'apply Postgres avec :\n"
+                  f"```\n{apply_err[:800]}\n```\n"
+                  f"Corrige le SQL en évitant cette erreur. Vérifie EXACTEMENT le nom"
+                  f" des colonnes dans les SCHÉMAS BRONZE DISPONIBLES — n'invente aucune"
+                  f" colonne. Pour les indexes multi-colonnes, syntaxe correcte :"
+                  f" `CREATE INDEX ON t (col1, col2)` (UNE seule paire de parenthèses)."
+            )
+            retry = await generate_silver_sql(
+                silver_name=silver_name,
+                feedback=new_feedback,
+                apply_immediately=True,
+                max_retries=max_retries - 1,
+            )
+            retry["retries"] = result["retries"] + 1 + retry.get("retries", 0)
+            return retry
 
     return result
 
