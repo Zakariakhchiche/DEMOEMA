@@ -840,3 +840,326 @@ Stack : tooltip Radix UI + breakdown JSONB stocké dans `gold.entreprises_master
 - **v3+** : #4 Density + #7 Voice + #9 Watchlists collaboratives
 
 Ces 10 innovations + le design system glassmorphism futuriste = **moat concurrentiel** vs Mergermarket / Dealogic / PitchBook.
+
+---
+
+# 🗄️ DATA EXPLORER MODE — accès direct aux tables (ajout v3)
+
+## Pourquoi
+DEMOEMA stocke **512 GB / 115 bronze / 29 silver MV / 13 gold tables**. Une interface chat-first
+ne permet pas de **tout** explorer. Pour les power users (advisors expérimentés, analysts,
+compliance officers), il faut un **mode Data Explorer** qui complète le chat.
+
+**Anne** utilise le chat 80% du temps. Mais 20% du temps elle veut :
+- Voir TOUTES les colonnes d'une cible (chat ne montre que les highlights)
+- Faire des queries custom SQL-like sans connaître SQL
+- Exporter un dataset complet pour ML / Excel custom
+- Comparer 50 cibles (pas 5)
+
+## Layout — Toggle entre Chat et Data Explorer
+
+Cmd+Shift+E (ou icon 📊 dans la sidebar) → switch entre les 2 modes.
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ DEMOEMA  💬 Chat | 📊 Explorer  Workspace ▾  🔔  Avatar          │  56px
+├────────────┬─────────────────────────────────────────────────────┤
+│            │                                                      │
+│ Tables     │  ┌─Table Browser──────────────────────────────────┐ │
+│            │  │ gold.entreprises_master · 5,123,456 rows  ⚙️   │ │
+│ ▾ Bronze   │  └─────────────────────────────────────────────────┘ │
+│   115 tab  │                                                      │
+│            │  ┌─Filters bar─────────────────────────────────────┐│
+│ ▾ Silver   │  │ score>=70  naf=24.10Z  dept=75  ☓ 47 active    ││
+│   29 MV    │  └─────────────────────────────────────────────────┘│
+│            │                                                      │
+│ ▾ Gold ⭐  │  ┌─Data table virtualisée────────────────────────┐  │
+│   ▸ entrep │  │ siren  denomination  naf   ca_dernier  score │  │
+│   ▸ dirige │  │ 838.. Acme Industri 24.10  47M€       82●    │  │
+│   ▸ cibles │  │ 432.. Beta Pharma   21.20  124M€     91●    │  │
+│   ▸ signau │  │ 891.. Carbon Captu  71.12  8.4M€      76●    │  │
+│   ▸ red_fl │  │ ... 47 rows                                  │  │
+│   ▸ juridi │  └────────────────────────────────────────────────┘ │
+│   ▸ networ │                                                      │
+│   ▸ contac │  ┌─Aggregations bar───────────────────────────────┐│
+│   ...      │  │ Σ 47 cibles · Median CA 32M · Median score 78  ││
+│            │  └─────────────────────────────────────────────────┘│
+│ Saved views│                                                      │
+│ ▸ Top tech │  [Export CSV] [Export Parquet] [Save view] [+ Compare] │
+│ ▸ DD ready │                                                      │
+└────────────┴─────────────────────────────────────────────────────┘
+```
+
+## Composants Data Explorer
+
+### 1. **Table tree sidebar** (gauche, 260px)
+
+```tsx
+<TableTreeSidebar>
+  <Section label="Bronze (115 tables, 512 GB)" defaultOpen={false}>
+    <Group label="INPI">
+      <Table name="inpi_dirigeants_*" rows="8.1M" size="13 GB" />
+      <Table name="inpi_comptes_*" rows="6.3M" size="14 GB" />
+      ...
+    </Group>
+    <Group label="DILA">...</Group>
+    <Group label="OSINT">...</Group>
+  </Section>
+
+  <Section label="Silver (29 MV)" defaultOpen={false}>
+    {silverTables.map(t => <Table name={t.name} rows={t.rows} />)}
+  </Section>
+
+  <Section label="Gold (13 tables) ⭐" defaultOpen={true}>
+    <Table name="entreprises_master" rows="5.1M" highlighted />
+    <Table name="dirigeants_master" rows="8.1M" highlighted />
+    <Table name="cibles_ma_top" rows="123K" highlighted />
+    ...
+  </Section>
+
+  <Section label="Saved views" defaultOpen={true}>
+    <SavedView name="Top tech IDF" filters={...} />
+    <SavedView name="DD ready cibles" filters={...} />
+  </Section>
+</TableTreeSidebar>
+```
+
+Click sur une table → ouvre le Table Browser principal.
+
+### 2. **Visual Query Builder** (no SQL knowledge needed)
+
+Au-dessus du tableau, une **filter bar** intuitive (style Notion / Airtable) :
+
+```tsx
+<FilterBar>
+  <FilterChip column="score_ma" operator=">=" value={70} />
+  <FilterChip column="naf" operator="=" value="24.10Z" />
+  <FilterChip column="siege_dept" operator="IN" value={["75", "92", "78"]} />
+  <FilterChip column="ca_dernier" operator="BETWEEN" value={[10_000_000, 100_000_000]} />
+  <Button onClick={addFilter}>+ Add filter</Button>
+</FilterBar>
+```
+
+Chaque chip est éditable inline (popover avec :
+- Column selector (autocomplete)
+- Operator (=, !=, >=, <=, BETWEEN, IN, NOT IN, IS NULL, IS NOT NULL, ILIKE)
+- Value input (typed selon column type)
+
+### 3. **Data Table virtualisée** (TanStack Table)
+
+```tsx
+<DataTable
+  data={rows}
+  columns={cols}
+  virtualization={{ rowHeight: 36, overscan: 10 }}
+  pagination={{ pageSize: 100, mode: "keyset" }}
+  sorting={{ multi: true }}
+  selection={{ mode: "multi", showCheckboxes: true }}
+  columnVisibility={{ controllable: true }}
+  columnPinning={{ left: ["denomination"], right: ["actions"] }}
+  density={density} // compact/comfortable/spacious
+  onRowClick={(row) => openSheet(row)}
+  onRowContextMenu={(row) => showContextMenu(row)}
+/>
+```
+
+**Colonnes** : toutes celles de la table sélectionnée. User peut hide/show via column manager.
+**Pagination** : keyset cursor (sub-second sur 8M rows).
+**Sort** : multi-column (cmd+click pour ajouter).
+**Selection** : multi-select avec checkbox → barre actions sticky en bas.
+
+### 4. **Aggregations bar** (footer)
+
+```tsx
+<AggregationsBar>
+  <Stat label="Total" value="47 cibles" />
+  <Stat label="Σ CA" value="2.4 Md€" />
+  <Stat label="Median score" value="78" />
+  <Stat label="% red flags" value="6%" />
+  {/* Custom aggregations possibles */}
+  <Button onClick={addAggregation}>+ Add</Button>
+</AggregationsBar>
+```
+
+User peut ajouter : count distinct, sum, avg, median, p25, p75, percentile custom.
+
+### 5. **Saved Views** (dashboards perso)
+
+User configure une vue → save avec nom + tags → réutilisable :
+
+```tsx
+<SavedView>
+  <Title>Top tech IDF</Title>
+  <Filters>
+    score >= 70, naf IN ('62.01Z', '62.02A'), siege_dept = '75'
+  </Filters>
+  <Sorting>score_ma DESC, ca_dernier DESC</Sorting>
+  <Columns>siren, denomination, score, ca, top_dirigeant</Columns>
+  <Aggregations>count, sum_ca, median_score</Aggregations>
+  <Density>compact</Density>
+</SavedView>
+```
+
+Saved views sont partageables (lien `/v/abc123`) avec l'équipe EdRCF.
+
+### 6. **Bulk actions sticky bar** (quand selection > 0)
+
+```tsx
+{selectedCount > 0 && (
+  <StickyBulkActionsBar>
+    <span>{selectedCount} selected</span>
+    <Button>📊 Compare</Button>
+    <Button>💾 Save to watchlist</Button>
+    <Button>📄 Pitch Ready (batch PDF)</Button>
+    <Button>🔗 Share link</Button>
+    <Button>📤 Export CSV</Button>
+    <Button>🛡️ DD Compliance batch</Button>
+  </StickyBulkActionsBar>
+)}
+```
+
+### 7. **Export panel** (CSV, Parquet, Excel, JSON)
+
+```tsx
+<ExportPanel>
+  <Format options={["csv", "xlsx", "parquet", "json"]} default="csv" />
+  <Encoding options={["utf-8", "latin-1"]} default="utf-8" />
+  <Delimiter options={[",", ";", "tab"]} default=";" /> {/* FR-friendly */}
+  <Range options={["all_filtered (47)", "selected (5)", "current_page (100)"]} />
+  <Columns selectable />
+  <Button onClick={download}>Download</Button>
+</ExportPanel>
+```
+
+Export Parquet pour les data scientists. Excel pour les compliance officers.
+
+### 8. **SQL mode** (power user, optionnel)
+
+Toggle "SQL" dans la filter bar → ouvre un éditeur SQL avec :
+- Autocomplete schémas (bronze.*, silver.*, gold.*)
+- Highlighting Postgres syntax
+- Run button → résultat affiché dans le DataTable
+- Save query (persisté en saved views)
+
+```tsx
+<SQLEditor>
+  <Monaco
+    language="postgresql"
+    theme="vs-dark"
+    autocomplete={dbSchema}
+    onRun={(query) => executeAndDisplay(query)}
+  />
+</SQLEditor>
+```
+
+Sécurité : queries READ-ONLY (interdire INSERT/UPDATE/DELETE/DROP côté backend).
+
+---
+
+## Use cases Data Explorer
+
+### Use case 1 — Compliance officer audit
+"Donne-moi toutes les cibles M&A avec **un dirigeant ICIJ Offshore**" :
+- Click `gold.persons_master_universal`
+- Add filter `has_offshore_match = true`
+- Add filter `pro_ma_score >= 50`
+- 23 rows displayed
+- Bulk action "DD Compliance batch" → 23 PDFs en 1 clic
+
+### Use case 2 — Data scientist M&A
+"Export tous les `gold.entreprises_master` IDF tech pour entraîner un modèle de scoring custom" :
+- Click `gold.entreprises_master`
+- Filter `siege_dept IN ('75','92','78','93','94')` + `naf LIKE '62.%'`
+- 12K rows
+- Export Parquet → fichier 50 MB
+- Branche dans Jupyter / SageMaker
+
+### Use case 3 — Sales prospection direct mail
+"Liste 1000 dirigeants Tier 1 avec email validé pour outreach Q3" :
+- Click `gold.persons_contacts_master`
+- Filter `pro_ma_score >= 60` + `has_email = true` + `emails_validated_count > 0`
+- Sort by `pro_ma_score DESC`
+- Limit 1000
+- Export CSV (prenom, nom, top_email, denomination, score)
+
+### Use case 4 — Boutique advisor benchmark
+"Compare 50 cibles sectorielles biotech" :
+- Click `gold.cibles_ma_top`
+- Filter `naf LIKE '21.%'`
+- Sort by `score_ma DESC` Limit 50
+- Select all (Ctrl+A)
+- Bulk "Compare" → vue side-by-side avec radar 9 dimensions superposés
+
+---
+
+## Modes coexistent — toggle fluide
+
+```
+Top header :  💬 Chat  |  📊 Explorer  |  🌐 Graphe
+              ─────       ─────────       ──────
+              actif       inactif         inactif
+```
+
+User peut switch n'importe quand. Les filtres / saved views sont partagés entre modes.
+
+**Pattern** : on chat → AI répond avec cards → si user veut voir plus de détails → click "Voir dans Explorer" → ouvre Data Explorer avec filtres pré-appliqués correspondants.
+
+```tsx
+// Dans une réponse AI chat
+<Button onClick={() => switchToExplorer({ table: "gold.cibles_ma_top",
+                                           filters: aiAppliedFilters })}>
+  📊 Voir les 47 résultats dans Data Explorer
+</Button>
+```
+
+---
+
+## Layout final révisé — 3 modes UI
+
+```
+1. CHAT MODE (default, 80% usage)     — outil simple Anne
+   ├── Sidebar conversations
+   └── Main chat + cards
+
+2. EXPLORER MODE (20% usage)           — power user direct DB access
+   ├── Sidebar table tree + saved views
+   └── Main : filters + data table + aggregations + bulk actions
+
+3. GRAPHE MODE (5% usage)              — exploration réseau
+   ├── ForceGraph2D plein écran
+   └── Sidebar focus details
+```
+
+## Composants supplémentaires Data Explorer (5 nouveaux)
+
+```tsx
+// Components à designer en plus des 5 du mode Chat
+<TableTreeSidebar tables={schema} />
+<FilterChip column op value editable />
+<DataTable virtualized columns rows />
+<AggregationsBar stats />
+<SQLEditor query onRun />
+```
+
+Total composants UI = **5 chat + 5 explorer = 10 components**.
+
+## Critères de succès UX Data Explorer
+
+✅ User peut **trouver une row dans 8M dirigeants en < 3 secondes** (filter + sort)
+✅ Export 100K rows → CSV en < 10 secondes
+✅ User non-SQL peut faire des queries complexes via le visual builder
+✅ Saved views partageables avec équipe EdRCF
+✅ Bulk actions sur 100+ rows fluides
+✅ Mobile : Data Explorer dégradé (table → cards verticales)
+
+---
+
+## 🎯 Récap final — 3 modes pour 3 use cases
+
+| Mode | User profile | Use case primary |
+|---|---|---|
+| **💬 Chat** | Anne (associate) | "Trouve-moi des cibles" — questions naturelles |
+| **📊 Explorer** | Power user (analyst, compliance) | "Browse 8M dirigeants" — direct DB access |
+| **🌐 Graphe** | Tous (exploration) | "Qui connaît qui ?" — réseau visuel |
+
+C'est la **bonne architecture** pour DEMOEMA.
