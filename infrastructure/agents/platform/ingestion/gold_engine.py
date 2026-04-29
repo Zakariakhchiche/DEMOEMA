@@ -175,25 +175,50 @@ async def run_gold_refresh(gold_name: str, trigger_source: str = "scheduler") ->
             pass
 
 
+async def run_gold_maintainer() -> dict:
+    """Maintainer gold — toutes les 30 min, retry les golds failed/empty.
+
+    Équivalent du silver_maintainer pour la couche gold. À chaque tick :
+    - Liste les golds avec rows = 0 ou table inexistante
+    - Re-trigger bootstrap_missing_golds (idempotent — skip ceux déjà OK)
+    - Sources silvers maintenant peut-être matérialisées → rebuild possible
+
+    Le bootstrap_missing_golds gère déjà l'advisory lock cluster-wide donc
+    pas besoin de gérer la concurrence ici.
+    """
+    try:
+        from ingestion.gold_codegen import bootstrap_missing_golds
+        return await bootstrap_missing_golds(force_empty=True)
+    except Exception as e:
+        log.exception("[gold_maintainer] tick failed")
+        return {"error": str(e)}
+
+
 def start_gold_scheduler(scheduler) -> int:
-    """Register gold bootstrap (one-shot) + per-gold refresh jobs."""
+    """Register gold bootstrap (every 30 min auto-retry) + per-gold refresh.
+
+    Diffère de l'ancienne version (one-shot date) : on passe en IntervalTrigger
+    pour que les golds se construisent automatiquement quand les silvers sources
+    deviennent disponibles. Idempotent — bootstrap_missing_golds skip ceux déjà
+    matérialisés (rows > 0).
+    """
     global GOLDS
     GOLDS = load_all_gold_specs()
     if not GOLDS:
         log.info("[gold] no gold_specs/*.yaml found — skip scheduler")
         return 0
 
-    # 1. One-shot bootstrap au boot (5s après le silver bootstrap pour laisser
-    # les silvers se construire d'abord)
+    # 1. Bootstrap toutes les 30 min — auto-retry les missing/empty quand
+    # leurs sources silvers se matérialisent. Premier run au boot via misfire.
     scheduler.add_job(
-        run_gold_bootstrap, trigger="date",
-        run_date=datetime.now(tz=timezone.utc).replace(microsecond=0),
-        id="gold_bootstrap", name="Gold bootstrap missing/empty tables",
+        run_gold_bootstrap, trigger=IntervalTrigger(minutes=30),
+        id="gold_bootstrap", name="Gold bootstrap (parallèle, retry toutes 30min)",
         max_instances=1, coalesce=True, replace_existing=True,
         misfire_grace_time=600,
+        next_run_time=datetime.now(tz=timezone.utc),  # premier tick immédiat
     )
 
-    # 2. Refresh job per gold
+    # 2. Refresh job per gold (cron individuel défini dans spec.refresh_trigger)
     for name, spec in GOLDS.items():
         trigger = _build_trigger(spec)
         scheduler.add_job(
@@ -205,5 +230,5 @@ def start_gold_scheduler(scheduler) -> int:
         log.info("[gold] registered refresh %s (trigger=%s)",
                  name, spec.get("refresh_trigger"))
 
-    log.info("[gold] scheduler registered bootstrap + %d gold tables", len(GOLDS))
+    log.info("[gold] scheduler registered bootstrap (30min) + %d gold tables", len(GOLDS))
     return len(GOLDS)

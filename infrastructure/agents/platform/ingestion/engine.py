@@ -267,15 +267,50 @@ def start_scheduler() -> None:
         log.warning("Silver engine init skipped: %s", e)
         n_silvers = 0
 
-    # Gold layer: tables physiques avec UPSERT pattern. Bootstrap au boot
-    # (5min après silver pour que les silvers soient construits avant que
-    # les golds ne tentent de les query). Refresh quotidien per gold.
+    # Gold layer: tables physiques avec UPSERT pattern. Bootstrap toutes les
+    # 30 min en auto-retry (idempotent — skip ceux déjà matérialisés). Quand
+    # les silvers sources deviennent prêts (level 1 puis 2 du silver bootstrap),
+    # les golds se construisent au tick suivant sans intervention manuelle.
     try:
         from ingestion.gold_engine import start_gold_scheduler
         n_golds = start_gold_scheduler(scheduler)
     except Exception as e:
         log.warning("Gold engine init skipped: %s", e)
         n_golds = 0
+
+    # OSINT enrichment job — Maigret + Holehe sur top 1000 dirigeants Tier 1
+    # par nuit (pro_ma_score >= 50, déjà filtré par PICK_SQL après commit
+    # 248dcde). Évite la croissance non-contrôlée de bronze.osint_persons.
+    # Run via subprocess osint_orchestrator.py qui a sa propre concurrence.
+    try:
+        from subprocess import run as _subrun
+        async def run_osint_enrichment_nightly():
+            """Lance osint_orchestrator.py --limit 1000 chaque nuit 02:00 Paris."""
+            log.info("[osint_nightly] starting batch 1000 Tier 1 dirigeants")
+            try:
+                # Run via subprocess pour isolation (Maigret CLI Docker spawn)
+                proc = _subrun(
+                    ["python", "-m", "scripts.osint.osint_orchestrator",
+                     "--limit", "1000", "--top-sites", "100"],
+                    cwd="/app", capture_output=True, text=True, timeout=14400,
+                )
+                log.info("[osint_nightly] done returncode=%d stdout=%s",
+                         proc.returncode, proc.stdout[-500:] if proc.stdout else "")
+                return {"returncode": proc.returncode}
+            except Exception as e:
+                log.exception("[osint_nightly] failed")
+                return {"error": str(e)}
+
+        scheduler.add_job(
+            run_osint_enrichment_nightly,
+            trigger=CronTrigger(hour=2, minute=0, timezone="Europe/Paris"),
+            id="osint_enrichment_nightly",
+            name="OSINT enrichment Maigret/Holehe (1000 Tier 1 / nuit)",
+            max_instances=1, coalesce=True, replace_existing=True,
+        )
+        log.info("OSINT nightly enrichment registered (02:00 Paris)")
+    except Exception as e:
+        log.warning("OSINT nightly init skipped: %s", e)
 
     # Bronze bootstrap : génère les fetchers manquants en arrière-plan, un par
     # tick (5 min). Permet de combler le gap specs YAML / sources/*.py sans
