@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 import { CommandPalette } from "@/components/CommandPalette";
 import GlobalCopilot from "@/components/GlobalCopilot";
@@ -8,11 +9,23 @@ import MobileHeader from "@/components/layout/MobileHeader";
 import OfflineBanner from "@/components/layout/OfflineBanner";
 import InstallPrompt from "@/components/ui/InstallPrompt";
 
+// Routes en mode "fullscreen autonome" — bypass sidebar/header/widgets
+// (typiquement les modes Chat-driven AI ou Data Explorer plein écran).
+const FULLSCREEN_ROUTES = ["/copilot", "/explorer"];
+
 export default function MainLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const pathname = usePathname();
+  const isFullscreen = FULLSCREEN_ROUTES.some((r) => pathname?.startsWith(r));
+
+  if (isFullscreen) {
+    // Mode fullscreen : juste les enfants, pas de sidebar/header/widgets EDRCF
+    return <>{children}</>;
+  }
+
   return (
     <>
       <OfflineBanner />

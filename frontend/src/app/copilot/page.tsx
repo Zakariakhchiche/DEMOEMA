@@ -256,7 +256,13 @@ export default function CopilotPage() {
           <div className="mx-auto max-w-3xl">
             <ChatInput
               onSubmit={sendMessage}
-              suggestions={!activeConv?.messages.length ? STARTER_PROMPTS : []}
+              // Suggestions chips dans l'input UNIQUEMENT après une réponse
+              // (pas en empty state — on a déjà la grid de starter prompts).
+              suggestions={
+                activeConv?.messages.length && !streaming
+                  ? ["Affiner par dept", "Compare top 3", "DD compliance"]
+                  : []
+              }
               disabled={streaming}
             />
           </div>

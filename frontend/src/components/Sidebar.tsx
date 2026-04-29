@@ -39,6 +39,7 @@ export default function Sidebar() {
 
   const navItems = [
     { label: "Tableau de Bord", icon: LayoutDashboard, href: "/", badge: null },
+    { label: "Copilot IA", icon: Sparkles, href: "/copilot", badge: "NEW" },
     { label: "Intelligence Vault", icon: Target, href: "/targets", badge: null },
     { label: "Graphe Réseau", icon: Network, href: "/graph", badge: null },
     { label: "Pipeline M&A", icon: Layers, href: "/pipeline", badge: null },
