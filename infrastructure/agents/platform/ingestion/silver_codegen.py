@@ -141,7 +141,12 @@ async def _llm_chat(model: str, system: str, user: str,
             model=model, messages=messages, stream=False,
             options={"temperature": temperature, "num_ctx": num_ctx},
         )
-    except (httpx.TimeoutException, httpx.RemoteProtocolError, httpx.ConnectError) as e:
+    except (
+        httpx.TimeoutException,
+        httpx.RemoteProtocolError,
+        httpx.ConnectError,
+        httpx.HTTPStatusError,  # 5xx Ollama (vu en prod : 504 Gateway Timeout)
+    ) as e:
         # Fallback DeepSeek avec timeout DISTINCT (180s vs Ollama 1200s) :
         # un DeepSeek qui ramerait au delà de 3 min = vraie panne, pas hang
         # raisonnable — on échoue vite plutôt que d'enchaîner 2 timeouts longs.
