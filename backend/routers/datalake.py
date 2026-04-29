@@ -304,21 +304,33 @@ async def fiche_entreprise(req: Request, siren: str):
                         if data.get("results"):
                             r = data["results"][0]
                             siege = r.get("siege") or {}
+                            mp = r.get("matching_etablissements") or []
+                            adresse = siege.get("adresse")
+                            commune = siege.get("libelle_commune") or siege.get("commune") or ""
+                            # NAF / catégorie : depuis siège (struct API gouv FR)
                             gouv = {
-                                "naf": r.get("activite_principale"),
-                                "naf_libelle": r.get("libelle_activite_principale"),
-                                "forme_juridique": r.get("nature_juridique"),
+                                "naf": siege.get("activite_principale") or r.get("activite_principale"),
+                                "naf_libelle": siege.get("libelle_activite_principale") or r.get("libelle_activite_principale"),
+                                "forme_juridique": r.get("nature_juridique") or r.get("nature_juridique_libelle"),
                                 "categorie_entreprise": r.get("categorie_entreprise"),
-                                "date_creation": r.get("date_creation"),
+                                "date_creation": r.get("date_creation") or siege.get("date_creation"),
                                 "denomination": r.get("nom_complet") or r.get("nom_raison_sociale"),
                                 "sigle": r.get("sigle"),
-                                "tranche_effectifs": r.get("tranche_effectif_salarie"),
-                                "ville": siege.get("libelle_commune"),
+                                "tranche_effectifs": r.get("tranche_effectif_salarie") or siege.get("tranche_effectif_salarie"),
+                                "ville": commune,
                                 "code_postal": siege.get("code_postal"),
-                                "dept": (siege.get("code_postal") or "")[:2] or siege.get("departement"),
-                                "region": siege.get("region"),
+                                "dept": siege.get("departement") or (siege.get("code_postal") or "")[:2],
+                                "region": siege.get("libelle_region") or siege.get("region"),
                                 "etat_administratif": r.get("etat_administratif"),
+                                "adresse": adresse,
+                                "n_etablissements": r.get("nombre_etablissements"),
+                                "n_etablissements_ouverts": r.get("nombre_etablissements_ouverts"),
+                                "date_fermeture": siege.get("date_fermeture"),
                                 "dirigeants": r.get("dirigeants") or [],
+                                "matching_etablissements": [
+                                    {"siret": e.get("siret"), "ville": e.get("libelle_commune"), "code_postal": e.get("code_postal")}
+                                    for e in mp[:5]
+                                ],
                             }
             except Exception as e:
                 print(f"[fiche] gouv API fallback failed: {type(e).__name__}: {str(e)[:80]}")
@@ -353,13 +365,20 @@ async def fiche_entreprise(req: Request, siren: str):
             "dept": (osint["adresse_code_postal"][:2] if osint and osint["adresse_code_postal"] else None) or (loc["dept"] if loc else None) or (gouv["dept"] if gouv else None),
             "ville": (loc["ville"] if loc else None) or (gouv["ville"] if gouv else None),
             "region": (loc["region"] if loc else None) or (gouv["region"] if gouv else None),
-            "etat_administratif": gouv["etat_administratif"] if gouv else None,
+            "etat_administratif": gouv["etat_administratif"] if gouv else (insee["etat_administratif"] if insee else None),
+            "adresse": gouv["adresse"] if gouv else None,
+            "n_etablissements": gouv["n_etablissements"] if gouv else None,
+            "n_etablissements_ouverts": gouv["n_etablissements_ouverts"] if gouv else None,
+            "date_fermeture": gouv["date_fermeture"] if gouv else None,
             "ca_history": ca_history,
             "exercices": exercices,
             "n_dirigeants": n_dirigeants or 0,
             "n_bodacc": n_bodacc or 0,
             "n_sanctions": n_sanctions or 0,
-            "statut": "actif",
+            "statut": (
+                "cesse" if (gouv and gouv.get("date_fermeture")) or (gouv and gouv.get("etat_administratif") == "C")
+                else "actif"
+            ),
         }
     # Si fiche est un dict (multi-query path) on skip le check ci-dessous.
     if not fiche:
