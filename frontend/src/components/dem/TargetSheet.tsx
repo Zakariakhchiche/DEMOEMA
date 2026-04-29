@@ -317,6 +317,8 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
   const nEtabOuv = fiche.n_etablissements_ouverts as number | undefined;
   const sigle = fiche.sigle as string | undefined;
   const isCesse = fiche.statut === "cesse" || etat === "C";
+  const isLobbying = Boolean(fiche.is_lobbying_registered);
+  const hatvpData = fiche.hatvp as Record<string, unknown> | undefined;
 
   return (
     <>
@@ -370,6 +372,26 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
             {adresse && (
               <div style={{ marginTop: 4, fontSize: 11.5, color: "var(--text-tertiary)" }}>
                 📍 {adresse}{region ? ` · région ${region}` : ""}
+              </div>
+            )}
+            {isLobbying && hatvpData && (
+              <div style={{
+                marginTop: 6, padding: "4px 10px", borderRadius: 999,
+                background: "rgba(167,139,250,0.10)",
+                border: "1px solid rgba(167,139,250,0.25)",
+                color: "var(--accent-purple)", fontSize: 11,
+                display: "inline-flex", alignItems: "center", gap: 6,
+              }}>
+                <Icon name="warning" size={11} />
+                <span>HATVP — Lobbyiste enregistré</span>
+                {Boolean(hatvpData.secteur_activite) && (
+                  <span style={{ color: "var(--text-tertiary)" }}>· {String(hatvpData.secteur_activite)}</span>
+                )}
+                {Boolean(hatvpData.chiffre_affaires_lobbying) && (
+                  <span style={{ color: "var(--text-secondary)" }}>
+                    · CA lobbying {(Number(hatvpData.chiffre_affaires_lobbying) / 1000).toFixed(0)}k€
+                  </span>
+                )}
               </div>
             )}
           </div>

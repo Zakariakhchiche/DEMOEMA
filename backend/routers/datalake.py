@@ -600,7 +600,60 @@ async def fiche_entreprise(req: Request, siren: str):
             ), default=[])
             red_flags.extend([dict(r) for r in dg_rows])
 
-    # --- 3. CNIL (sanctions RGPD France) ---
+    # --- 3. AMF DILA (décisions/sanctions AMF — 29k entrées) ---
+    if deno_for_match:
+        amf_exists = await pool.fetchval(
+            """SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+               WHERE n.nspname = 'bronze' AND c.relname = 'amf_dila_raw'""",
+        )
+        if amf_exists:
+            amf_rows = await _safe(pool.fetch(
+                """SELECT decision_id AS entity_id,
+                          COALESCE(payload->>'entreprise', payload->>'denomination',
+                                   payload->>'societe', payload->>'titre') AS caption,
+                          'AMFDecision' AS schema,
+                          ARRAY['sanction','amf']::text[] AS topics,
+                          ARRAY['fr']::text[] AS countries,
+                          ARRAY[COALESCE(payload->>'type_sanction', payload->>'motif',
+                                         payload->>'nature')]::text[] AS sanctions_programs,
+                          (payload->>'date_decision')::date AS first_seen,
+                          ingested_at AS last_seen,
+                          'amf' AS _source,
+                          'name_match' AS _match_type
+                   FROM bronze.amf_dila_raw
+                   WHERE COALESCE(payload->>'entreprise', payload->>'denomination',
+                                  payload->>'societe', payload->>'titre', '') ILIKE $1
+                   LIMIT 10""",
+                deno_for_match,
+            ), default=[])
+            red_flags.extend([dict(r) for r in amf_rows])
+
+    # --- 4. ICIJ Offshore (Pandora/Paradise/Panama leaks) ---
+    if deno_for_match:
+        icij_exists = await pool.fetchval(
+            """SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+               WHERE n.nspname = 'bronze' AND c.relname = 'icij_offshore_raw'""",
+        )
+        if icij_exists:
+            icij_rows = await _safe(pool.fetch(
+                """SELECT node_id AS entity_id,
+                          name AS caption,
+                          'OffshoreEntity' AS schema,
+                          ARRAY['icij','offshore', source_leak]::text[] AS topics,
+                          ARRAY[country]::text[] AS countries,
+                          ARRAY[role]::text[] AS sanctions_programs,
+                          NULL::date AS first_seen,
+                          ingested_at AS last_seen,
+                          'icij' AS _source,
+                          'name_match' AS _match_type
+                   FROM bronze.icij_offshore_raw
+                   WHERE name ILIKE $1
+                   LIMIT 10""",
+                deno_for_match,
+            ), default=[])
+            red_flags.extend([dict(r) for r in icij_rows])
+
+    # --- 5. CNIL (sanctions RGPD France) ---
     if deno_for_match:
         cnil_exists = await pool.fetchval(
             """SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -695,6 +748,21 @@ async def fiche_entreprise(req: Request, siren: str):
         except Exception as e:
             print(f"[fiche] Google News RSS failed: {type(e).__name__}: {str(e)[:80]}")
 
+    # HATVP — registre des représentants d'intérêts (lobbying). Ce n'est pas
+    # une sanction mais un signal de transparence : présence = entreprise
+    # déclarée comme lobbyiste auprès de l'État.
+    hatvp = await _safe(pool.fetchrow(
+        """SELECT representant_id, denomination, secteur_activite,
+                  date_inscription, adresse_ville, nb_deputes,
+                  chiffre_affaires_lobbying
+           FROM bronze.hatvp_representants_raw
+           WHERE siren = $1::char(9) LIMIT 1""",
+        siren,
+    )) if await pool.fetchval(
+        """SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE n.nspname = 'bronze' AND c.relname = 'hatvp_representants_raw'"""
+    ) else None
+
     # Synchronise les compteurs avec les données réellement fetched (silver + fallbacks)
     if isinstance(fiche, dict):
         if signaux and (fiche.get("n_bodacc") or 0) < len(signaux):
@@ -703,6 +771,23 @@ async def fiche_entreprise(req: Request, siren: str):
             fiche["n_sanctions"] = len(red_flags)
         fiche["n_presse"] = len(presse)
         fiche["n_network"] = len(network)
+        # HATVP lobbying — signal de transparence
+        if hatvp:
+            fiche["hatvp"] = {
+                "representant_id": hatvp.get("representant_id"),
+                "secteur_activite": hatvp.get("secteur_activite"),
+                "date_inscription": (
+                    hatvp["date_inscription"].isoformat() if hatvp.get("date_inscription") else None
+                ),
+                "adresse_ville": hatvp.get("adresse_ville"),
+                "nb_deputes": hatvp.get("nb_deputes"),
+                "chiffre_affaires_lobbying": (
+                    float(hatvp["chiffre_affaires_lobbying"]) if hatvp.get("chiffre_affaires_lobbying") else None
+                ),
+            }
+            fiche["is_lobbying_registered"] = True
+        else:
+            fiche["is_lobbying_registered"] = False
 
     return {
         "fiche": _serialize(fiche) if hasattr(fiche, "items") and not isinstance(fiche, dict) else fiche,
