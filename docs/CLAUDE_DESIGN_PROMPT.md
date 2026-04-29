@@ -463,3 +463,380 @@ C'est ça DEMOEMA Front v2.
 
 > Brief v2 — 29/04/2026. Repensé pour AI-first chat-driven UX.
 > Iter à donner à claude.ai/design pour mockup initial.
+
+---
+
+# 🚀 INNOVATIONS 2026 (intégrées au brief — issus veille UX/UI SaaS)
+
+Suite à veille SaaS UX/UI 2026 (sources : SaaSUI Blog, Orbix Studio, RankTracker, B2B mention G2, Averi, Linear gold standard, etc.), ajout de **3 patterns innovants sous-exploités** par les SaaS M&A actuels (Mergermarket, Dealogic, PitchBook) que DEMOEMA peut claim comme différenciateurs.
+
+## Innovation #1 — **Adaptive UI** (interface auto-personnalisée)
+
+> *"Adaptive UI is where the interface builds itself based on your data, history, patterns and inputs at the time, creating what should be the best possible experience."* — UX Tigers 2026
+
+### Concept
+Après 2 semaines d'usage, l'interface DEMOEMA s'adapte à **Anne Dupont** :
+- Son top 3 actions devient des **shortcuts épinglés** dans le chat input
+- Les cartes affichent en priorité les **champs qu'elle consulte le plus** (DD compliance ? Score patrimoine ? Réseau ?)
+- Le chat suggère des prompts basés sur son **historique** ("Comme tu as fait DD Acme la semaine dernière, voici DD Beta — secteur similaire")
+- La sidebar Conversations groupe par **patterns réels** (DD / Sourcing / Comparaison) pas juste par date
+
+### Implémentation UI
+
+```tsx
+// Chat input avec shortcuts personnalisés (top 3 actions Anne)
+<ChatInput>
+  <PinnedShortcuts>
+    <Chip icon="🛡️">DD compliance ⌘D</Chip>
+    <Chip icon="🔍">Sourcing IDF chimie ⌘S</Chip>
+    <Chip icon="📊">Compare cibles ⌘K</Chip>
+  </PinnedShortcuts>
+  <Input placeholder="Pose ta question..." />
+</ChatInput>
+```
+
+```tsx
+// TargetCard adaptative — ordre des champs selon usage user
+<TargetCard target={target} userPreferences={anne}>
+  {/* Anne consulte 90% du temps : score, red flags, top dirigeant */}
+  <ScoreBadge value={target.pro_ma_score} />
+  {target.compliance_red_flags > 0 && <RedFlagsBadge />}
+  <TopDirigeant person={target.top_dirigeant} />
+  {/* Champs secondaires : compact, expand on click */}
+  <ExpandableSection>
+    <FinanceBlock />
+    <NetworkBlock />
+  </ExpandableSection>
+</TargetCard>
+```
+
+### Backend
+- Stocker `user_preferences` (JSONB) avec :
+  - `top_actions` array (DD, sourcing, compare, etc.)
+  - `top_fields_viewed` (score, red_flags, ca, dirigeants, etc.)
+  - `last_searches` (10 derniers prompts)
+- LLM prompt incluant `user_context` pour personnalisation
+
+---
+
+## Innovation #2 — **Mode "Pitch Ready"** (PDF présentable en 1 clic)
+
+### Pain point M&A boutique
+Anne passe **2-4h par cible** à compiler manuellement les infos pour son livrable client. Mergermarket export = CSV brut moche.
+
+### Solution DEMOEMA
+Bouton "📄 Pitch Ready" sur chaque card / fiche → PDF design-matched (charte EdRCF) en **5 secondes** :
+
+**Page 1 — Synthesis** :
+- Header : logo client + titre "Cible M&A — [Denomination]" + date
+- Score halo grand format (signature DEMOEMA)
+- KPIs critiques 4 cards : CA, EBITDA, Effectif, Valorisation estimée
+- Verdict 1 phrase : *"Cible HIGH potentiel pour mandat sell-side mid-cap chimie"*
+
+**Page 2 — Identité + Finance** :
+- Profil entreprise (siren, NAF, dates, siège)
+- Mini-graphique évolution CA 5 ans (Recharts)
+- Comparaison vs médiane secteur (benchmarks_sectoriels)
+- Top 3 dirigeants (avatars + age + pro_ma_score)
+
+**Page 3 — Compliance / Red Flags** :
+- 🟢 Section "OK" si rien
+- 🔴 Section "Red flags" si présents (sanctions, ICIJ, procédures)
+- Auditabilité : sources avec liens BODACC/AMF/DILA
+
+**Page 4 — Réseau** :
+- Mini-graphe network_mandats (5 niveaux)
+- Top co-mandataires + entreprises liées
+- Patrimoine immobilier consolidé (parcelles_cibles)
+
+**Page 5 — Annexes** :
+- Liens audit (siren INPI, BODACC, BALO si coté)
+- Disclaimer légal RGPD
+- Footer EdRCF + date génération
+
+### Customisation client
+Anne peut personnaliser le **template** (couleurs charte EdRCF, logo, mention pro) une seule fois → toutes les générations PDF appliquent ce template.
+
+### Stack technique
+- React-PDF ou Puppeteer (HTML → PDF)
+- Stockage template par workspace (Supabase storage)
+- Job async (5s génération + 5s download)
+
+### UI
+
+```tsx
+<TargetCard target={acme}>
+  <Actions>
+    <Button variant="primary" icon={<FileText />}>📊 Voir fiche</Button>
+    <Button variant="secondary" icon={<Save />}>💾 Sauver</Button>
+    <Button variant="ghost" icon={<Sparkles />}>📄 Pitch Ready</Button>
+  </Actions>
+</TargetCard>
+
+// Modal Pitch Ready
+<Dialog>
+  <DialogHeader>Génération Pitch Cible — Acme Industries</DialogHeader>
+  <ProgressBar value={progress} /> {/* gradient animated */}
+  <Steps>
+    <Step done>Identité + finances</Step>
+    <Step done>Compliance check</Step>
+    <Step done>Réseau dirigeants</Step>
+    <Step active>Génération PDF charte EdRCF...</Step>
+  </Steps>
+  <DialogFooter>
+    <DownloadLink href={pdfUrl}>📥 Télécharger PDF (1.2 MB)</DownloadLink>
+  </DialogFooter>
+</Dialog>
+```
+
+---
+
+## Innovation #3 — **Proactive Alerts conversationnelles** (sticky engagement)
+
+### Concept
+Au lieu d'attendre qu'Anne demande, **DEMOEMA initie la conversation** chaque matin avec les signaux pertinents pour ses cibles sauvées.
+
+### Exemple message AI proactif (8h00 Paris)
+
+```
+✨ DEMOEMA  ·  Bonjour Anne ☕
+
+J'ai analysé ta watchlist "Cibles tech IDF" cette nuit.
+
+🚨 3 alertes prioritaires :
+
+[Card] Acme Industries SAS · Score 82 → 78 (-4)
+       ⚠️ Procédure collective ouverte au Tribunal de commerce
+       Nanterre le 28/04/26. Source : BODACC.
+       [Voir détail]  [Désabonner]
+
+[Card] Beta Pharma Holding · BALO event 24h
+       💰 Augmentation de capital 15M€ annoncée 28/04/26.
+       Tier-1 par rapport à ton historique sourcing pharma.
+       [Voir détail]  [Ajouter au mandat]
+
+[Card] Carbon Capture Tech · Nouveau dirigeant
+       👤 Jean Dupont (ex-Engie) nommé président le 26/04/26.
+       Parcours pertinent pour ton mandat deeptech.
+       [Voir détail]  [Réseau Jean Dupont]
+
+📊 Stats :
+- 47 nouveaux signaux 24h sur tes cibles
+- 12 cibles ont franchi le seuil score 70+ (tier 1)
+- 0 nouveau red flag majeur
+
+💡 Suggestion : on regarde ensemble le mandat sell-side
+   Beta Pharma ce matin ?  [Lancer DD complète]
+```
+
+### Mécanique
+
+**Cron 06:00 Paris** :
+1. Pour chaque user : query saved searches + watchlists
+2. Run AI analysis sur les 24h précédentes (silver.signaux_ma_feed depuis last_login)
+3. Génère un message proactif personnalisé via LLM (avec context de l'historique)
+4. Inject dans la conversation "Today" sidebar (badge unread)
+
+### Notifications
+
+- Badge rouge sur sidebar conversation
+- Push notification PWA si configuré
+- Email digest si user `notif_email_digest = true`
+
+### Anti-spam
+- Cap 1 message proactif / 24h max
+- Skip si user n'a pas ouvert l'app depuis 7 jours (re-engagement séparé)
+- User peut désactiver par watchlist
+
+### UI
+
+```tsx
+<ConversationSidebar>
+  <SectionHeader>Today</SectionHeader>
+  <ProactiveAlertBadge variant="new">
+    <SparkleIcon className="animate-pulse" />
+    <Title>3 alertes du matin</Title>
+    <Subtitle>Acme · Beta Pharma · Carbon Capture</Subtitle>
+    <Time>il y a 14 min</Time>
+  </ProactiveAlertBadge>
+  {/* ... autres conversations */}
+</ConversationSidebar>
+```
+
+---
+
+## Innovation #4 — **Density Mode toggle** (compact / comfortable / spacious)
+
+Bouton dans Settings → adapte la densité de toutes les cards.
+
+### Compact (default Anne mode — 80% des users)
+- TargetCard hauteur 64px
+- 8 cards visibles dans viewport 1080p
+
+### Comfortable
+- TargetCard hauteur 96px
+- 5 cards visibles
+
+### Spacious
+- TargetCard hauteur 128px (présentation client live)
+- 3 cards visibles
+
+```tsx
+const DensityContext = createContext<"compact" | "comfortable" | "spacious">("compact");
+
+<ToggleGroup value={density} onValueChange={setDensity}>
+  <ToggleGroupItem value="compact" aria-label="Compact">⊟</ToggleGroupItem>
+  <ToggleGroupItem value="comfortable" aria-label="Comfortable">⊞</ToggleGroupItem>
+  <ToggleGroupItem value="spacious" aria-label="Spacious">⊠</ToggleGroupItem>
+</ToggleGroup>
+```
+
+---
+
+## Innovation #5 — **Quick replies contextuelles auto-générées**
+
+Après chaque réponse AI, des chips de suggestions apparaissent automatiquement basées sur le contexte de la conversation.
+
+### Exemple
+
+```
+USER: "Top cibles M&A chimie spé IDF"
+
+AI: [retourne 47 cards]
+
+[Quick replies auto-générées par LLM]
+[Affiner par effectif] [Sans procédure collective]
+[Ajouter compliance check] [Voir top 10 dirigeants]
+[Compare top 3] [Export en watchlist]
+```
+
+Click sur un chip → injection automatique dans le prompt suivant.
+
+```tsx
+<QuickReplies>
+  {generatedSuggestions.map(s => (
+    <Chip onClick={() => sendMessage(s.prompt)}>{s.label}</Chip>
+  ))}
+</QuickReplies>
+```
+
+LLM génère ces suggestions en **post-processing** (cheap call, ~50ms) après la réponse principale.
+
+---
+
+## Innovation #6 — **Memory / RAG sur conversations passées**
+
+Le LLM a accès à l'historique des conversations Anne (RAG via embeddings) :
+
+```
+USER: "Tu te souviens de la cible chimie qu'on regardait il y a 2 semaines ?"
+
+AI: Oui, tu travaillais sur Acme Industries SAS (siren 838291045).
+    Voici les nouveautés depuis :
+
+    [Card avec deltas mis en évidence]
+    - Score : 82 → 78 (procédure collective récente)
+    - 1 nouveau dirigeant (Jean Dupont, 26/04/26)
+    - CA n'a pas encore évolué (déposé annuellement)
+
+    Tu veux qu'on poursuive la DD ou on switch vers une autre cible ?
+```
+
+### Stack
+- Vector store (pgvector dans Postgres) — embeddings sentences-transformers
+- À chaque message, embed + insert dans `user_conversation_embeddings`
+- Retrieve top 5 closest avant génération réponse → inject dans prompt
+
+---
+
+## Innovation #7 — **Voice mode** (mobile-first PWA)
+
+Pendant qu'Anne marche entre 2 RDV à La Défense, elle peut **parler** à DEMOEMA depuis son iPhone :
+
+```
+🎙️ Anne (audio) : "Donne-moi le scoring de Capgemini"
+🔊 AI (voice) : "Capgemini score 79, listée CAC40, CA 22 milliards,
+                  pas de red flag majeur. Tu veux la fiche complète ?"
+```
+
+Stack :
+- Web Speech API (mobile)
+- Whisper (transcription serveur fallback)
+- Anthropic Claude voice (output) ou ElevenLabs
+
+---
+
+## Innovation #8 — **Compare mode multi-cibles** (drag&drop ou shift+click)
+
+Anne sélectionne 2-5 cards via shift+click → sticky bouton "Compare 3 cibles" apparait en bas → click ouvre vue Compare inline dans le chat avec table + radar chart 9 dimensions.
+
+```tsx
+<SelectedCardsBar visible={selectedCount > 0}>
+  <span>{selectedCount} cibles sélectionnées</span>
+  <Button onClick={openCompare} variant="primary">
+    Compare {selectedCount} cibles
+  </Button>
+</SelectedCardsBar>
+```
+
+---
+
+## Innovation #9 — **Watchlists collaboratives** (slack-like)
+
+Anne crée "Cibles tech IDF Q3" → partage via lien (`/w/abc123`) avec son équipe. Les notifications signaux M&A sont synchronisées entre tous les membres.
+
+```tsx
+<WatchlistHeader>
+  <Title>Cibles tech IDF Q3</Title>
+  <Members>👤👤👤 +2</Members>
+  <Button onClick={share}>🔗 Partager</Button>
+  <NotificationToggle>🔔 Alertes ON</NotificationToggle>
+</WatchlistHeader>
+```
+
+---
+
+## Innovation #10 — **AI Explainability** (tooltip sur chaque score)
+
+Anne hover sur un `pro_ma_score` → tooltip explique la formule :
+
+```
+┌─ Score 82 ────────────────────┐
+│ +20 has_holding_patrimoniale   │
+│ +15 ca_total = 47M€            │
+│ +10 is_pro_ma (12 mandats)     │
+│ +10 has_cession_recente        │
+│ +5  has_press_buzz             │
+│ -3  contentieux récent (1 jug.)│
+│ -5  age dirigeant 65+ (Tier 2) │
+│ ─────────────────────────────  │
+│ = 82 / 100                     │
+│ [Voir détail formule complète] │
+└────────────────────────────────┘
+```
+
+Stack : tooltip Radix UI + breakdown JSONB stocké dans `gold.entreprises_master.score_breakdown`.
+
+---
+
+## 🎯 Résumé des 10 innovations à intégrer
+
+| # | Innovation | Effort | Impact |
+|---|---|:---:|:---:|
+| 1 | Adaptive UI (shortcuts personnalisés) | M | 🔥🔥 |
+| 2 | Pitch Ready PDF en 1 clic | L | 🔥🔥🔥 |
+| 3 | Proactive alerts conversationnelles | M | 🔥🔥🔥 |
+| 4 | Density mode toggle | S | 🔥 |
+| 5 | Quick replies auto-générées | S | 🔥🔥 |
+| 6 | Memory / RAG conversations passées | M | 🔥🔥 |
+| 7 | Voice mode PWA mobile | L | 🔥 |
+| 8 | Compare mode multi-cibles | S | 🔥🔥 |
+| 9 | Watchlists collaboratives | M | 🔥🔥 |
+| 10 | AI Explainability tooltip scores | S | 🔥 (mais critique pour trust) |
+
+**Priorisation** :
+- **MVP v1** : #2 Pitch Ready + #3 Proactive alerts + #5 Quick replies + #10 AI Explainability
+- **MVP v2** : #1 Adaptive UI + #6 Memory + #8 Compare mode
+- **v3+** : #4 Density + #7 Voice + #9 Watchlists collaboratives
+
+Ces 10 innovations + le design system glassmorphism futuriste = **moat concurrentiel** vs Mergermarket / Dealogic / PitchBook.
