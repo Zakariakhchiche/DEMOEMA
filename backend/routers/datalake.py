@@ -1937,10 +1937,19 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
 
     extra_where = (" AND " + " AND ".join(post_where)) if post_where else ""
 
-    # JOIN enrichi : insee_unites_legales (NAF + categorie_juridique) + insee_etablissements
-    # (siège : code_postal + commune + dept) + inpi_dirigeants top1 (PDG/manager M&A).
-    # Cela remplit naf / naf_libelle / forme_juridique / dept / ville / top_dirigeant_*
-    # qui étaient null jusqu'ici (Compare et Chat affichent ces champs).
+    # JOIN conditionnel : silver.entreprises_signals expose naf/forme/ville/dept,
+    # mais la table peut ne pas exister encore (silver_bootstrap en cours).
+    # On la JOIN seulement si elle existe — sinon les colonnes sont NULL et l'UI
+    # affiche un placeholder. Frontend reste sur le contrat silver+.
+    has_es = await _table_exists(pool, "silver", "entreprises_signals")
+    es_join_clause = "LEFT JOIN silver.entreprises_signals es ON es.siren = lc.siren" if has_es else ""
+    es_naf = "es.code_ape" if has_es else "NULL::text"
+    es_forme = "es.forme_juridique" if has_es else "NULL::text"
+    es_date_creation = "es.date_immatriculation" if has_es else "NULL::date"
+    es_cp = "es.adresse_code_postal" if has_es else "NULL::text"
+    es_ville = "es.adresse_commune" if has_es else "NULL::text"
+    es_dept = "COALESCE(es.adresse_dept, LEFT(es.adresse_code_postal, 2))" if has_es else "NULL::text"
+
     sql = f"""
         WITH last_compte AS (
             SELECT DISTINCT ON (c.siren) c.siren, c.denomination,
@@ -1953,17 +1962,13 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
             LIMIT {int(limit) * 4}
         ),
         enriched AS (
-            -- INTERDICTION : ne jamais lire bronze.* pour servir le frontend.
-            -- Le frontend reste strictement sur silver+ contract.
-            -- silver.entreprises_signals (yaml enrichi) expose naf/forme/ville/dept.
-            -- Si la table est lockée par silver_bootstrap → null + UI placeholder.
             SELECT lc.*,
-                   es.code_ape AS naf,
-                   es.forme_juridique AS forme_juridique,
-                   es.date_immatriculation AS date_creation_unite,
-                   es.adresse_code_postal AS adresse_code_postal,
-                   es.adresse_commune AS ville_sirene,
-                   COALESCE(es.adresse_dept, LEFT(es.adresse_code_postal, 2)) AS dept_sirene,
+                   {es_naf} AS naf,
+                   {es_forme} AS forme_juridique,
+                   {es_date_creation} AS date_creation_unite,
+                   {es_cp} AS adresse_code_postal,
+                   {es_ville} AS ville_sirene,
+                   {es_dept} AS dept_sirene,
                    (SELECT b.code_dept FROM silver.bodacc_annonces b
                     WHERE b.siren = lc.siren AND b.code_dept IS NOT NULL
                     ORDER BY b.date_parution DESC LIMIT 1) AS dept_bodacc,
@@ -1971,7 +1976,7 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
                     WHERE b.siren = lc.siren AND b.ville IS NOT NULL
                     ORDER BY b.date_parution DESC LIMIT 1) AS ville_bodacc
             FROM last_compte lc
-            LEFT JOIN silver.entreprises_signals es ON es.siren = lc.siren
+            {es_join_clause}
         )
         SELECT siren,
                denomination,
