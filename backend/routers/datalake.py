@@ -55,11 +55,17 @@ async def introspect(req: Request, schema: str | None = None, table: str | None 
     """Liste toutes les tables (et colonnes si table=...) du datalake."""
     pool = _pool(req)
     if schema and table:
+        # pg_attribute est plus permissif que information_schema (qui peut filtrer
+        # selon les GRANTs visibles à l'utilisateur connecté).
         rows = await pool.fetch(
-            """SELECT column_name, data_type
-               FROM information_schema.columns
-               WHERE table_schema = $1 AND table_name = $2
-               ORDER BY ordinal_position""",
+            """SELECT a.attname AS column_name,
+                      format_type(a.atttypid, a.atttypmod) AS data_type
+               FROM pg_attribute a
+               JOIN pg_class c ON c.oid = a.attrelid
+               JOIN pg_namespace n ON n.oid = c.relnamespace
+               WHERE n.nspname = $1 AND c.relname = $2
+                 AND a.attnum > 0 AND NOT a.attisdropped
+               ORDER BY a.attnum""",
             schema,
             table,
         )
@@ -81,16 +87,12 @@ async def introspect(req: Request, schema: str | None = None, table: str | None 
 
 @router.get("/tables")
 async def list_tables(req: Request):
-    """Liste les tables gold + silver presse + counts (head only). Query info_schema
-    pour vérifier que la table existe physiquement avant de la renvoyer — évite
-    de proposer des tables qui ne sont pas encore matérialisées."""
+    """Liste les tables whitelistées qui existent physiquement (pg_class)."""
     pool = _pool(req)
     rows = await pool.fetch(
-        """
-        SELECT table_schema || '.' || table_name AS name
-        FROM information_schema.tables
-        WHERE table_schema IN ('gold', 'silver')
-        """
+        """SELECT n.nspname || '.' || c.relname AS name
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE c.relkind IN ('r','m','p') AND n.nspname IN ('gold','silver')"""
     )
     existing = {r["name"] for r in rows}
     out = []
@@ -457,8 +459,8 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
 async def _table_exists(pool: asyncpg.Pool, schema: str, table: str) -> bool:
     return bool(
         await pool.fetchval(
-            """SELECT 1 FROM information_schema.tables
-               WHERE table_schema = $1 AND table_name = $2""",
+            """SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+               WHERE n.nspname = $1 AND c.relname = $2 AND c.relkind IN ('r','m','p')""",
             schema,
             table,
         )
