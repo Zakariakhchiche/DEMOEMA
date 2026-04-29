@@ -201,84 +201,129 @@ async def fiche_entreprise(req: Request, siren: str):
             "SELECT * FROM gold.entreprises_master WHERE siren = $1", siren
         )
     if not fiche:
-        # JOIN inpi_comptes (CA/EBITDA) + osint_companies (NAF/dept/forme/
-        # capital/domain/linkedin) + bodacc (loc fallback) + counts agrégés.
-        fiche = await pool.fetchrow(
-            """WITH last_compte AS (
-                  SELECT DISTINCT ON (siren) siren, denomination,
-                         ca_net, resultat_net, capitaux_propres,
-                         effectif_moyen::int AS effectif_exact,
-                         date_cloture
-                  FROM silver.inpi_comptes
-                  WHERE siren = $1
-                  ORDER BY siren, date_cloture DESC
-               ),
-               history AS (
-                  SELECT array_agg(ca_net::float8 ORDER BY date_cloture) FILTER (WHERE ca_net IS NOT NULL) AS ca_history,
-                         array_agg(date_cloture ORDER BY date_cloture) FILTER (WHERE ca_net IS NOT NULL) AS exercices
-                  FROM (
-                      SELECT DISTINCT ON (date_cloture) date_cloture, ca_net
-                      FROM silver.inpi_comptes
-                      WHERE siren = $1
-                      ORDER BY date_cloture DESC
-                      LIMIT 5
-                  ) h
-               ),
-               loc AS (
-                  SELECT code_dept AS dept, ville, region
-                  FROM silver.bodacc_annonces
-                  WHERE siren = $1 AND code_dept IS NOT NULL
-                  ORDER BY date_parution DESC LIMIT 1
-               ),
-               osint AS (
-                  SELECT siren, code_ape AS naf,
-                         forme_juridique,
-                         montant_capital AS capital_social,
-                         adresse_code_postal,
-                         date_immatriculation,
-                         primary_domain,
-                         has_linkedin_page, has_github_org,
-                         linkedin_employees, digital_presence_score
-                  FROM silver.osint_companies_enriched
-                  WHERE siren = $1
-               ),
-               counts AS (
-                  SELECT
-                    (SELECT COUNT(*)::int FROM silver.inpi_dirigeants WHERE $1::char(9) = ANY(sirens_mandats)) AS n_dirigeants,
-                    (SELECT COUNT(*)::int FROM silver.bodacc_annonces WHERE siren = $1) AS n_bodacc,
-                    (SELECT COUNT(*)::int FROM silver.opensanctions WHERE $1 = ANY(sirens_fr)) AS n_sanctions
-               )
-               SELECT lc.siren,
-                      lc.denomination,
-                      lc.ca_net AS ca_dernier,
-                      lc.resultat_net AS ebitda_dernier,
-                      lc.capitaux_propres,
-                      lc.effectif_exact,
-                      lc.date_cloture AS date_derniers_comptes,
-                      CASE
-                        WHEN lc.ca_net IS NOT NULL AND lc.ca_net > 0 AND lc.resultat_net IS NOT NULL
-                        THEN ROUND((lc.resultat_net::numeric / lc.ca_net) * 100, 1)
-                        ELSE NULL
-                      END AS marge_pct,
-                      o.naf,
-                      o.forme_juridique,
-                      o.capital_social,
-                      o.adresse_code_postal,
-                      EXTRACT(YEAR FROM o.date_immatriculation)::int AS annee_creation,
-                      o.primary_domain, o.has_linkedin_page, o.has_github_org,
-                      o.linkedin_employees, o.digital_presence_score,
-                      COALESCE(LEFT(o.adresse_code_postal, 2), l.dept) AS dept,
-                      l.ville, l.region,
-                      h.ca_history, h.exercices,
-                      cnt.n_dirigeants, cnt.n_bodacc, cnt.n_sanctions,
-                      'actif' AS statut
-               FROM last_compte lc
-               LEFT JOIN loc l ON true
-               LEFT JOIN osint o ON true
-               CROSS JOIN history h
-               CROSS JOIN counts cnt""",
+        # Multi-query approach : chaque source séparée avec timeout court.
+        # Si une table est lente/locked, on remplit avec NULL au lieu de tout
+        # bloquer. Plus robuste qu'un mega-CTE.
+        import asyncio as _asyncio
+
+        async def _safe(coro, timeout_s: float = 4.0, default=None):
+            try:
+                return await _asyncio.wait_for(coro, timeout=timeout_s)
+            except (_asyncio.TimeoutError, Exception) as e:
+                print(f"[fiche] sub-query failed: {type(e).__name__}: {str(e)[:80]}")
+                return default
+
+        # 1. INPI comptes (rapide, PK siren)
+        compte = await pool.fetchrow(
+            """SELECT DISTINCT ON (siren) siren, denomination,
+                      ca_net, resultat_net, capitaux_propres,
+                      effectif_moyen::int AS effectif_exact,
+                      date_cloture
+               FROM silver.inpi_comptes
+               WHERE siren = $1
+               ORDER BY siren, date_cloture DESC""",
             siren,
         )
+        if not compte:
+            raise HTTPException(status_code=404, detail=f"SIREN {siren} introuvable dans silver.inpi_comptes")
+
+        # 2. CA history (5 derniers exercices)
+        history = await _safe(pool.fetch(
+            """SELECT date_cloture, ca_net::float8 AS ca
+               FROM (SELECT DISTINCT ON (date_cloture) date_cloture, ca_net
+                     FROM silver.inpi_comptes
+                     WHERE siren = $1 ORDER BY date_cloture DESC LIMIT 5) h
+               WHERE ca_net IS NOT NULL ORDER BY date_cloture""",
+            siren,
+        ), default=[])
+
+        # 3. Localisation bodacc (rapide, indexé siren)
+        loc = await _safe(pool.fetchrow(
+            """SELECT code_dept AS dept, ville, region
+               FROM silver.bodacc_annonces
+               WHERE siren = $1 AND code_dept IS NOT NULL
+               ORDER BY date_parution DESC LIMIT 1""",
+            siren,
+        ))
+
+        # 4. OSINT enrichment (NAF, forme, capital, domain, linkedin)
+        osint = await _safe(pool.fetchrow(
+            """SELECT code_ape AS naf, forme_juridique,
+                      montant_capital AS capital_social,
+                      adresse_code_postal,
+                      EXTRACT(YEAR FROM date_immatriculation)::int AS annee_creation,
+                      primary_domain, has_linkedin_page, has_github_org,
+                      linkedin_employees, digital_presence_score, tech_stack
+               FROM silver.osint_companies_enriched WHERE siren = $1""",
+            siren,
+        ), timeout_s=6.0)
+
+        # 5. INSEE unites_legales (sigle, secteur)
+        insee = await _safe(pool.fetchrow(
+            """SELECT denomination_unite, sigle, code_ape, categorie_juridique,
+                      categorie_entreprise, tranche_effectifs, date_creation,
+                      date_derniere_maj
+               FROM silver.insee_unites_legales WHERE siren = $1""",
+            siren,
+        ))
+
+        # 6. Counts agrégés (séparés pour timeout indépendant)
+        n_dirigeants = await _safe(pool.fetchval(
+            "SELECT COUNT(*)::int FROM silver.inpi_dirigeants WHERE $1::char(9) = ANY(sirens_mandats)",
+            siren,
+        ), default=0)
+        n_bodacc = await _safe(pool.fetchval(
+            "SELECT COUNT(*)::int FROM silver.bodacc_annonces WHERE siren = $1",
+            siren,
+        ), default=0)
+        n_sanctions = await _safe(pool.fetchval(
+            "SELECT COUNT(*)::int FROM silver.opensanctions WHERE $1 = ANY(sirens_fr)",
+            siren,
+        ), default=0)
+
+        # Agrégation finale
+        ca_history = [r["ca"] for r in (history or [])]
+        exercices = [r["date_cloture"].isoformat() for r in (history or [])]
+
+        ca_net = float(compte["ca_net"]) if compte["ca_net"] is not None else None
+        resultat = float(compte["resultat_net"]) if compte["resultat_net"] is not None else None
+        marge_pct = round((resultat / ca_net) * 100, 1) if ca_net and ca_net > 0 and resultat is not None else None
+
+        fiche = {
+            "siren": compte["siren"],
+            "denomination": compte["denomination"] or (insee["denomination_unite"] if insee else None),
+            "sigle": insee["sigle"] if insee else None,
+            "ca_dernier": compte["ca_net"],
+            "ebitda_dernier": compte["resultat_net"],
+            "capitaux_propres": compte["capitaux_propres"],
+            "effectif_exact": compte["effectif_exact"],
+            "tranche_effectifs": insee["tranche_effectifs"] if insee else None,
+            "date_derniers_comptes": compte["date_cloture"].isoformat() if compte["date_cloture"] else None,
+            "marge_pct": marge_pct,
+            "naf": (osint["naf"] if osint else None) or (insee["code_ape"] if insee else None),
+            "forme_juridique": (osint["forme_juridique"] if osint else None) or (insee["categorie_juridique"] if insee else None),
+            "capital_social": osint["capital_social"] if osint else None,
+            "adresse_code_postal": osint["adresse_code_postal"] if osint else None,
+            "annee_creation": (osint["annee_creation"] if osint and osint["annee_creation"] else None) or (
+                int(str(insee["date_creation"])[:4]) if insee and insee["date_creation"] else None
+            ),
+            "primary_domain": osint["primary_domain"] if osint else None,
+            "has_linkedin_page": osint["has_linkedin_page"] if osint else None,
+            "has_github_org": osint["has_github_org"] if osint else None,
+            "linkedin_employees": osint["linkedin_employees"] if osint else None,
+            "digital_presence_score": osint["digital_presence_score"] if osint else None,
+            "categorie_entreprise": insee["categorie_entreprise"] if insee else None,
+            "dept": (osint["adresse_code_postal"][:2] if osint and osint["adresse_code_postal"] else None) or (loc["dept"] if loc else None),
+            "ville": loc["ville"] if loc else None,
+            "region": loc["region"] if loc else None,
+            "ca_history": ca_history,
+            "exercices": exercices,
+            "n_dirigeants": n_dirigeants or 0,
+            "n_bodacc": n_bodacc or 0,
+            "n_sanctions": n_sanctions or 0,
+            "statut": "actif",
+        }
+    # Si fiche est un dict (multi-query path) on skip le check ci-dessous.
     if not fiche:
         raise HTTPException(status_code=404, detail=f"SIREN {siren} introuvable")
 
@@ -362,7 +407,7 @@ async def fiche_entreprise(req: Request, siren: str):
     presse: list = []
 
     return {
-        "fiche": _serialize(fiche),
+        "fiche": _serialize(fiche) if hasattr(fiche, "items") and not isinstance(fiche, dict) else fiche,
         "dirigeants": [_serialize(d) for d in dirigeants],
         "signaux": [_serialize(s) for s in signaux],
         "red_flags": [_serialize(r) for r in red_flags],
