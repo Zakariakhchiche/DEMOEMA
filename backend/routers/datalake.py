@@ -1229,7 +1229,13 @@ async def groupe_filiation(req: Request, siren: str):
         siren,
     ))
 
-    # 2. Maison mere via INPI : si X est siren, qui dirige X comme PM ?
+    # Codes role INPI capital (vraies meres/filiales — pas commissaires comptes 71-75) :
+    #   30 = associe / actionnaire     11 = represent. PM (president PM)
+    #   29 = societe liee              40 = representant permanent
+    #   99 = autre (peut inclure capital, on garde par defaut)
+    CAPITAL_ROLES = ["30", "11", "29", "40", "99"]
+
+    # 2. Maison mere via INPI : qui detient X au capital (PM dirigeante) ?
     meres_rows = await _safe(pool.fetch(
         """SELECT DISTINCT
               entreprise_siren AS mere_siren,
@@ -1242,11 +1248,12 @@ async def groupe_filiation(req: Request, siren: str):
              AND COALESCE(actif, true) = true
              AND entreprise_siren IS NOT NULL
              AND entreprise_siren != $1
+             AND entreprise_role_entreprise = ANY($2::text[])
            LIMIT 10""",
-        siren,
+        siren, CAPITAL_ROLES,
     ), default=[])
 
-    # 3. Filiales via INPI : qui a X comme entreprise dirigeante PM ?
+    # 3. Filiales via INPI : qui a X au capital (PM dirigeante) ?
     filiales_rows = await _safe(pool.fetch(
         """SELECT DISTINCT
               p.siren AS filiale_siren,
@@ -1258,11 +1265,12 @@ async def groupe_filiation(req: Request, siren: str):
            FROM bronze.inpi_formalites_personnes p
            LEFT JOIN bronze.inpi_formalites_entreprises e ON e.siren = p.siren
            WHERE p.entreprise_siren = $1
-             AND p.UPPER(type_de_personne) = 'ENTREPRISE'
+             AND UPPER(p.type_de_personne) = 'ENTREPRISE'
              AND COALESCE(p.actif, true) = true
              AND p.siren != $1
+             AND p.entreprise_role_entreprise = ANY($2::text[])
            LIMIT 50""",
-        siren,
+        siren, CAPITAL_ROLES,
     ), default=[])
 
     # 4. Evenements groupe (BODACC fusion / absorption / prise participation)
