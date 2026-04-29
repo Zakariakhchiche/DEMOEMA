@@ -59,14 +59,15 @@ class Settings(BaseSettings):
     # Codegen silver — parallélisme PAR NIVEAU topologique. À chaque niveau du DAG
     # (silvers indépendants entre eux), on lance jusqu'à N codegen+apply en parallèle :
     # N appels LLM concurrents (lead-data-engineer) + N DROP/CREATE MV concurrents en
-    # base. Default 4 calé sur :
-    #   - rate limit Ollama Cloud Pro (~10 req/s, on en consomme 4 pour ~5min/silver)
-    #   - DeepSeek (50 req/min, idem)
-    #   - VPS 16 vCPU + 62 GB RAM = capable d'absorber 4 CREATE MV concurrents
-    #     (chaque MV est I/O bound sur scan bronze, pas CPU)
-    # Bumper à 6-8 si on observe que les LLM saturent rarement le pipeline.
+    # base. Default 12 calé sur :
+    #   - DeepSeek 60 req/s officiel + nous consommons ~1 req/silver (codegen one-shot)
+    #     → 12 concurrent largement sous le cap, fallback automatique si Ollama 429/504
+    #   - VPS 16 vCPU + 62 GB RAM absorbe sans souci 12 CREATE MV concurrents
+    #     (I/O bound sur scan bronze, pas CPU)
+    #   - Bootstrap initial passe d'~1h (parallelism=4) à ~10-15min (parallelism=12)
+    # Pour réduire si LLM provider sous-dimensionné : SILVER_CODEGEN_PARALLELISM=4 en env.
     silver_codegen_parallelism: int = Field(
-        default=4,
+        default=12,
         description="Codegen silver par niveau topologique : N agents LLM + N applies concurrents",
     )
     # Bronze codegen — parallélisme du tick bronze_bootstrap qui génère les
