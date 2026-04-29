@@ -339,15 +339,10 @@ async def fiche_entreprise(req: Request, siren: str):
         siren,
     ) if await _table_exists(pool, "silver", "inpi_dirigeants") else []
 
-    # Presse matchée
-    presse = await pool.fetch(
-        """SELECT published_at, source, title, url, ma_signal_type
-           FROM silver.press_mentions_matched
-           WHERE siren = $1
-           ORDER BY published_at DESC
-           LIMIT 10""",
-        siren,
-    ) if await _table_exists(pool, "silver", "press_mentions_matched") else []
+    # Presse matchée — skipped : silver.press_mentions_matched est actuellement
+    # vide (0 rows) ET son prepare() timeout aléatoirement (table state weird).
+    # Ré-activera quand le scraper press_mentions_matched aura ingéré.
+    presse: list = []
 
     return {
         "fiche": _serialize(fiche),
