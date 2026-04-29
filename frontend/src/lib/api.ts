@@ -204,7 +204,7 @@ export const datalakeApi = {
         created_at: string;
       }[];
       notice?: string;
-    }>(`/api/datalake/audit/log?limit=${limit}`),
+    }>(`/api/datalake/agent-actions?limit=${limit}`),
 
   auditFreshness: () =>
     jget<{
@@ -219,7 +219,7 @@ export const datalakeApi = {
         completeness_pct: number | null;
         retry_count: number;
       }[];
-    }>(`/api/datalake/audit/freshness`),
+    }>(`/api/datalake/source-health`),
 };
 
 // ───── Copilot SSE streaming ──────────────────────────────────────────

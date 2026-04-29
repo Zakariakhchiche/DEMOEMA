@@ -501,7 +501,7 @@ async def pipeline(req: Request):
     }
 
 
-@router.get("/audit/log")
+@router.get("/agent-actions")
 async def audit_log(req: Request, limit: int = Query(50, ge=1, le=200)):
     """Audit log live depuis audit.agent_actions (4k+ entries) — actions des
     agents codegen + ingest sur les sources."""
@@ -522,7 +522,7 @@ async def audit_log(req: Request, limit: int = Query(50, ge=1, le=200)):
     return {"entries": [_serialize(r) for r in rows]}
 
 
-@router.get("/audit/freshness")
+@router.get("/source-health")
 async def audit_freshness(req: Request):
     """Statut santé des sources bronze/silver — last success, sla, completeness."""
     pool = _pool(req)
