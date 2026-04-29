@@ -1,0 +1,55 @@
+silver_name: silver.hatvp_lobbying
+goal: >
+  Représentants d'intérêts (lobbyistes) inscrits à la HATVP — Haute Autorité pour
+  la Transparence de la Vie Publique. Signal de transparence (PAS un red flag) :
+  une cible inscrite indique une activité de lobbying déclarée auprès de l'État.
+  Pertinent pour DD M&A pour mesurer l'exposition réglementaire.
+
+source_tables:
+  - bronze.hatvp_representants_raw
+
+grain: "1 row par representant_id (siren peut avoir plusieurs représentants)"
+
+key_columns:
+  - representant_id
+  - siren
+
+business_logic: |
+  Bronze a déjà siren (char(9)) natif → simple normalisation + agrégation.
+
+  Silver expose :
+  - siren, denomination
+  - secteur_activite (Banque/Assurance/Tech/Pharma/Énergie/etc.)
+  - date_inscription
+  - adresse_ville
+  - nb_deputes (nombre de représentants HATVP au nom de cette entité)
+  - chiffre_affaires_lobbying (CA déclaré pour activité de lobbying)
+  - has_active_lobbying = (date_inscription >= CURRENT_DATE - INTERVAL '2 years')
+
+  Pas de match nécessaire — siren déjà présent en bronze.
+
+transformations: |
+  SELECT
+    representant_id,
+    siren,
+    denomination,
+    secteur_activite,
+    date_inscription,
+    adresse_ville,
+    nb_deputes,
+    chiffre_affaires_lobbying,
+    (date_inscription >= CURRENT_DATE - INTERVAL '2 years') AS has_active_lobbying,
+    payload,
+    ingested_at
+  FROM bronze.hatvp_representants_raw
+  WHERE siren IS NOT NULL;
+
+indexes:
+  - representant_id
+  - siren
+  - secteur_activite
+  - date_inscription
+  - "has_active_lobbying"
+
+refresh_trigger: "interval_hours=168"
+sla_minutes: 10080

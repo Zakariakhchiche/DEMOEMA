@@ -92,7 +92,7 @@ async def list_tables(req: Request):
     rows = await pool.fetch(
         """SELECT n.nspname || '.' || c.relname AS name
            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-           WHERE c.relkind IN ('r','m','p') AND n.nspname IN ('gold','silver','bronze')"""
+           WHERE c.relkind IN ('r','m','p') AND n.nspname IN ('gold','silver')"""
     )
     existing = {r["name"] for r in rows}
     out = []
@@ -544,138 +544,38 @@ async def fiche_entreprise(req: Request, siren: str):
         except Exception as e:
             print(f"[fiche] BODACC live API failed: {type(e).__name__}: {str(e)[:80]}")
 
-    # Compliance — match multi-source par siren ET denomination :
-    #   1. silver.opensanctions WHERE siren ∈ sirens_fr OR caption ILIKE deno
-    #      (couvre PEP, sanctions UE/US/UN/UK, ICIJ Pandora/Paradise/Panama)
-    #   2. bronze.dgccrf_sanctions_raw WHERE entreprise ILIKE deno
-    #      (sanctions Direction Générale Concurrence Consommation Répression Fraudes France)
-    #   3. bronze.cnil_sanctions_raw via payload->>'organisme' ILIKE deno
-    #      (sanctions RGPD CNIL France)
+    # Compliance — UNIQUEMENT via silver.sanctions (table unifiée AMF + OpenSanctions
+    # + ICIJ + DGCCRF + CNIL). Le backend ne touche PAS bronze.
     deno_for_match = (fiche.get("denomination") if isinstance(fiche, dict) else None) or ""
 
     red_flags: list = []
-
-    # --- 1. OpenSanctions ---
-    if await _table_exists(pool, "silver", "opensanctions") and deno_for_match:
-        os_rows = await _safe(pool.fetch(
-            """SELECT entity_id, caption, schema, topics, countries,
-                      sanctions_programs, first_seen, last_seen,
-                      'opensanctions' AS _source,
-                      CASE
-                        WHEN $1 = ANY(sirens_fr) THEN 'siren_match'
-                        WHEN caption ILIKE $2 THEN 'name_match'
-                        ELSE 'alias_match'
-                      END AS _match_type
-               FROM silver.opensanctions
-               WHERE $1 = ANY(sirens_fr)
-                  OR caption ILIKE $2
-                  OR EXISTS(SELECT 1 FROM unnest(alias_names) a WHERE a ILIKE $2)
-               LIMIT 20""",
-            siren, deno_for_match,
+    if deno_for_match and await _table_exists(pool, "silver", "sanctions"):
+        red_flags_rows = await _safe(pool.fetch(
+            """SELECT sanction_uid AS entity_id,
+                      entreprise AS caption,
+                      type_decision AS schema,
+                      topics,
+                      countries,
+                      ARRAY[type_decision, motif]::text[] AS sanctions_programs,
+                      date_decision AS first_seen,
+                      date_decision AS last_seen,
+                      source AS _source,
+                      CASE WHEN siren = $2 THEN 'siren_match' ELSE 'name_match' END AS _match_type,
+                      severity,
+                      montant_amende,
+                      jurisdiction
+               FROM silver.sanctions
+               WHERE siren = $2 OR entity_lower ILIKE $1
+               ORDER BY
+                 CASE severity
+                   WHEN 'critical' THEN 1 WHEN 'high' THEN 2
+                   WHEN 'medium'   THEN 3 WHEN 'low'  THEN 4
+                 END,
+                 date_decision DESC NULLS LAST
+               LIMIT 50""",
+            deno_for_match.lower(), siren,
         ), default=[])
-        red_flags.extend([dict(r) for r in os_rows])
-
-    # --- 2. DGCCRF (sanctions France) ---
-    if deno_for_match:
-        dgccrf_exists = await pool.fetchval(
-            """SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-               WHERE n.nspname = 'bronze' AND c.relname = 'dgccrf_sanctions_raw'""",
-        )
-        if dgccrf_exists:
-            dg_rows = await _safe(pool.fetch(
-                """SELECT sanction_id AS entity_id,
-                          entreprise AS caption,
-                          'CommercePractice' AS schema,
-                          ARRAY['sanction','dgccrf']::text[] AS topics,
-                          ARRAY['fr']::text[] AS countries,
-                          ARRAY[motif]::text[] AS sanctions_programs,
-                          date_decision AS first_seen,
-                          date_decision AS last_seen,
-                          'dgccrf' AS _source,
-                          'name_match' AS _match_type,
-                          montant_amende
-                   FROM bronze.dgccrf_sanctions_raw
-                   WHERE entreprise ILIKE $1""",
-                deno_for_match,
-            ), default=[])
-            red_flags.extend([dict(r) for r in dg_rows])
-
-    # --- 3. AMF DILA (décisions/sanctions AMF — 29k entrées) ---
-    if deno_for_match:
-        amf_exists = await pool.fetchval(
-            """SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-               WHERE n.nspname = 'bronze' AND c.relname = 'amf_dila_raw'""",
-        )
-        if amf_exists:
-            amf_rows = await _safe(pool.fetch(
-                """SELECT decision_id AS entity_id,
-                          COALESCE(payload->>'entreprise', payload->>'denomination',
-                                   payload->>'societe', payload->>'titre') AS caption,
-                          'AMFDecision' AS schema,
-                          ARRAY['sanction','amf']::text[] AS topics,
-                          ARRAY['fr']::text[] AS countries,
-                          ARRAY[COALESCE(payload->>'type_sanction', payload->>'motif',
-                                         payload->>'nature')]::text[] AS sanctions_programs,
-                          (payload->>'date_decision')::date AS first_seen,
-                          ingested_at AS last_seen,
-                          'amf' AS _source,
-                          'name_match' AS _match_type
-                   FROM bronze.amf_dila_raw
-                   WHERE COALESCE(payload->>'entreprise', payload->>'denomination',
-                                  payload->>'societe', payload->>'titre', '') ILIKE $1
-                   LIMIT 10""",
-                deno_for_match,
-            ), default=[])
-            red_flags.extend([dict(r) for r in amf_rows])
-
-    # --- 4. ICIJ Offshore (Pandora/Paradise/Panama leaks) ---
-    if deno_for_match:
-        icij_exists = await pool.fetchval(
-            """SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-               WHERE n.nspname = 'bronze' AND c.relname = 'icij_offshore_raw'""",
-        )
-        if icij_exists:
-            icij_rows = await _safe(pool.fetch(
-                """SELECT node_id AS entity_id,
-                          name AS caption,
-                          'OffshoreEntity' AS schema,
-                          ARRAY['icij','offshore', source_leak]::text[] AS topics,
-                          ARRAY[country]::text[] AS countries,
-                          ARRAY[role]::text[] AS sanctions_programs,
-                          NULL::date AS first_seen,
-                          ingested_at AS last_seen,
-                          'icij' AS _source,
-                          'name_match' AS _match_type
-                   FROM bronze.icij_offshore_raw
-                   WHERE name ILIKE $1
-                   LIMIT 10""",
-                deno_for_match,
-            ), default=[])
-            red_flags.extend([dict(r) for r in icij_rows])
-
-    # --- 5. CNIL (sanctions RGPD France) ---
-    if deno_for_match:
-        cnil_exists = await pool.fetchval(
-            """SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-               WHERE n.nspname = 'bronze' AND c.relname = 'cnil_sanctions_raw'""",
-        )
-        if cnil_exists:
-            cnil_rows = await _safe(pool.fetch(
-                """SELECT sanction_id AS entity_id,
-                          COALESCE(payload->>'organisme', payload->>'entreprise', payload->>'nom') AS caption,
-                          'RGPDViolation' AS schema,
-                          ARRAY['sanction','cnil','rgpd']::text[] AS topics,
-                          ARRAY['fr']::text[] AS countries,
-                          ARRAY[COALESCE(payload->>'motif', payload->>'manquement')]::text[] AS sanctions_programs,
-                          (payload->>'date')::date AS first_seen,
-                          ingested_at AS last_seen,
-                          'cnil' AS _source,
-                          'name_match' AS _match_type
-                   FROM bronze.cnil_sanctions_raw
-                   WHERE COALESCE(payload->>'organisme', payload->>'entreprise', '') ILIKE $1""",
-                deno_for_match,
-            ), default=[])
-            red_flags.extend([dict(r) for r in cnil_rows])
+        red_flags = [dict(r) for r in red_flags_rows]
 
     # Réseau — co-mandats : silver.inpi_dirigeants (top 3 dirigeants → autres
     # sirens). Fallback : dirigeants gouv API qui ont un siren (personnes morales).
@@ -748,20 +648,16 @@ async def fiche_entreprise(req: Request, siren: str):
         except Exception as e:
             print(f"[fiche] Google News RSS failed: {type(e).__name__}: {str(e)[:80]}")
 
-    # HATVP — registre des représentants d'intérêts (lobbying). Ce n'est pas
-    # une sanction mais un signal de transparence : présence = entreprise
-    # déclarée comme lobbyiste auprès de l'État.
+    # HATVP — registre des représentants d'intérêts (lobbying). Source silver
+    # uniquement (backend interdiction de toucher bronze).
     hatvp = await _safe(pool.fetchrow(
         """SELECT representant_id, denomination, secteur_activite,
                   date_inscription, adresse_ville, nb_deputes,
-                  chiffre_affaires_lobbying
-           FROM bronze.hatvp_representants_raw
+                  chiffre_affaires_lobbying, has_active_lobbying
+           FROM silver.hatvp_lobbying
            WHERE siren = $1::char(9) LIMIT 1""",
         siren,
-    )) if await pool.fetchval(
-        """SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-           WHERE n.nspname = 'bronze' AND c.relname = 'hatvp_representants_raw'"""
-    ) else None
+    )) if await _table_exists(pool, "silver", "hatvp_lobbying") else None
 
     # Synchronise les compteurs avec les données réellement fetched (silver + fallbacks)
     if isinstance(fiche, dict):

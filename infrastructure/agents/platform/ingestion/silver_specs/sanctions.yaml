@@ -1,0 +1,179 @@
+silver_name: silver.sanctions
+goal: >
+  🔑 TABLE UNIFIÉE compliance/red-flags toutes sources françaises et internationales.
+  UNION ALL des silver existants : AMF (silver.amf_signals), OpenSanctions
+  (silver.opensanctions), ICIJ Offshore (silver.icij_offshore_match), DGCCRF
+  (silver.dgccrf_sanctions), CNIL (silver.cnil_sanctions). Une seule table à
+  interroger côté API pour la fiche compliance — siren matché partout via
+  inpi_comptes.
+
+source_tables:
+  - silver.amf_signals
+  - silver.opensanctions
+  - silver.icij_offshore_match
+  - silver.dgccrf_sanctions
+  - silver.cnil_sanctions
+
+grain: "1 row par sanction_uid"
+
+key_columns:
+  - sanction_uid
+  - source
+  - siren
+  - entity_lower
+
+business_logic: |
+  Schéma unifié pour toutes les sources sanctions/red-flags :
+
+  | Colonne          | Type            | Description                                    |
+  |------------------|-----------------|------------------------------------------------|
+  | sanction_uid     | text PK         | id stable cross-sources                        |
+  | source           | text NOT NULL   | 'amf' | 'opensanctions' | 'icij' | 'dgccrf' | 'cnil' |
+  | entity_id        | text            | id natif source                                |
+  | siren            | char(9)         | siren matché ou natif (nullable)               |
+  | entreprise       | text            | nom display                                    |
+  | entity_lower     | text NOT NULL   | lower(unaccent(entreprise)) pour trgm          |
+  | date_decision    | date            | date sanction (nullable)                       |
+  | type_decision    | text            | sanction|mise_en_garde|liste_noire|offshore|etc.|
+  | motif            | text            | raison/manquement/programme                    |
+  | montant_amende   | numeric         | montant € (DGCCRF/CNIL/AMF si applicable)      |
+  | severity         | text NOT NULL   | 'low'|'medium'|'high'|'critical'              |
+  | topics           | text[]          | tags : sanction,pep,rgpd,financier,etc.       |
+  | countries        | text[]          | codes ISO pays                                 |
+  | jurisdiction     | text            | juridiction off-shore (ICIJ only)              |
+
+  Pas de bronze touché — silver de silver pure agrégation.
+
+transformations: |
+  -- 1. AMF (silver.amf_signals)
+  WITH amf AS (
+    SELECT
+      amf_signal_uid AS sanction_uid,
+      'amf'::text AS source,
+      amf_signal_uid AS entity_id,
+      siren,
+      entity_name AS entreprise,
+      lower(unaccent(coalesce(entity_name, ''))) AS entity_lower,
+      date_signal AS date_decision,
+      signal_type AS type_decision,
+      NULL::text AS motif,
+      NULL::numeric AS montant_amende,
+      LOWER(severity) AS severity,
+      ARRAY['amf','financier', LOWER(severity)]::text[] AS topics,
+      ARRAY['fr']::text[] AS countries,
+      NULL::text AS jurisdiction
+    FROM silver.amf_signals
+  ),
+
+  -- 2. OpenSanctions (silver.opensanctions)
+  opensanctions AS (
+    SELECT
+      entity_id AS sanction_uid,
+      'opensanctions'::text AS source,
+      entity_id,
+      -- sirens_fr est text[] — on flatten 1 row par siren matché
+      unnest(CASE
+        WHEN sirens_fr IS NULL OR array_length(sirens_fr, 1) IS NULL THEN ARRAY[NULL::text]
+        ELSE sirens_fr
+      END)::char(9) AS siren,
+      caption AS entreprise,
+      name_lower AS entity_lower,
+      first_seen::date AS date_decision,
+      schema AS type_decision,
+      array_to_string(topics, ', ') AS motif,
+      NULL::numeric AS montant_amende,
+      CASE
+        WHEN topics @> ARRAY['sanction'] THEN 'critical'
+        WHEN topics @> ARRAY['sanction.linked'] THEN 'high'
+        WHEN topics @> ARRAY['crime'] THEN 'critical'
+        WHEN topics @> ARRAY['pep'] THEN 'high'
+        WHEN topics @> ARRAY['reg.warn'] THEN 'medium'
+        ELSE 'low'
+      END AS severity,
+      topics,
+      countries,
+      NULL::text AS jurisdiction
+    FROM silver.opensanctions
+  ),
+
+  -- 3. ICIJ (silver.icij_offshore_match — match dirigeants → on garde person_uid)
+  icij AS (
+    SELECT
+      match_uid AS sanction_uid,
+      'icij'::text AS source,
+      icij_entity_id AS entity_id,
+      NULL::char(9) AS siren,  -- ICIJ match au niveau personne, pas entreprise
+      icij_entity_name AS entreprise,
+      lower(unaccent(coalesce(icij_entity_name, ''))) AS entity_lower,
+      NULL::date AS date_decision,
+      icij_database AS type_decision,
+      'offshore_leak'::text AS motif,
+      NULL::numeric AS montant_amende,
+      CASE match_confidence
+        WHEN 'HIGH' THEN 'high'
+        WHEN 'MEDIUM' THEN 'medium'
+        ELSE 'low'
+      END AS severity,
+      ARRAY['icij','offshore', icij_database]::text[] AS topics,
+      ARRAY[lower(jurisdiction)]::text[] AS countries,
+      jurisdiction
+    FROM silver.icij_offshore_match
+  ),
+
+  -- 4. DGCCRF (silver.dgccrf_sanctions)
+  dgccrf AS (
+    SELECT
+      sanction_id AS sanction_uid,
+      'dgccrf'::text AS source,
+      sanction_id AS entity_id,
+      siren,
+      entreprise,
+      entreprise_lower AS entity_lower,
+      date_decision,
+      'sanction'::text AS type_decision,
+      motif,
+      montant_amende,
+      severity,
+      ARRAY['dgccrf','concurrence', severity]::text[] AS topics,
+      ARRAY['fr']::text[] AS countries,
+      NULL::text AS jurisdiction
+    FROM silver.dgccrf_sanctions
+  ),
+
+  -- 5. CNIL (silver.cnil_sanctions)
+  cnil AS (
+    SELECT
+      sanction_id AS sanction_uid,
+      'cnil'::text AS source,
+      sanction_id AS entity_id,
+      siren,
+      organisme AS entreprise,
+      organisme_lower AS entity_lower,
+      date_decision,
+      type_decision,
+      motif,
+      montant_amende,
+      severity,
+      ARRAY['cnil','rgpd', severity]::text[] AS topics,
+      ARRAY['fr']::text[] AS countries,
+      NULL::text AS jurisdiction
+    FROM silver.cnil_sanctions
+  )
+
+  SELECT * FROM amf
+  UNION ALL SELECT * FROM opensanctions
+  UNION ALL SELECT * FROM icij
+  UNION ALL SELECT * FROM dgccrf
+  UNION ALL SELECT * FROM cnil;
+
+indexes:
+  - sanction_uid
+  - "(siren) WHERE siren IS NOT NULL"
+  - source
+  - "entity_lower gin_trgm_ops USING gin"
+  - severity
+  - "topics USING gin"
+  - "date_decision DESC"
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 1500

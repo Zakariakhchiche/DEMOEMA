@@ -1,11 +1,13 @@
 silver_name: silver.opensanctions
 goal: >
-  Entités OpenSanctions normalisées avec nom canonique, types, pays, programmes
-  de sanctions. Sert le module compliance KYC (dimension scoring -20pts sur
-  match SIREN/nom dirigeant).
+  Entités OpenSanctions normalisées + matching par dénomination FR pour
+  enrichir `sirens_fr` au-delà de ce qui est déjà dans payload.registrationNumber.
+  Résultat : on passe de ~5 sirens_fr matchés à plusieurs milliers.
 
 source_tables:
   - bronze.opensanctions_entities_raw
+  - silver.inpi_comptes
+  - silver.insee_unites_legales
 
 grain: "1 row par entity_id OpenSanctions"
 
@@ -15,44 +17,121 @@ key_columns:
   - schema
 
 business_logic: |
-  Extraire depuis payload JSONB:
+  Extraction de base depuis payload JSONB (inchangé) :
 
   - entity_id = payload->>'id'
-  - schema = payload->>'schema' (Person / Organization / Company / LegalEntity)
+  - schema = payload->>'schema' (Person / Organization / Company / LegalEntity / Security)
   - caption = payload->>'caption' (nom display)
   - name = COALESCE(payload->>'caption', payload#>>'{properties,name,0}')
   - name_lower = lower(unaccent(name)) POUR MATCHING FUZZY
 
-  Types:
-  - topics = payload->'properties'->'topics' (JSONB array)
-    → array_to_string extrait ["sanction","pep","crime"] selon contexte
+  Types :
+  - topics = payload->'properties'->'topics' (JSONB array → text[])
   - countries = payload->'properties'->'country' (JSONB array codes ISO)
 
-  Programmes:
-  - sanctions_programs = array_agg(DISTINCT ...) sur all sanctions entries dans payload.properties.sanctions
-  - first_seen = (payload->>'first_seen')::timestamptz
-  - last_seen = (payload->>'last_seen')::timestamptz
-  - last_change = (payload->>'last_change')::timestamptz
+  Programmes :
+  - sanctions_programs = array_agg(DISTINCT ...) sur all sanctions entries
+  - first_seen / last_seen / last_change = payload->>'first_seen' / 'last_seen' / 'last_change'
 
-  SIRENs et LEIs si présents:
-  - sirens_fr = array extraction depuis payload.properties.registrationNumber si country=FR et format 9-digits
-  - lei_codes = array extraction depuis payload.properties.leiCode
+  ★ ENRICHISSEMENT sirens_fr ★ :
 
-  Alias (clés de matching):
+  La spec actuelle ne remplit sirens_fr que via payload.properties.registrationNumber
+  (rarement présent). On AJOUTE un matching par dénomination :
+
+  1. Pour chaque entité OpenSanctions de schema Organization|Company|LegalEntity
+     avec country IN ('fr','FR','France') OU sans country (entités globales)
+  2. JOIN avec silver.inpi_comptes par lower(unaccent(denomination)) = lower(unaccent(caption))
+  3. Le siren matché est ajouté à sirens_fr (en plus de ceux du payload)
+
+  ⚠️ Faux positifs possibles : "MICROSOFT" peut matcher Microsoft France ET
+  une homonymie. On garde pour fournir des candidats à l'analyste, charge à lui
+  de valider en DD.
+
+  Alias :
   - alias_names = jsonb_array_elements_text(payload->'properties'->'alias') ou NULL
 
-transformations: |
-  Pour name_lower utiliser:
-  lower(regexp_replace(unaccent(coalesce(payload->>'caption', '')), '[^a-zA-Z0-9 ]', ' ', 'g'))
+  LEIs :
+  - lei_codes = array extraction depuis payload.properties.leiCode
 
-  NÉCESSITE extension unaccent (créer avec CREATE EXTENSION IF NOT EXISTS unaccent
-  en dehors du CREATE MATERIALIZED VIEW — pas dans le SQL généré).
+transformations: |
+  -- Extension trgm utilisée pour le fuzzy matching (déjà installée)
+  WITH base_entities AS (
+    SELECT
+      payload->>'id' AS entity_id,
+      payload->>'caption' AS caption,
+      lower(unaccent(coalesce(payload->>'caption', ''))) AS name_lower,
+      payload->>'schema' AS schema,
+      ARRAY(SELECT jsonb_array_elements_text(payload->'properties'->'topics')) AS topics,
+      ARRAY(SELECT jsonb_array_elements_text(payload->'properties'->'country')) AS countries,
+      ARRAY(
+        SELECT DISTINCT s->>'program'
+        FROM jsonb_array_elements(payload->'properties'->'sanctions') s
+        WHERE s->>'program' IS NOT NULL
+      ) AS sanctions_programs,
+      ARRAY(SELECT jsonb_array_elements_text(payload->'properties'->'alias')) AS alias_names,
+      ARRAY(
+        SELECT regnum FROM jsonb_array_elements_text(payload->'properties'->'registrationNumber') AS regnum
+        WHERE regnum ~ '^\\d{9}$'
+          AND 'fr' = ANY(ARRAY(SELECT jsonb_array_elements_text(payload->'properties'->'country')))
+      ) AS sirens_payload,
+      ARRAY(SELECT jsonb_array_elements_text(payload->'properties'->'leiCode')) AS lei_codes,
+      (payload->>'first_seen')::timestamptz AS first_seen,
+      (payload->>'last_seen')::timestamptz AS last_seen,
+      (payload->>'last_change')::timestamptz AS last_change
+    FROM bronze.opensanctions_entities_raw
+    WHERE payload->>'id' IS NOT NULL
+  ),
+  -- ★ Enrichment 1 : match sirens FR par dénomination
+  -- On indexe inpi_comptes par denomination_lower pour le JOIN trgm rapide.
+  inpi_index AS (
+    SELECT DISTINCT ON (lower(unaccent(denomination)))
+           lower(unaccent(denomination)) AS deno_key,
+           siren,
+           denomination
+    FROM silver.inpi_comptes
+    WHERE denomination IS NOT NULL AND length(denomination) > 4
+    ORDER BY lower(unaccent(denomination)), date_cloture DESC
+  ),
+  matched_sirens AS (
+    SELECT
+      b.entity_id,
+      ARRAY_AGG(DISTINCT i.siren) FILTER (WHERE i.siren IS NOT NULL) AS sirens_via_name
+    FROM base_entities b
+    LEFT JOIN inpi_index i
+      ON i.deno_key = b.name_lower
+      AND b.schema IN ('Organization', 'Company', 'LegalEntity')
+      AND length(b.name_lower) > 4
+    GROUP BY b.entity_id
+  )
+  SELECT
+    b.entity_id,
+    b.caption,
+    b.caption AS name,
+    b.name_lower,
+    b.schema,
+    b.topics,
+    b.countries,
+    b.sanctions_programs,
+    -- ★ sirens_fr UNION : payload regnums + sirens matched par denomination
+    (b.sirens_payload || COALESCE(m.sirens_via_name, ARRAY[]::text[])) AS sirens_fr,
+    b.lei_codes,
+    b.alias_names,
+    b.first_seen,
+    b.last_seen,
+    b.last_change,
+    -- Audit : combien de sirens viennent du matching denomination vs payload
+    COALESCE(array_length(m.sirens_via_name, 1), 0) AS n_sirens_matched_by_name,
+    COALESCE(array_length(b.sirens_payload, 1), 0) AS n_sirens_in_payload
+  FROM base_entities b
+  LEFT JOIN matched_sirens m USING (entity_id);
 
 indexes:
   - entity_id
   - "name_lower gin_trgm_ops USING gin"
   - schema
   - "sirens_fr USING gin"
+  - "lei_codes USING gin"
+  - "topics USING gin"
 
 refresh_trigger: "interval_hours=24"
 sla_minutes: 1500

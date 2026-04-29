@@ -1,0 +1,68 @@
+silver_name: silver.dgccrf_sanctions
+goal: >
+  Sanctions DGCCRF (Direction Générale Concurrence Consommation Répression Fraudes)
+  France, normalisées + match siren via inpi_comptes.denomination.
+
+source_tables:
+  - bronze.dgccrf_sanctions_raw
+  - silver.inpi_comptes
+
+grain: "1 row par sanction_id"
+
+key_columns:
+  - sanction_id
+  - siren
+  - entreprise_lower
+
+business_logic: |
+  Bronze a `entreprise` (text) sans siren. Silver enrichit via JOIN inpi_comptes :
+
+  - entreprise_lower = lower(unaccent(entreprise))
+  - siren matché par denomination_lower
+  - severity dérivée du montant_amende
+
+  severity rules :
+    'critical' si montant >= 100k€ ou motif contient "liquidation"
+    'high'     si montant >= 10k€
+    'medium'   si montant > 0
+    'low'      sinon
+
+transformations: |
+  WITH inpi_index AS (
+    SELECT DISTINCT ON (lower(unaccent(denomination)))
+           lower(unaccent(denomination)) AS deno_key,
+           siren
+    FROM silver.inpi_comptes
+    WHERE denomination IS NOT NULL AND length(denomination) > 4
+    ORDER BY lower(unaccent(denomination)), date_cloture DESC
+  )
+  SELECT
+    b.sanction_id,
+    b.entreprise,
+    lower(unaccent(coalesce(b.entreprise, ''))) AS entreprise_lower,
+    i.siren,
+    b.date_decision,
+    b.montant_amende,
+    b.motif,
+    CASE
+      WHEN b.montant_amende >= 100000 OR b.motif ILIKE '%liquidation%' THEN 'critical'
+      WHEN b.montant_amende >= 10000 THEN 'high'
+      WHEN b.montant_amende > 0 THEN 'medium'
+      ELSE 'low'
+    END AS severity,
+    b.payload,
+    b.ingested_at
+  FROM bronze.dgccrf_sanctions_raw b
+  LEFT JOIN inpi_index i
+    ON i.deno_key = lower(unaccent(coalesce(b.entreprise, '')))
+  WHERE b.entreprise IS NOT NULL;
+
+indexes:
+  - sanction_id
+  - "siren WHERE siren IS NOT NULL"
+  - "entreprise_lower gin_trgm_ops USING gin"
+  - severity
+  - "date_decision DESC"
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 1440

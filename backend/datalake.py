@@ -384,8 +384,8 @@ GOLD_TABLES_WHITELIST: dict[str, dict[str, Any]] = {
             "siren",
         ],
     },
-    "bronze.hatvp_representants_raw": {
-        "label": "HATVP Lobbyistes (459k)",
+    "silver.hatvp_lobbying": {
+        "label": "HATVP Lobbyistes",
         "category": "risk",
         "pk": "representant_id",
         "default_order": "date_inscription DESC NULLS LAST",
@@ -397,7 +397,23 @@ GOLD_TABLES_WHITELIST: dict[str, dict[str, Any]] = {
             "date_inscription",
             "adresse_ville",
             "chiffre_affaires_lobbying",
-            "nb_deputes",
+            "has_active_lobbying",
+        ],
+    },
+    "silver.sanctions": {
+        "label": "Sanctions unifiées",
+        "category": "risk",
+        "pk": "sanction_uid",
+        "default_order": "date_decision DESC NULLS LAST",
+        "search_cols": ["entreprise", "siren", "motif"],
+        "preview_cols": [
+            "source",
+            "siren",
+            "entreprise",
+            "date_decision",
+            "type_decision",
+            "severity",
+            "montant_amende",
         ],
     },
     "silver.opensanctions": {

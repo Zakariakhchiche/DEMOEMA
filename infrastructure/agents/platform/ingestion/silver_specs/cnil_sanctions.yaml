@@ -1,0 +1,91 @@
+silver_name: silver.cnil_sanctions
+goal: >
+  Sanctions CNIL (RGPD) France normalisées + match siren via inpi_comptes.
+
+source_tables:
+  - bronze.cnil_sanctions_raw
+  - silver.inpi_comptes
+
+grain: "1 row par sanction_id"
+
+key_columns:
+  - sanction_id
+  - siren
+  - organisme_lower
+
+business_logic: |
+  Bronze stocke un JSONB `payload` aux schémas variables : organisme | entreprise
+  | nom (selon délibération CNIL), date, motif/manquement, montant.
+
+  Silver normalise + match siren :
+
+  - organisme = COALESCE(payload->>'organisme', payload->>'entreprise', payload->>'nom')
+  - siren matché par denomination via inpi_comptes
+  - severity selon montant amende RGPD :
+      critical >= 1M€ / high >= 100k€ / medium > 0 / low (mise en demeure)
+
+transformations: |
+  WITH inpi_index AS (
+    SELECT DISTINCT ON (lower(unaccent(denomination)))
+           lower(unaccent(denomination)) AS deno_key,
+           siren
+    FROM silver.inpi_comptes
+    WHERE denomination IS NOT NULL AND length(denomination) > 4
+    ORDER BY lower(unaccent(denomination)), date_cloture DESC
+  ),
+  base AS (
+    SELECT
+      sanction_id,
+      payload,
+      ingested_at,
+      COALESCE(payload->>'organisme', payload->>'entreprise', payload->>'nom') AS organisme,
+      lower(unaccent(coalesce(
+        payload->>'organisme', payload->>'entreprise', payload->>'nom', ''
+      ))) AS organisme_lower,
+      COALESCE(
+        (payload->>'date')::date,
+        (payload->>'date_decision')::date,
+        (payload->>'date_publication')::date
+      ) AS date_decision,
+      COALESCE(
+        (payload->>'montant_amende')::numeric,
+        (payload->>'amende_administrative')::numeric,
+        (payload->>'montant')::numeric,
+        0
+      ) AS montant_amende,
+      COALESCE(payload->>'motif', payload->>'manquement', payload->>'objet') AS motif,
+      COALESCE(payload->>'type_decision', payload->>'nature', 'sanction') AS type_decision
+    FROM bronze.cnil_sanctions_raw
+    WHERE payload IS NOT NULL
+  )
+  SELECT
+    b.sanction_id,
+    b.organisme,
+    b.organisme_lower,
+    i.siren,
+    b.date_decision,
+    b.montant_amende,
+    b.motif,
+    b.type_decision,
+    CASE
+      WHEN b.montant_amende >= 1000000 THEN 'critical'
+      WHEN b.montant_amende >= 100000 THEN 'high'
+      WHEN b.montant_amende > 0 THEN 'medium'
+      ELSE 'low'
+    END AS severity,
+    b.payload,
+    b.ingested_at
+  FROM base b
+  LEFT JOIN inpi_index i ON i.deno_key = b.organisme_lower
+  WHERE b.organisme IS NOT NULL;
+
+indexes:
+  - sanction_id
+  - "siren WHERE siren IS NOT NULL"
+  - "organisme_lower gin_trgm_ops USING gin"
+  - severity
+  - "date_decision DESC"
+  - type_decision
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 1440

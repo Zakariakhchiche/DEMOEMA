@@ -11,6 +11,7 @@ source_tables:
   - bronze.amf_geco_raw
   - bronze.amf_bdif_raw
   - bronze.amf_listes_noires_raw
+  - silver.inpi_comptes  # ★ pour matcher siren via denomination
 
 grain: "1 row par signal AMF (decision_id ou nom_entité)"
 
@@ -53,15 +54,27 @@ business_logic: |
   LEFT JOIN dans dirigeants_360.
 
 transformations: |
-  WITH dila AS (
+  WITH inpi_index AS (
+    -- Index denomination_lower → siren utilisé pour matcher AMF DILA / BDIF /
+    -- listes noires (qui ne portent pas de siren natif).
+    SELECT DISTINCT ON (lower(unaccent(denomination)))
+           lower(unaccent(denomination)) AS deno_key,
+           siren
+    FROM silver.inpi_comptes
+    WHERE denomination IS NOT NULL AND length(denomination) > 4
+    ORDER BY lower(unaccent(denomination)), date_cloture DESC
+  ),
+  dila AS (
     SELECT decision_id || '|dila' AS amf_signal_uid,
            'amf_dila' AS source_table,
-           coalesce(payload->>'TITRE', payload->>'PARTIE') AS entity_name,
-           NULL::text AS siren,
+           coalesce(payload->>'TITRE', payload->>'PARTIE',
+                    payload->>'entreprise', payload->>'denomination') AS entity_name,
+           NULL::text AS siren_native,
            'sanction' AS signal_type,
            'HIGH' AS severity,
            coalesce((payload->>'DATE_DEC')::date,
                     (payload->>'DATE_PUBLI')::date,
+                    (payload->>'date_decision')::date,
                     ingested_at::date) AS date_signal,
            payload AS raw_payload
     FROM bronze.amf_dila_raw
@@ -70,7 +83,7 @@ transformations: |
     SELECT (payload->>'id') || '|geco' AS amf_signal_uid,
            'amf_geco' AS source_table,
            payload->>'denomination' AS entity_name,
-           payload->>'siren' AS siren,
+           payload->>'siren' AS siren_native,
            'operation_listed' AS signal_type,
            'LOW' AS severity,
            coalesce((payload->>'date_publication')::date, ingested_at::date) AS date_signal,
@@ -81,7 +94,7 @@ transformations: |
     SELECT (payload->>'id') || '|bdif' AS amf_signal_uid,
            'amf_bdif' AS source_table,
            payload->>'partie' AS entity_name,
-           NULL::text AS siren,
+           NULL::text AS siren_native,
            coalesce(payload->>'type', 'decision_individuelle') AS signal_type,
            CASE
              WHEN payload->>'type' ILIKE '%sanction%' THEN 'HIGH'
@@ -96,17 +109,35 @@ transformations: |
     SELECT (payload->>'id') || '|noires' AS amf_signal_uid,
            'amf_listes_noires' AS source_table,
            payload->>'denomination' AS entity_name,
-           NULL::text AS siren,
+           NULL::text AS siren_native,
            'liste_noire' AS signal_type,
            'HIGH' AS severity,
            coalesce((payload->>'date_inscription')::date, ingested_at::date) AS date_signal,
            payload AS raw_payload
     FROM bronze.amf_listes_noires_raw
+  ),
+  unioned AS (
+    SELECT * FROM dila
+    UNION ALL SELECT * FROM geco
+    UNION ALL SELECT * FROM bdif
+    UNION ALL SELECT * FROM noires
   )
-  SELECT * FROM dila
-  UNION ALL SELECT * FROM geco
-  UNION ALL SELECT * FROM bdif
-  UNION ALL SELECT * FROM noires;
+  SELECT
+    u.amf_signal_uid,
+    u.source_table,
+    u.entity_name,
+    -- siren natif (GECO) en priorité, fallback match denomination via inpi
+    COALESCE(u.siren_native, i.siren) AS siren,
+    u.signal_type,
+    u.severity,
+    u.date_signal,
+    u.raw_payload
+  FROM unioned u
+  LEFT JOIN inpi_index i
+    ON u.siren_native IS NULL
+    AND i.deno_key = lower(unaccent(coalesce(u.entity_name, '')))
+    AND length(coalesce(u.entity_name, '')) > 4
+  WHERE u.entity_name IS NOT NULL;
 
 indexes:
   - "siren WHERE siren IS NOT NULL"
