@@ -22,7 +22,8 @@ check_constraints:
   - "naf ~ '^[0-9]{2}\\.[0-9]{2}[A-Z]?$'"
   - "annee BETWEEN 2010 AND 2030"
   - "tranche_taille IN ('TPE','PME','ETI','GE')"
-  - "n_entreprises >= 5"  -- anonymat statistique
+  # n_entreprises >= 5 pour anonymat statistique
+  - "n_entreprises >= 5"
 
 composite_indexes:
   - cols: "(naf, annee DESC)"

@@ -31,8 +31,9 @@ composite_indexes:
   - cols: "(siren, is_active, role_code)"
     where: "is_active = true"
     purpose: "Dirigeants actifs par entreprise"
+  # role_code 31 = Président, 51 = DG (codes INPI)
   - cols: "(role_code, is_active)"
-    where: "role_code IN ('31','51')"  -- Président, DG
+    where: "role_code IN ('31','51')"
     purpose: "Top mandataires (président/DG actuels)"
 
 business_logic: |
@@ -93,7 +94,8 @@ indexes:
   - "mandat_id UNIQUE"
   - "person_uid"
   - "siren"
-  - "(person_uid, siren) UNIQUE WHERE is_active = true"  -- 1 mandat actif par couple
+  # 1 mandat actif par couple (person_uid, siren) — anti-doublon
+  - "(person_uid, siren) UNIQUE WHERE is_active = true"
   - "role_code"
   - "is_active WHERE is_active = true"
 
