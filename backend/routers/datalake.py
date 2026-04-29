@@ -1698,10 +1698,12 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
                 WHERE siren = lc.siren AND etablissement_siege = true
                 LIMIT 1
             ) et ON true
+            -- Top dirigeant via && (operator overlap) → utilise l'index GIN sur
+            -- sirens_mandats. ANY(...) ne peut pas utiliser GIN et timeout sur 8M rows.
             LEFT JOIN LATERAL (
                 SELECT nom, prenom, age_2026, n_mandats_actifs
                 FROM silver.inpi_dirigeants
-                WHERE lc.siren::char(9) = ANY(sirens_mandats)
+                WHERE sirens_mandats && ARRAY[lc.siren]::bpchar[]
                 ORDER BY n_mandats_actifs DESC NULLS LAST
                 LIMIT 1
             ) td ON true
