@@ -1666,39 +1666,30 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
             LIMIT {int(limit) * 4}
         ),
         enriched AS (
+            -- Enrichissement minimal et rapide : seul osint_companies_enriched (3k
+            -- rows, indexed siren) + bodacc (75k indexed siren). Skip insee_*
+            -- (29M et 43M) car silver_bootstrap les lock pendant 30min.
             SELECT lc.*,
-                   COALESCE(ul.code_ape, oce.code_ape) AS naf,
-                   COALESCE(ul.categorie_juridique, oce.forme_juridique) AS forme_juridique,
-                   COALESCE(ul.date_creation, oce.date_immatriculation) AS date_creation_unite,
+                   oce.code_ape AS naf,
+                   oce.forme_juridique AS forme_juridique,
+                   oce.date_immatriculation AS date_creation_unite,
                    oce.adresse_code_postal AS adresse_code_postal,
-                   NULL::text AS ville_etab,
-                   NULL::text AS dept_etab,
-                   -- Fallback dept/ville depuis bodacc si insee siège manque
                    (SELECT b.code_dept FROM silver.bodacc_annonces b
                     WHERE b.siren = lc.siren AND b.code_dept IS NOT NULL
                     ORDER BY b.date_parution DESC LIMIT 1) AS dept_bodacc,
                    (SELECT b.ville FROM silver.bodacc_annonces b
                     WHERE b.siren = lc.siren AND b.ville IS NOT NULL
                     ORDER BY b.date_parution DESC LIMIT 1) AS ville_bodacc
-                   -- Top dirigeant pas joint ici : LATERAL sur silver.inpi_dirigeants
-                   -- (8M rows) timeout meme avec GIN. /fiche/SIREN fait le drill-down
-                   -- precis quand l utilisateur clique sur une cible. Pour le listing
-                   -- on garde des cibles rapides (sub-seconde).
             FROM last_compte lc
-            -- insee_unites_legales.siren = text, lc.siren = char(9). Sans cast
-            -- explicite Postgres ne peut pas utiliser l'index btree → 29M scan.
-            LEFT JOIN silver.insee_unites_legales ul ON ul.siren = lc.siren::text
             LEFT JOIN silver.osint_companies_enriched oce ON oce.siren = lc.siren::char(9)
-            -- insee_etablissements 43M rows fait timeout meme avec LATERAL
-            -- LIMIT 1. On utilise osint pour code_postal + bodacc pour ville/dept.
         )
         SELECT siren,
                denomination,
                naf,
                NULL::text AS naf_libelle,
                forme_juridique,
-               COALESCE(dept_etab, dept_bodacc, LEFT(NULLIF(adresse_code_postal, ''), 2)) AS dept,
-               COALESCE(ville_etab, ville_bodacc) AS ville,
+               COALESCE(dept_bodacc, LEFT(NULLIF(adresse_code_postal, ''), 2)) AS dept,
+               ville_bodacc AS ville,
                COALESCE(adresse_code_postal, '') AS adresse_code_postal,
                COALESCE(date_creation_unite, date_cloture) AS date_creation,
                'actif' AS statut,
