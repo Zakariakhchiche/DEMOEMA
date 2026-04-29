@@ -34,6 +34,17 @@ def _qualified(table: str) -> str:
     return table
 
 
+async def _safe(coro, timeout_s: float = 4.0, default=None):
+    """Helper module-level : exécute une coroutine avec timeout, retourne default
+    si échec/timeout. Pour endpoints lents où une table peut être bloquante."""
+    import asyncio as _asyncio
+    try:
+        return await _asyncio.wait_for(coro, timeout=timeout_s)
+    except (_asyncio.TimeoutError, Exception) as e:
+        print(f"[_safe] {type(e).__name__}: {str(e)[:100]}")
+        return default
+
+
 def _serialize(row: asyncpg.Record) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for k, v in row.items():
@@ -414,31 +425,94 @@ async def fiche_entreprise(req: Request, siren: str):
     dirigeants_silver = await pool.fetch(
         """WITH dirig AS (
               SELECT nom, prenom, date_naissance, age_2026 AS age,
-                     n_mandats_actifs, n_mandats_total, sirens_mandats,
-                     denominations, roles, is_multi_mandat
+                     n_mandats_actifs, n_mandats_total,
+                     sirens_mandats, denominations, formes_juridiques,
+                     roles, is_multi_mandat,
+                     first_mandat_date, last_mandat_date
               FROM silver.inpi_dirigeants
               WHERE $1::char(9) = ANY(sirens_mandats)
               ORDER BY n_mandats_actifs DESC NULLS LAST
               LIMIT 10
+           ),
+           -- Aggrège SCI patrimoine par (nom, prenom) — la table a plusieurs rows
+           -- par dirigeant (1 row par siren_main probable), il faut consolider
+           -- pour éviter les duplicate dirigeants côté API.
+           sci_agg AS (
+              SELECT nom, prenom, date_naissance,
+                     SUM(n_sci) AS n_sci,
+                     SUM(total_capital_sci) AS total_capital_sci,
+                     ARRAY(SELECT DISTINCT unnest(array_agg(sci_denominations))) AS sci_denominations,
+                     ARRAY(SELECT DISTINCT unnest(array_agg(sci_sirens))) AS sci_sirens,
+                     ARRAY(SELECT DISTINCT unnest(array_agg(sci_code_postaux))) AS sci_code_postaux,
+                     MIN(first_sci_date) AS first_sci_date
+              FROM silver.dirigeant_sci_patrimoine
+              WHERE (nom, prenom) IN (SELECT nom, prenom FROM dirig)
+              GROUP BY nom, prenom, date_naissance
+           ),
+           -- Sanctions matching strict : nom + prenom dans le caption opensanctions
+           sanc_agg AS (
+              SELECT d.nom, d.prenom,
+                     bool_or(true) AS is_sanctioned,
+                     array_agg(DISTINCT s.entity_id) FILTER (WHERE s.entity_id IS NOT NULL) AS sanction_ids,
+                     array_agg(DISTINCT s.caption) FILTER (WHERE s.caption IS NOT NULL) AS sanction_captions,
+                     ARRAY(SELECT DISTINCT unnest(array_agg(s.topics))) AS sanction_topics,
+                     ARRAY(SELECT DISTINCT unnest(array_agg(s.countries))) AS sanction_countries,
+                     ARRAY(SELECT DISTINCT unnest(array_agg(s.sanctions_programs))) AS sanction_programs
+              FROM dirig d
+              JOIN silver.opensanctions s
+                ON s.schema = 'Person'
+               AND LOWER(s.name) ILIKE '%' || LOWER(d.prenom) || '%'
+               AND LOWER(s.name) ILIKE '%' || LOWER(d.nom) || '%'
+               AND LENGTH(d.prenom) > 2 AND LENGTH(d.nom) > 2
+              GROUP BY d.nom, d.prenom
            )
            SELECT d.*,
-                  sci.n_sci, sci.total_capital_sci, sci.sci_denominations,
-                  os.has_linkedin, os.has_github, os.n_total_social,
-                  -- Match strict prenom + nom (et country FR si dispo) pour
-                  -- éliminer les faux positifs ('DURAND' ≠ tous les Durand
-                  -- du monde). On exige aussi que ce soit une Person.
-                  EXISTS(
-                    SELECT 1 FROM silver.opensanctions s
-                    WHERE s.schema = 'Person'
-                      AND LOWER(s.name) ILIKE '%' || LOWER(d.prenom) || '%'
-                      AND LOWER(s.name) ILIKE '%' || LOWER(d.nom) || '%'
-                      AND LENGTH(d.prenom) > 2 AND LENGTH(d.nom) > 2
-                  ) AS is_sanctioned
+                  -- Patrimoine SCI consolidé
+                  sci.n_sci,
+                  sci.total_capital_sci,
+                  sci.sci_denominations,
+                  sci.sci_sirens,
+                  sci.sci_code_postaux,
+                  sci.first_sci_date,
+                  -- OSINT : présence sociale + entreprise principale (JOIN sur prenoms[])
+                  os.person_uid,
+                  os.has_linkedin, os.has_github, os.has_any_social,
+                  os.n_linkedin, os.n_github, os.n_twitter,
+                  os.n_other_sites, os.n_total_social,
+                  os.denomination_main_company AS osint_main_deno,
+                  os.forme_juridique_main AS osint_main_forme,
+                  os.capital_main AS osint_main_capital,
+                  os.date_immat_main AS osint_main_immat,
+                  os.n_mandats_inpi AS osint_n_mandats,
+                  os.last_scanned_at AS osint_scanned_at,
+                  -- Compliance : sanction détail
+                  COALESCE(sa.is_sanctioned, false) AS is_sanctioned,
+                  sa.sanction_ids,
+                  sa.sanction_captions,
+                  sa.sanction_topics,
+                  sa.sanction_countries,
+                  sa.sanction_programs,
+                  -- Pro M&A heuristique : multi-mandats + holdings + age 50+
+                  (d.n_mandats_actifs >= 5
+                   AND COALESCE(sci.n_sci, 0) >= 1
+                   AND COALESCE(d.age, 0) >= 50) AS is_pro_ma,
+                  (COALESCE(d.age, 0) >= 60) AS is_senior,
+                  (COALESCE(sci.total_capital_sci, 0) >= 500000) AS is_asset_rich
            FROM dirig d
-           LEFT JOIN silver.dirigeant_sci_patrimoine sci
-                  ON sci.nom = d.nom AND sci.prenom = d.prenom
+           LEFT JOIN sci_agg sci
+                  ON UPPER(unaccent(sci.nom)) = UPPER(unaccent(d.nom))
+                 AND UPPER(unaccent(sci.prenom)) = UPPER(unaccent(d.prenom))
+                 AND COALESCE(sci.date_naissance, '') = COALESCE(d.date_naissance, '')
+           LEFT JOIN sanc_agg sa
+                  ON UPPER(unaccent(sa.nom)) = UPPER(unaccent(d.nom))
+                 AND UPPER(unaccent(sa.prenom)) = UPPER(unaccent(d.prenom))
            LEFT JOIN silver.osint_persons_enriched os
-                  ON os.nom = d.nom AND $1 = os.siren_main""",
+                  ON UPPER(unaccent(os.nom)) = UPPER(unaccent(d.nom))
+                 AND EXISTS (
+                       SELECT 1 FROM unnest(os.prenoms) p
+                       WHERE UPPER(unaccent(p)) = UPPER(unaccent(d.prenom))
+                 )
+                 AND COALESCE(os.date_naissance, '') = COALESCE(d.date_naissance, '')""",
         siren,
     )
 
@@ -693,6 +767,147 @@ async def fiche_entreprise(req: Request, siren: str):
         "network": [_serialize(n) for n in network],
         "presse": [_serialize(p) for p in presse],
     }
+
+
+async def _dirigeant_full(
+    req: Request, nom: str, prenom: str, date_naissance: str | None = None
+):
+    """Drill-down : retourne TOUTES les infos disponibles pour un dirigeant
+    identifié par le triplet (nom, prenom, date_naissance).
+    Sources silver agrégées :
+      - inpi_dirigeants : carrière (mandats actifs / total / formes / roles)
+      - dirigeant_sci_patrimoine : patrimoine SCI complet (denominations / sirens
+        / code postaux / capital cumulé)
+      - osint_persons_enriched : présence sociale (LinkedIn, GitHub, Twitter)
+        + entreprise principale
+      - opensanctions : matchs personne (topics / programs / countries)
+      - dvf_transactions : transactions immobilières des SCI du dirigeant
+    """
+    pool = _pool(req)
+
+    nom_u = (nom or "").strip()
+    prenom_u = (prenom or "").strip()
+    date_n = (date_naissance or "").strip() or None
+
+    if not nom_u or not prenom_u:
+        raise HTTPException(status_code=400, detail="nom + prenom requis")
+
+    # 1. Identité INPI — match insensible casse/accents pour gérer "Mignon"
+    # vs "MIGNON" et "DUFOÛR" vs "DUFOUR" qui sont les mêmes personnes.
+    inpi = await _safe(pool.fetchrow(
+        """SELECT
+              MAX(nom) AS nom, MAX(prenom) AS prenom,
+              MAX(date_naissance) AS date_naissance, MAX(age_2026) AS age,
+              MAX(n_mandats_total) AS n_mandats_total,
+              MAX(n_mandats_actifs) AS n_mandats_actifs,
+              ARRAY(SELECT DISTINCT unnest(array_agg(sirens_mandats))) AS sirens_mandats,
+              ARRAY(SELECT DISTINCT unnest(array_agg(denominations))) AS denominations,
+              ARRAY(SELECT DISTINCT unnest(array_agg(formes_juridiques))) AS formes_juridiques,
+              ARRAY(SELECT DISTINCT unnest(array_agg(roles))) AS roles,
+              MIN(first_mandat_date) AS first_mandat_date,
+              MAX(last_mandat_date) AS last_mandat_date,
+              bool_or(is_multi_mandat) AS is_multi_mandat
+           FROM silver.inpi_dirigeants
+           WHERE UPPER(unaccent(nom)) = UPPER(unaccent($1))
+             AND UPPER(unaccent(prenom)) = UPPER(unaccent($2))
+             AND ($3::text IS NULL OR date_naissance = $3)""",
+        nom_u, prenom_u, date_n,
+    ))
+    if not inpi or not inpi.get("nom"):
+        raise HTTPException(status_code=404, detail="Dirigeant introuvable en silver")
+
+    # 2. Patrimoine SCI agrégé sur (nom, prenom, date_naissance) normalisé
+    sci = await _safe(pool.fetchrow(
+        """SELECT
+              SUM(n_sci) AS n_sci,
+              SUM(total_capital_sci) AS total_capital_sci,
+              ARRAY(SELECT DISTINCT unnest(array_agg(sci_denominations))) AS sci_denominations,
+              ARRAY(SELECT DISTINCT unnest(array_agg(sci_sirens))) AS sci_sirens,
+              ARRAY(SELECT DISTINCT unnest(array_agg(sci_code_postaux))) AS sci_code_postaux,
+              MIN(first_sci_date) AS first_sci_date
+           FROM silver.dirigeant_sci_patrimoine
+           WHERE UPPER(unaccent(nom)) = UPPER(unaccent($1))
+             AND UPPER(unaccent(prenom)) = UPPER(unaccent($2))
+             AND ($3::text IS NULL OR date_naissance = $3)""",
+        nom_u, prenom_u, date_n,
+    ))
+
+    # 3. OSINT (LinkedIn, GitHub, Twitter, sites perso, entreprise principale)
+    # JOIN robuste : prenom dans prenoms[] insensible casse/accents
+    osint = await _safe(pool.fetchrow(
+        """SELECT
+              person_uid, siren_main, representant_id, prenoms,
+              n_linkedin, n_github, n_twitter, n_other_sites, n_total_social,
+              has_linkedin, has_github, has_any_social,
+              denomination_main_company, forme_juridique_main,
+              capital_main, date_immat_main, n_mandats_inpi,
+              last_scanned_at
+           FROM silver.osint_persons_enriched
+           WHERE UPPER(unaccent(nom)) = UPPER(unaccent($1))
+             AND EXISTS (
+                   SELECT 1 FROM unnest(prenoms) p
+                   WHERE UPPER(unaccent(p)) = UPPER(unaccent($2))
+             )
+             AND ($3::text IS NULL OR date_naissance = $3)
+           ORDER BY n_total_social DESC NULLS LAST
+           LIMIT 1""",
+        nom_u, prenom_u, date_n,
+    ))
+
+    # 4. Sanctions personne — match dans caption insensible casse/accents
+    sanctions = await _safe(pool.fetch(
+        """SELECT entity_id, caption, schema, topics, countries,
+                  sanctions_programs, first_seen, last_seen, alias_names
+           FROM silver.opensanctions
+           WHERE schema = 'Person'
+             AND UPPER(unaccent(name)) ILIKE '%' || UPPER(unaccent($1)) || '%'
+             AND UPPER(unaccent(name)) ILIKE '%' || UPPER(unaccent($2)) || '%'
+           LIMIT 20""",
+        nom_u, prenom_u,
+    ), default=[])
+
+    # 5. DVF immo — transactions liées aux SCI du dirigeant
+    dvf_summary: dict | None = None
+    if sci and sci.get("sci_sirens"):
+        # Note : DVF n'a pas de siren, on récupère par code_postal des SCI
+        # (proxy approximatif). Bilan = nombre + valeur cumulée par CP.
+        cps = sci.get("sci_code_postaux") or []
+        if cps:
+            dvf_rows = await _safe(pool.fetch(
+                """SELECT code_postal, COUNT(*) AS n, SUM(valeur_fonciere) AS total
+                   FROM silver.dvf_transactions
+                   WHERE code_postal = ANY($1::text[])
+                   GROUP BY code_postal
+                   ORDER BY total DESC NULLS LAST
+                   LIMIT 10""",
+                cps,
+            ), default=[])
+            dvf_summary = {
+                "n_zones": len(dvf_rows),
+                "by_cp": [_serialize(r) for r in dvf_rows],
+            }
+
+    return {
+        "identity": _serialize(inpi),
+        "sci_patrimoine": _serialize(sci) if sci else None,
+        "osint": _serialize(osint) if osint else None,
+        "sanctions": [_serialize(s) for s in sanctions],
+        "dvf_zones": dvf_summary,
+    }
+
+
+@router.get("/dirigeant/{nom}/{prenom}/{date_naissance}")
+async def dirigeant_full_with_dn(
+    req: Request, nom: str, prenom: str, date_naissance: str
+):
+    """Drill-down dirigeant identifié par triplet (nom, prenom, date_naissance)."""
+    return await _dirigeant_full(req, nom, prenom, date_naissance)
+
+
+@router.get("/dirigeant/{nom}/{prenom}")
+async def dirigeant_full_no_dn(req: Request, nom: str, prenom: str):
+    """Drill-down dirigeant sans date_naissance (peut matcher plusieurs homonymes)."""
+    return await _dirigeant_full(req, nom, prenom, None)
 
 
 @router.get("/pitch/{siren}")

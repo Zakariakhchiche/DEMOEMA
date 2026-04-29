@@ -563,87 +563,282 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
             )}
 
             {tab === "dirigeants" && !loading && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {data?.dirigeants.length === 0 && (
-                  <div style={{ color: "var(--text-tertiary)", fontSize: 13 }}>Aucun dirigeant trouvé en INPI.</div>
+                  <div style={{ color: "var(--text-tertiary)", fontSize: 13 }}>Aucun dirigeant trouvé.</div>
                 )}
-                {data?.dirigeants.map((d, i) => (
-                  <div key={i} className="dem-glass" style={{ borderRadius: 10, padding: 14, display: "flex", gap: 14, alignItems: "center" }}>
-                    <div style={{
-                      width: 40, height: 40, borderRadius: 999,
-                      background: "linear-gradient(135deg, #3b3b44, #1a1a20)",
-                      border: "1px solid var(--border-soft)",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      fontWeight: 600, fontSize: 13, color: "var(--text-secondary)",
+                {data?.dirigeants.map((d, i) => {
+                  const denoms: string[] = Array.isArray(d.denominations)
+                    ? (d.denominations as unknown[]).map((x) => String(x)).filter(Boolean)
+                    : [];
+                  const sirensMandats: string[] = Array.isArray(d.sirens_mandats)
+                    ? (d.sirens_mandats as unknown[]).map((x) => String(x).trim()).filter(Boolean)
+                    : [];
+                  const formes: string[] = Array.isArray(d.formes_juridiques)
+                    ? (d.formes_juridiques as unknown[]).map((x) => String(x)).filter(Boolean)
+                    : [];
+                  const sciDenoms: string[] = Array.isArray(d.sci_denominations)
+                    ? (d.sci_denominations as unknown[]).map((x) => String(x)).filter(Boolean)
+                    : [];
+                  const sciCps: string[] = Array.isArray(d.sci_code_postaux)
+                    ? (d.sci_code_postaux as unknown[]).map((x) => String(x)).filter(Boolean)
+                    : [];
+                  const roles: string[] = Array.isArray(d.roles)
+                    ? (d.roles as unknown[]).map((x) => String(x)).filter(Boolean)
+                    : [];
+                  const dateN = d.date_naissance ? String(d.date_naissance) : null;
+                  const firstMandat = d.first_mandat_date ? String(d.first_mandat_date).slice(0, 10) : null;
+                  const lastMandat = d.last_mandat_date ? String(d.last_mandat_date).slice(0, 10) : null;
+                  const isSenior = Boolean(d.is_senior);
+                  const isProMa = Boolean(d.is_pro_ma);
+                  const isAssetRich = Boolean(d.is_asset_rich);
+                  const isSanctioned = Boolean(d.is_sanctioned);
+                  const ancienneteAns = firstMandat
+                    ? Math.floor((Date.now() - new Date(firstMandat).getTime()) / (1000 * 60 * 60 * 24 * 365))
+                    : null;
+                  return (
+                    <div key={i} className="dem-glass card-lift" style={{
+                      borderRadius: 12, padding: 16, display: "flex", gap: 14,
+                      borderColor: isSanctioned
+                        ? "rgba(251,113,133,0.30)"
+                        : (isProMa ? "rgba(96,165,250,0.30)" : undefined),
+                      background: isSanctioned
+                        ? "rgba(251,113,133,0.02)"
+                        : (isProMa ? "rgba(96,165,250,0.02)" : undefined),
                     }}>
-                      {String(d.prenom ?? "").slice(0, 1)}{String(d.nom ?? "").slice(0, 1)}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                        <span style={{ fontSize: 14, fontWeight: 600 }}>
-                          {String(d.prenom ?? "")} {String(d.nom ?? "")}
-                        </span>
-                        {Boolean(d.qualite) && (
-                          <span style={{
-                            fontSize: 10.5, padding: "2px 7px", borderRadius: 999,
-                            background: "rgba(96,165,250,0.10)",
-                            color: "#cfe1fb",
-                            border: "1px solid rgba(96,165,250,0.30)",
-                          }}>
-                            {String(d.qualite)}
-                          </span>
-                        )}
-                        {d.type_dirigeant === "personne morale" && (
-                          <span style={{
-                            fontSize: 10, padding: "2px 6px", borderRadius: 4,
-                            background: "rgba(167,139,250,0.10)",
-                            color: "var(--accent-purple)",
-                            border: "1px solid rgba(167,139,250,0.30)",
-                          }}>
-                            Personne morale
-                          </span>
-                        )}
-                        {Boolean(d.siren_dirigeant) && (
-                          <span className="dem-mono" style={{ fontSize: 10.5, color: "var(--text-tertiary)" }}>
-                            siren {String(d.siren_dirigeant)}
-                          </span>
-                        )}
-                        <span className="dem-mono" style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
-                          {d.age != null ? `${d.age} ans` : ""}
-                        </span>
-                        {Boolean(d.is_sanctioned) && (
-                          <span className="dem-chip" style={{
-                            background: "rgba(251,113,133,0.10)", color: "var(--accent-rose)",
-                            borderColor: "rgba(251,113,133,0.30)", fontSize: 10,
-                          }}>
-                            <Icon name="warning" size={9} /> sanction
-                          </span>
-                        )}
-                        {Boolean(d.has_linkedin) && (
-                          <span style={{ color: "var(--accent-cyan)", fontSize: 10 }}>LinkedIn</span>
-                        )}
-                        {Boolean(d.has_github) && (
-                          <span style={{ color: "var(--accent-purple)", fontSize: 10 }}>GitHub</span>
-                        )}
+                      {/* Avatar */}
+                      <div style={{
+                        width: 48, height: 48, borderRadius: 999, flexShrink: 0,
+                        background: isProMa
+                          ? "linear-gradient(135deg, #6366f1, #818cf8)"
+                          : "linear-gradient(135deg, #3b3b44, #1a1a20)",
+                        border: "1px solid var(--border-soft)",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontWeight: 700, fontSize: 14,
+                        color: isProMa ? "#fff" : "var(--text-secondary)",
+                      }}>
+                        {String(d.prenom ?? "").slice(0, 1)}{String(d.nom ?? "").slice(0, 1)}
                       </div>
-                      <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-secondary)", display: "flex", gap: 14, flexWrap: "wrap" }}>
-                        <span><span style={{ color: "var(--text-muted)" }}>Mandats actifs</span> <span className="dem-mono">{String(d.n_mandats_actifs ?? 0)}</span></span>
-                        {d.n_mandats_total != null && <span><span style={{ color: "var(--text-muted)" }}>Total</span> <span className="dem-mono">{String(d.n_mandats_total)}</span></span>}
-                        {d.n_sci != null && Number(d.n_sci) > 0 && (
-                          <span><span style={{ color: "var(--text-muted)" }}>SCI</span> <span className="dem-mono">{String(d.n_sci)}</span></span>
-                        )}
-                        {d.total_capital_sci != null && (
-                          <span><span style={{ color: "var(--text-muted)" }}>Capital SCI</span> <span className="dem-mono">{fmtEur(d.total_capital_sci)}</span></span>
-                        )}
-                      </div>
-                      {Array.isArray(d.denominations) && d.denominations.length > 0 && (
-                        <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-tertiary)" }}>
-                          Mandats : {(d.denominations as string[]).slice(0, 4).join(", ")}{(d.denominations as string[]).length > 4 ? "…" : ""}
+
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        {/* Nom + chips signaux */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)" }}>
+                            {String(d.prenom ?? "")} {String(d.nom ?? "")}
+                          </span>
+                          {Boolean(d.qualite) && (
+                            <span style={{
+                              fontSize: 10.5, padding: "2px 8px", borderRadius: 999,
+                              background: "rgba(96,165,250,0.10)",
+                              color: "#cfe1fb",
+                              border: "1px solid rgba(96,165,250,0.30)",
+                              fontWeight: 600,
+                            }}>{String(d.qualite)}</span>
+                          )}
+                          {d.type_dirigeant === "personne morale" && (
+                            <span style={{
+                              fontSize: 10, padding: "2px 6px", borderRadius: 4,
+                              background: "rgba(167,139,250,0.10)",
+                              color: "var(--accent-purple)",
+                              border: "1px solid rgba(167,139,250,0.30)",
+                            }}>Personne morale</span>
+                          )}
+                          {Boolean(d.siren_dirigeant) && (
+                            <span className="dem-mono" style={{ fontSize: 10.5, color: "var(--text-tertiary)" }}>
+                              siren {String(d.siren_dirigeant)}
+                            </span>
+                          )}
+                          {isProMa && (
+                            <span style={{
+                              fontSize: 10, padding: "2px 7px", borderRadius: 999,
+                              background: "rgba(96,165,250,0.15)",
+                              color: "var(--accent-blue)",
+                              border: "1px solid rgba(96,165,250,0.40)",
+                              fontWeight: 700, letterSpacing: "0.06em",
+                            }}>PRO M&A</span>
+                          )}
+                          {isSenior && (
+                            <span style={{
+                              fontSize: 10, padding: "2px 7px", borderRadius: 999,
+                              background: "rgba(251,191,36,0.10)",
+                              color: "var(--accent-amber)",
+                              border: "1px solid rgba(251,191,36,0.30)",
+                              fontWeight: 600,
+                            }}>SENIOR 60+</span>
+                          )}
+                          {isAssetRich && (
+                            <span style={{
+                              fontSize: 10, padding: "2px 7px", borderRadius: 999,
+                              background: "rgba(52,211,153,0.10)",
+                              color: "var(--accent-emerald)",
+                              border: "1px solid rgba(52,211,153,0.30)",
+                              fontWeight: 600,
+                            }}>ASSET-RICH</span>
+                          )}
+                          {isSanctioned && (
+                            <span style={{
+                              fontSize: 10, padding: "2px 7px", borderRadius: 999,
+                              background: "rgba(251,113,133,0.10)",
+                              color: "var(--accent-rose)",
+                              border: "1px solid rgba(251,113,133,0.30)",
+                              fontWeight: 700,
+                              display: "inline-flex", alignItems: "center", gap: 4,
+                            }}><Icon name="warning" size={9} /> SANCTION</span>
+                          )}
                         </div>
-                      )}
+
+                        {/* Identité */}
+                        <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-secondary)", display: "flex", gap: 14, flexWrap: "wrap" }}>
+                          {d.age != null && (
+                            <span><span style={{ color: "var(--text-muted)" }}>Âge</span> <span className="dem-mono">{String(d.age)} ans</span></span>
+                          )}
+                          {dateN && (
+                            <span><span style={{ color: "var(--text-muted)" }}>Né(e)</span> <span className="dem-mono">{dateN}</span></span>
+                          )}
+                          {ancienneteAns != null && (
+                            <span><span style={{ color: "var(--text-muted)" }}>Ancienneté</span> <span className="dem-mono">{ancienneteAns} ans</span></span>
+                          )}
+                        </div>
+
+                        {/* Mandats */}
+                        <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-secondary)", display: "flex", gap: 14, flexWrap: "wrap" }}>
+                          <span><span style={{ color: "var(--text-muted)" }}>Mandats actifs</span> <span className="dem-mono">{String(d.n_mandats_actifs ?? 0)}</span></span>
+                          {d.n_mandats_total != null && (
+                            <span><span style={{ color: "var(--text-muted)" }}>Total carrière</span> <span className="dem-mono">{String(d.n_mandats_total)}</span></span>
+                          )}
+                          {firstMandat && <span><span style={{ color: "var(--text-muted)" }}>1er mandat</span> <span className="dem-mono">{firstMandat}</span></span>}
+                          {lastMandat && <span><span style={{ color: "var(--text-muted)" }}>Dernier</span> <span className="dem-mono">{lastMandat}</span></span>}
+                        </div>
+
+                        {/* Patrimoine SCI */}
+                        {(Number(d.n_sci ?? 0) > 0 || Number(d.total_capital_sci ?? 0) > 0) && (
+                          <div style={{
+                            marginTop: 8, padding: "8px 12px", borderRadius: 8,
+                            background: "rgba(52,211,153,0.04)",
+                            border: "1px solid rgba(52,211,153,0.15)",
+                            fontSize: 11.5,
+                          }}>
+                            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", color: "var(--text-secondary)" }}>
+                              <span style={{ fontWeight: 600, color: "var(--accent-emerald)" }}>🏠 Patrimoine SCI</span>
+                              <span>{String(d.n_sci ?? 0)} SCI</span>
+                              {d.total_capital_sci != null && (
+                                <span><span style={{ color: "var(--text-muted)" }}>Capital cumulé</span> <span className="dem-mono tab-num" style={{ fontWeight: 600, color: "var(--accent-emerald)" }}>{fmtEur(d.total_capital_sci)}</span></span>
+                              )}
+                              {d.first_sci_date ? <span><span style={{ color: "var(--text-muted)" }}>1ère SCI</span> <span className="dem-mono">{String(d.first_sci_date).slice(0, 10)}</span></span> : null}
+                            </div>
+                            {sciDenoms.length > 0 && (
+                              <div style={{ marginTop: 4, fontSize: 11, color: "var(--text-tertiary)" }}>
+                                {sciDenoms.slice(0, 5).map((sd, j) => (
+                                  <span key={j}>
+                                    {sd}{sciCps[j] ? ` (${sciCps[j]})` : ""}
+                                    {j < Math.min(sciDenoms.length, 5) - 1 ? " · " : ""}
+                                  </span>
+                                ))}
+                                {sciDenoms.length > 5 && <span> · +{sciDenoms.length - 5}</span>}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* OSINT social */}
+                        {Boolean(d.has_any_social) && (
+                          <div style={{
+                            marginTop: 8, padding: "6px 12px", borderRadius: 8,
+                            background: "rgba(103,232,249,0.04)",
+                            border: "1px solid rgba(103,232,249,0.15)",
+                            fontSize: 11.5,
+                            display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center",
+                          }}>
+                            <span style={{ fontWeight: 600, color: "var(--accent-cyan)" }}>📡 Présence digitale</span>
+                            {Boolean(d.has_linkedin) && (
+                              <span style={{ color: "var(--accent-cyan)" }}>
+                                LinkedIn{Number(d.n_linkedin ?? 0) > 1 ? ` ×${String(d.n_linkedin)}` : ""}
+                              </span>
+                            )}
+                            {Boolean(d.has_github) && (
+                              <span style={{ color: "var(--accent-purple)" }}>
+                                GitHub{Number(d.n_github ?? 0) > 1 ? ` ×${String(d.n_github)}` : ""}
+                              </span>
+                            )}
+                            {Number(d.n_twitter ?? 0) > 0 && (
+                              <span style={{ color: "var(--accent-blue)" }}>Twitter ×{String(d.n_twitter)}</span>
+                            )}
+                            {Number(d.n_other_sites ?? 0) > 0 && (
+                              <span style={{ color: "var(--text-tertiary)" }}>+{String(d.n_other_sites)} sites</span>
+                            )}
+                            {d.osint_scanned_at ? (
+                              <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--text-muted)" }}>
+                                MAJ {fmtDate(d.osint_scanned_at)}
+                              </span>
+                            ) : null}
+                          </div>
+                        )}
+
+                        {/* Entreprise principale OSINT */}
+                        {Boolean(d.osint_main_deno) && (
+                          <div style={{
+                            marginTop: 6, fontSize: 11.5, color: "var(--text-secondary)",
+                            display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center",
+                          }}>
+                            <span style={{ color: "var(--text-muted)" }}>Entreprise principale</span>
+                            <span style={{ fontWeight: 600 }}>{String(d.osint_main_deno)}</span>
+                            {Boolean(d.osint_main_forme) && <span className="dem-mono" style={{ color: "var(--text-tertiary)" }}>{String(d.osint_main_forme)}</span>}
+                            {d.osint_main_capital != null && (
+                              <span><span style={{ color: "var(--text-muted)" }}>Capital</span> <span className="dem-mono">{fmtEur(d.osint_main_capital)}</span></span>
+                            )}
+                            {d.osint_main_immat ? (
+                              <span><span style={{ color: "var(--text-muted)" }}>Immat.</span> <span className="dem-mono">{String(d.osint_main_immat).slice(0, 4)}</span></span>
+                            ) : null}
+                          </div>
+                        )}
+
+                        {/* Autres mandats */}
+                        {denoms.length > 1 && (
+                          <details style={{ marginTop: 8 }}>
+                            <summary style={{
+                              fontSize: 11.5, color: "var(--text-tertiary)",
+                              cursor: "pointer", userSelect: "none",
+                            }}>
+                              📋 {denoms.length} mandats au total — voir liste
+                            </summary>
+                            <div style={{
+                              marginTop: 6, padding: "8px 12px", borderRadius: 6,
+                              background: "rgba(255,255,255,0.02)",
+                              border: "1px solid var(--border-subtle)",
+                              fontSize: 11, color: "var(--text-secondary)",
+                              display: "flex", flexDirection: "column", gap: 3,
+                              maxHeight: 220, overflowY: "auto",
+                            }}>
+                              {denoms.map((dn, j) => (
+                                <div key={j} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                  {sirensMandats[j] && (
+                                    <span className="dem-mono" style={{ color: "var(--accent-cyan)", fontSize: 10 }}>
+                                      {sirensMandats[j]}
+                                    </span>
+                                  )}
+                                  <span style={{ flex: 1 }}>{dn}</span>
+                                  {formes[j] && (
+                                    <span className="dem-mono" style={{ fontSize: 10, color: "var(--text-tertiary)" }}>
+                                      {formes[j]}
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </details>
+                        )}
+
+                        {/* Rôles INPI */}
+                        {roles.length > 0 && (
+                          <div style={{ marginTop: 6, fontSize: 10.5, color: "var(--text-muted)" }}>
+                            Rôles INPI : <span className="dem-mono">{roles.slice(0, 8).join(", ")}</span>
+                            {roles.length > 8 && <span> · +{roles.length - 8}</span>}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 

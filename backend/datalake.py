@@ -320,8 +320,10 @@ GOLD_TABLES_WHITELIST: dict[str, dict[str, Any]] = {
         "preview_cols": [
             "nom",
             "prenom",
+            "date_naissance",
             "age_2026",
             "n_mandats_actifs",
+            "n_mandats_total",
             "n_sci",
             "total_capital_sci",
             "is_multi_mandat",
@@ -336,9 +338,10 @@ GOLD_TABLES_WHITELIST: dict[str, dict[str, Any]] = {
         "preview_cols": [
             "nom",
             "prenom",
+            "date_naissance",
             "n_sci",
             "total_capital_sci",
-            "n_mandats_actifs",
+            "n_total_mandats",
         ],
     },
     "silver.dvf_transactions": {
@@ -454,12 +457,18 @@ GOLD_TABLES_WHITELIST: dict[str, dict[str, Any]] = {
     "silver.osint_persons_enriched": {
         "label": "OSINT persons (2k)",
         "category": "osint",
-        "pk": "nom",
-        "default_order": "nom",
-        "search_cols": ["nom", "prenom"],
+        "pk": "person_uid",
+        "default_order": "n_total_social DESC NULLS LAST",
+        "search_cols": ["nom"],
         "preview_cols": [
             "nom",
-            "prenom",
+            "prenoms",
+            "date_naissance",
+            "siren_main",
+            "denomination_main_company",
+            "n_total_social",
+            "has_linkedin",
+            "has_github",
         ],
     },
 }
