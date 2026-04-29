@@ -397,6 +397,51 @@ async def generate_silver_sql(
     if missing:
         return {"error": f"bronze tables missing: {missing}"}
 
+    # ============================================================
+    # OPTIM : reuse du dernier SQL applied=true (evite re-LLM si on
+    # a deja un SQL qui marche). Skip si feedback (retry contextuel).
+    # ============================================================
+    if not feedback and apply_immediately:
+        try:
+            with psycopg.connect(settings.database_url) as conn, conn.cursor() as cur:
+                cur.execute(
+                    """SELECT generated_sql, version_uid
+                       FROM audit.silver_specs_versions
+                       WHERE silver_name = %s
+                         AND applied = true
+                         AND validation_status = 'ok'
+                       ORDER BY applied_at DESC NULLS LAST
+                       LIMIT 1""",
+                    (silver_name,),
+                )
+                row = cur.fetchone()
+                if row:
+                    cached_sql, cached_uid = row
+                    log.info(
+                        "[silver_codegen] reuse last applied SQL for %s (version %s) — skip LLM",
+                        silver_name, cached_uid[:12] if cached_uid else "?",
+                    )
+                    applied = _apply_sql(silver_name, cached_sql, cached_uid)
+                    if applied["applied"]:
+                        return {
+                            "silver_name": silver_name,
+                            "sql": cached_sql,
+                            "version_uid": cached_uid,
+                            "valid": True,
+                            "validation_msg": "reused from audit.silver_specs_versions",
+                            "applied": True,
+                            "retries": 0,
+                            "source": "audit_cache",
+                        }
+                    # Si l'apply rate (schema bronze a peut-etre evolue),
+                    # on tombe sur le LLM normal.
+                    log.warning(
+                        "[silver_codegen] cached SQL apply failed for %s (%s) — fallback LLM",
+                        silver_name, applied.get("error", "")[:120],
+                    )
+        except Exception as e:
+            log.warning("[silver_codegen] audit reuse check failed: %s", e)
+
     # LLM call
     agent = get_agent("lead-data-engineer")
     if not agent:
