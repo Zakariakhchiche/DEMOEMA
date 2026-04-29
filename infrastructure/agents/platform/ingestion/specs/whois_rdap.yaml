@@ -1,0 +1,70 @@
+source_id: whois_rdap
+source_num: 130
+layer: 16
+couche: "Web/digital — emails + phones registrants"
+name: "RDAP (WHOIS moderne) — registrant_email/phone par domaine"
+description: |
+  RDAP (Registration Data Access Protocol) = évolution standard de WHOIS,
+  expose les contacts registrants des domaines via JSON API publique.
+
+  Use case : pour chaque domaine du silver.crt_sh_certificates_raw (extrait
+  des Certificate Transparency logs), retrouver le registrant_email et
+  registrant_phone du propriétaire du domaine.
+
+  Coverage attendue : ~20-40% des domaines révèlent un email (RGPD redacts
+  beaucoup post-2018, mais .com/.net/.io/.fr récents souvent OK).
+
+  Pour matching dirigeant : registrant_name → JOIN INPI dirigeants par
+  prenom+nom (avec fuzzy si différent ordre). registrant_organization →
+  matching denomination INPI.
+
+endpoint: https://rdap.org/domain/
+auth: none
+format: rest_json
+pattern: rest_json_query
+refresh_trigger: interval_hours=720
+sla_minutes: 43200
+license: ICANN public RDAP
+
+bronze_table: bronze.rdap_whois_raw
+key_field: domain
+
+http_headers:
+  Accept: application/rdap+json
+  User-Agent: DEMOEMA-OSINT/1.0
+
+# Strategy : itérer sur les domaines uniques de bronze.crt_sh_certificates_raw
+# Pour MVP, prendre les 10K domaines avec le plus de certs (= sites actifs)
+input_table: bronze.crt_sh_certificates_raw
+input_field: common_name
+max_queries_per_run: 10000
+rate_limit:
+  requests_per_second: 5
+  notes: "RDAP supporte 5-10 req/s sur rdap.org. Pour les TLDs spécifiques (.fr via afnic.fr) : 2 req/s."
+
+# Le RDAP renvoie un JSON structuré avec entités contact :
+# entities[].vcardArray[1] contient un array vCard structuré :
+#   ["fn", {}, "text", "Jean Dupont"]              -- nom
+#   ["org", {}, "text", "Acme SAS"]                -- organisation
+#   ["email", {}, "text", "contact@acme.fr"]       -- email
+#   ["tel", {}, "text", "+33123456789"]            -- téléphone
+#   ["adr", {}, "text", ["Rue des Fleurs", "75001", "Paris", ...]]
+
+bronze_fields:
+- {name: domain, type: VARCHAR(256), primary_key: true}
+- {name: registrant_name, type: VARCHAR(256)}
+- {name: registrant_organization, type: VARCHAR(256)}
+- {name: registrant_email, type: VARCHAR(256)}
+- {name: registrant_phone, type: VARCHAR(64)}
+- {name: registrant_address, type: TEXT}
+- {name: registrant_country, type: VARCHAR(8)}
+- {name: registrar, type: VARCHAR(256)}            # GoDaddy, OVH, Gandi, etc.
+- {name: created_date, type: TIMESTAMPTZ}
+- {name: expires_date, type: TIMESTAMPTZ}
+- {name: nameservers, type: TEXT[]}
+- {name: payload, type: JSONB}
+
+conflict_strategy: ON CONFLICT (domain) DO UPDATE SET payload = EXCLUDED.payload, ingested_at = now()
+
+expected_rows_first_run: 10000
+expected_rows_incremental: 100

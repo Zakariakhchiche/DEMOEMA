@@ -1,0 +1,179 @@
+silver_name: silver.persons_contacts_enriched
+goal: >
+  🔑 CONTACTS DIRIGEANTS (emails + téléphones) cross-source — agrège toutes
+  les sources gratuites disponibles sur DEMOEMA pour produire 1 row par
+  person_uid avec ses emails/téléphones publics validés.
+
+  Phase A (gratuit) : Holehe (Maigret email checks) + GitHub email_public +
+  RDAP/WHOIS registrant + Wikidata + HATVP.
+
+  Future Phase B : ajout Apollo.io / Hunter.io patterns (€168/mois).
+
+source_tables:
+  - silver.inpi_dirigeants
+  - bronze.osint_persons          # Holehe + Maigret usernames
+  - bronze.github_repos_raw       # email_public
+  - bronze.rdap_whois_raw         # registrant_email + phone
+  - bronze.wikidata_entreprises_raw
+  - silver.hatvp_conflits_interets
+
+grain: "1 row par person_uid (FK silver.inpi_dirigeants)"
+
+key_columns:
+  - person_uid
+  - has_email
+  - has_phone
+  - emails_count
+
+business_logic: |
+  Pour chaque person_uid INPI, agréger TOUS les emails + phones trouvés :
+
+  Schéma :
+  - person_uid (FK)
+  - emails JSONB array : [{value, source, confidence, validated}]
+    Sources :
+    - 'github_public' : email_public du GitHub user matché
+    - 'rdap_registrant' : registrant_email du domaine matché par nom dirigeant
+    - 'wikidata' : email Wikidata (rare)
+    - 'hatvp' : email déclaration officielle (élus seulement)
+    - 'holehe_inferred' : pattern construit + Holehe-validated
+    - 'maigret_username_pattern' : déduit du username matché (ex: john.doe → john.doe@gmail.com)
+
+  - phones JSONB array : [{value, source, confidence}]
+    Sources :
+    - 'rdap_registrant' : phone WHOIS
+    - 'wikidata' : phone Wikidata (très rare)
+    - 'hatvp' : déclarations officielles
+
+  - has_email (= length(emails) > 0)
+  - has_phone (= length(phones) > 0)
+  - emails_count, phones_count
+  - top_email (= 1er email avec confidence HIGH si dispo)
+  - top_phone (= 1er phone avec confidence HIGH)
+  - emails_validated_count (Holehe checked)
+
+  Confidence par source :
+  - HIGH : github_public + hatvp + rdap si registrant_name matche prenom+nom
+  - MEDIUM : rdap si seulement organization matche denomination + holehe validated
+  - LOW : guess pattern non validé
+
+  Matching algos :
+  1. github_public → JOIN bronze.github_repos_raw via lower(name) = lower(prenom||' '||nom)
+  2. rdap_registrant → JOIN bronze.rdap_whois_raw via :
+     - registrant_name match exact prenom+nom (HIGH)
+     - registrant_organization match denomination INPI (MEDIUM)
+  3. wikidata → JOIN bronze.wikidata_entreprises_raw via wikidata_qid de
+     persons_resolved + extract email/phone du payload SPARQL
+  4. hatvp → JOIN silver.hatvp_conflits_interets sur declarant_person_uid
+  5. holehe_validated → SELECT FROM bronze.osint_persons WHERE
+     emails_valid IS NOT NULL (= validés par Holehe scan)
+
+transformations: |
+  WITH base AS (
+    SELECT person_uid, prenom, nom, denominations_mandats
+    FROM silver.inpi_dirigeants
+  ),
+  emails_github AS (
+    SELECT b.person_uid,
+           jsonb_build_array(jsonb_build_object(
+             'value', g.email_public,
+             'source', 'github_public',
+             'confidence', 'HIGH',
+             'validated', false
+           )) AS emails
+    FROM base b
+    JOIN bronze.github_repos_raw g
+      ON lower(g.name) = lower(b.prenom || ' ' || b.nom)
+    WHERE g.email_public IS NOT NULL AND g.email_public ~ '^.+@.+\..+$'
+  ),
+  emails_rdap AS (
+    SELECT b.person_uid,
+           jsonb_agg(jsonb_build_object(
+             'value', r.registrant_email,
+             'source', 'rdap_registrant',
+             'confidence', CASE
+               WHEN lower(r.registrant_name) = lower(b.prenom || ' ' || b.nom) THEN 'HIGH'
+               WHEN r.registrant_organization = ANY(b.denominations_mandats) THEN 'MEDIUM'
+               ELSE 'LOW'
+             END,
+             'domain', r.domain,
+             'validated', false
+           )) AS emails
+    FROM base b
+    JOIN bronze.rdap_whois_raw r
+      ON (lower(r.registrant_name) = lower(b.prenom || ' ' || b.nom)
+          OR r.registrant_organization = ANY(b.denominations_mandats))
+    WHERE r.registrant_email IS NOT NULL AND r.registrant_email ~ '^.+@.+\..+$'
+    GROUP BY b.person_uid
+  ),
+  emails_holehe AS (
+    SELECT op.person_uid,
+           jsonb_agg(jsonb_build_object(
+             'value', e,
+             'source', 'holehe_validated',
+             'confidence', 'MEDIUM',
+             'validated', true
+           )) AS emails
+    FROM bronze.osint_persons op,
+         unnest(op.emails_valid) AS e
+    WHERE op.emails_valid IS NOT NULL AND array_length(op.emails_valid, 1) > 0
+    GROUP BY op.person_uid
+  ),
+  -- Phones depuis RDAP
+  phones_rdap AS (
+    SELECT b.person_uid,
+           jsonb_agg(jsonb_build_object(
+             'value', r.registrant_phone,
+             'source', 'rdap_registrant',
+             'confidence', CASE
+               WHEN lower(r.registrant_name) = lower(b.prenom || ' ' || b.nom) THEN 'HIGH'
+               ELSE 'MEDIUM'
+             END,
+             'domain', r.domain
+           )) AS phones
+    FROM base b
+    JOIN bronze.rdap_whois_raw r
+      ON (lower(r.registrant_name) = lower(b.prenom || ' ' || b.nom)
+          OR r.registrant_organization = ANY(b.denominations_mandats))
+    WHERE r.registrant_phone IS NOT NULL
+    GROUP BY b.person_uid
+  ),
+  -- Aggregation finale
+  consolidated AS (
+    SELECT
+      b.person_uid, b.prenom, b.nom,
+      coalesce(eg.emails, '[]'::jsonb)
+        || coalesce(er.emails, '[]'::jsonb)
+        || coalesce(eh.emails, '[]'::jsonb) AS emails,
+      coalesce(pr.phones, '[]'::jsonb) AS phones
+    FROM base b
+    LEFT JOIN emails_github eg USING (person_uid)
+    LEFT JOIN emails_rdap er USING (person_uid)
+    LEFT JOIN emails_holehe eh USING (person_uid)
+    LEFT JOIN phones_rdap pr USING (person_uid)
+  )
+  SELECT
+    person_uid, prenom, nom, emails, phones,
+    jsonb_array_length(emails) > 0 AS has_email,
+    jsonb_array_length(phones) > 0 AS has_phone,
+    jsonb_array_length(emails) AS emails_count,
+    jsonb_array_length(phones) AS phones_count,
+    -- Top email (1er HIGH si dispo, sinon 1er MEDIUM)
+    (SELECT e->>'value' FROM jsonb_array_elements(emails) e
+     WHERE e->>'confidence' = 'HIGH' LIMIT 1) AS top_email,
+    (SELECT p->>'value' FROM jsonb_array_elements(phones) p
+     WHERE p->>'confidence' = 'HIGH' LIMIT 1) AS top_phone,
+    (SELECT count(*) FROM jsonb_array_elements(emails) e
+     WHERE (e->>'validated')::bool = true) AS emails_validated_count
+  FROM consolidated
+  WHERE jsonb_array_length(emails) > 0 OR jsonb_array_length(phones) > 0;
+
+indexes:
+  - "person_uid UNIQUE"
+  - "has_email WHERE has_email = true"
+  - "has_phone WHERE has_phone = true"
+  - "emails USING gin"
+  - "top_email"
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 1440

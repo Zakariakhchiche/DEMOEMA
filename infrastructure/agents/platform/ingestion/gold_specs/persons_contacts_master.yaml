@@ -1,0 +1,93 @@
+silver_name: gold.persons_contacts_master
+target_schema: gold
+physical: true
+goal: >
+  🥇 CONTACTS MASTER — table dénormalisée 1 row/dirigeant avec emails+phones
+  + le contexte M&A complet (pro_ma_score, mandats actifs, secteur). Source
+  unique pour les exports CSV prospection EdRCF.
+
+source_tables:
+  - silver.persons_contacts_enriched
+  - gold.dirigeants_master
+
+grain: "1 row par person_uid avec contact"
+
+key_columns:
+  - person_uid
+  - top_email
+  - pro_ma_score
+
+check_constraints:
+  - "emails_count >= 0"
+  - "phones_count >= 0"
+  - "has_email IN (true, false)"
+
+composite_indexes:
+  - cols: "(pro_ma_score DESC, has_email)"
+    where: "has_email = true AND pro_ma_score >= 50"
+    purpose: "Top cibles avec email dispo"
+  - cols: "(emails_validated_count DESC, person_uid)"
+    where: "emails_validated_count > 0"
+    purpose: "Emails validés Holehe pour cold outreach"
+
+business_logic: |
+  Pass-through silver.persons_contacts_enriched + JOIN gold.dirigeants_master
+  pour enrichir avec :
+  - pro_ma_score, n_mandats_actifs, top_company_denomination
+  - is_pro_ma, has_holding_patrimoniale
+  - sirens_mandats[] pour exporter avec contexte société
+
+  Use cases :
+  - Export CSV : EdRCF veut "top 1000 cibles avec email valide"
+    SELECT prenom, nom, top_email, top_phone, denominations_mandats[1] AS company,
+           pro_ma_score, n_mandats_actifs
+    FROM gold.persons_contacts_master
+    WHERE has_email AND pro_ma_score >= 60
+    ORDER BY pro_ma_score DESC LIMIT 1000;
+
+  - Cold outreach campagne :
+    WHERE emails_validated_count > 0 AND has_holding_patrimoniale = true
+
+  - Export RGPD-compliant : seulement les emails ayant confidence HIGH
+    + opt-in vérifié (vérification RGPD à coder côté API)
+
+transformations: |
+  INSERT INTO gold.persons_contacts_master
+  SELECT
+    pce.person_uid, pce.prenom, pce.nom,
+    pce.emails, pce.phones,
+    pce.has_email, pce.has_phone,
+    pce.emails_count, pce.phones_count,
+    pce.emails_validated_count,
+    pce.top_email, pce.top_phone,
+    -- Enrichissement gold.dirigeants_master
+    gd.pro_ma_score, gd.n_mandats_actifs,
+    gd.is_pro_ma, gd.has_holding_patrimoniale,
+    gd.sirens_mandats, gd.denominations_mandats,
+    gd.denominations_mandats[1] AS top_company_denomination,
+    gd.has_political_connection,
+    -- Lineage
+    jsonb_build_object(
+      'emails_sources', (SELECT array_agg(DISTINCT e->>'source')
+                          FROM jsonb_array_elements(pce.emails) e),
+      'phones_sources', (SELECT array_agg(DISTINCT p->>'source')
+                          FROM jsonb_array_elements(pce.phones) p),
+      'last_enriched', now()
+    ) AS sources_de_verite
+  FROM silver.persons_contacts_enriched pce
+  JOIN gold.dirigeants_master gd USING (person_uid)
+  ON CONFLICT (person_uid) DO UPDATE SET
+    emails = EXCLUDED.emails,
+    phones = EXCLUDED.phones,
+    pro_ma_score = EXCLUDED.pro_ma_score,
+    derniere_maj = now();
+
+indexes:
+  - "person_uid UNIQUE"
+  - "pro_ma_score DESC"
+  - "top_email WHERE top_email IS NOT NULL"
+  - "has_email WHERE has_email = true"
+  - "(pro_ma_score DESC, has_email) WHERE has_email = true"
+
+refresh_trigger: "cron=0 5 * * *"
+sla_minutes: 1440
