@@ -28,6 +28,12 @@ services:
     # Les ALTER SYSTEM live (ALTER SYSTEM SET ... ; pg_reload_conf()) ont la même
     # effet pour les params SIGHUP-able, mais shared_buffers nécessite restart →
     # on bake les flags ici pour qu'ils survivent au prochain redémarrage.
+    # Anti-zombie : 3 protections Postgres
+    # - idle_in_transaction_session_timeout=900s (15min) : tue les sessions
+    #   ayant une transaction ouverte sans activité (client mort pendant CREATE MV)
+    # - statement_timeout=1800s (30min) : cap toute query (anomalie au-delà)
+    # - tcp_keepalive (60s/10s/20×) : détecte les clients morts en ~5min
+    #   au lieu des 2h default Linux → libère les locks plus vite
     command: >
       postgres
       -c shared_buffers=16GB
@@ -44,17 +50,8 @@ services:
       -c wal_compression=on
       -c jit=on
       -c log_min_duration_statement=10000
-      # Anti-zombie 1 : tue les sessions idle (transaction abandonnée par client mort)
-      # 15 min couvre les CREATE MATERIALIZED VIEW les plus lents tout en évitant
-      # qu'une session orpheline garde des locks indéfiniment.
       -c idle_in_transaction_session_timeout=900000
-      # Anti-zombie 2 : statement_timeout global = 30 min (les big REFRESH MV
-      # peuvent prendre 20+ min sur silver.inpi_dirigeants 8M rows). Au-delà,
-      # la session est tuée — protège contre les requêtes infinies.
       -c statement_timeout=1800000
-      # Anti-zombie 3 : TCP keepalive — détecte les clients morts en ~5 min
-      # au lieu des 2h default Linux. Si un client (agents-platform tué pendant
-      # CREATE MV) ne répond plus, Postgres ferme la connexion + libère les locks.
       -c tcp_keepalives_idle=60
       -c tcp_keepalives_interval=10
       -c tcp_keepalives_count=20
