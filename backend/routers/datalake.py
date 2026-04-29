@@ -1621,7 +1621,9 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
     - osint_companies_enriched : siren, code_ape, adresse_code_postal,
       forme_juridique, date_immatriculation, denomination
     """
-    ca_min = max(0, (min_score - 50) * 200_000) if min_score is not None else 0
+    # Floor 1M€ par défaut pour ne pas scanner les 6M inpi_comptes (95% sont
+    # des micro-entreprises sans intérêt M&A). min_score plus haut → ca_min plus haut.
+    ca_min = max(1_000_000, (min_score - 50) * 200_000) if min_score is not None else 1_000_000
     where: list[str] = [f"c.ca_net >= {int(ca_min)}"]
     params: list[Any] = []
     if q:
