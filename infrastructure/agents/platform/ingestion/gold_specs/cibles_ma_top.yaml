@@ -1,0 +1,80 @@
+silver_name: gold.cibles_ma_top
+target_schema: gold
+physical: true
+goal: >
+  🥇 TOP CIBLES M&A — vue dénormalisée des entreprises Tier 1 avec leurs
+  dirigeants top scoring. Optimisé pour pagination keyset DESC par score_ma.
+  C'est ce que la page "Intelligence Targets" affiche avec ses 200-300 cibles.
+
+source_tables:
+  - gold.entreprises_master
+  - gold.dirigeants_master
+
+grain: "1 row par siren (subset entreprises_master where score_ma >= 50)"
+
+key_columns:
+  - siren
+  - score_ma
+  - top_dirigeant_person_uid
+
+check_constraints:
+  - "score_ma >= 50"
+  - "ca_dernier >= 1000000 OR has_balo_recent = true OR has_cession_recente = true"
+
+composite_indexes:
+  - cols: "(score_ma DESC, siren)"
+    purpose: "Pagination keyset top cibles"
+  - cols: "(siege_dept, score_ma DESC)"
+    purpose: "Filtre département"
+  - cols: "(naf, score_ma DESC)"
+    purpose: "Filtre secteur"
+
+business_logic: |
+  Subset filtré de gold.entreprises_master + champs joints du top dirigeant :
+
+  Filtres :
+  - statut = 'actif'
+  - score_ma >= 50 OU has_balo_recent OU has_cession_recente
+  - ca_dernier >= 1M€ OU est cotée (lei IS NOT NULL)
+
+  Champs ajoutés (vs entreprises_master) :
+  - top_dirigeant_person_uid (= president/DG actuel le plus haut pro_ma_score)
+  - top_dirigeant_full_name
+  - top_dirigeant_pro_ma_score
+  - top_dirigeant_age_2026
+  - n_dirigeants_pro_ma (>= 60 score)
+
+  Cas d'usage : page Intelligence Targets affiche 50 cibles par page sortées
+  par score_ma DESC. Pagination keyset O(1) via (score_ma, siren).
+
+transformations: |
+  WITH eligible AS (
+    SELECT * FROM gold.entreprises_master
+    WHERE statut = 'actif'
+      AND (score_ma >= 50 OR has_balo_recent OR has_cession_recente_24m)
+      AND (ca_dernier >= 1000000 OR lei IS NOT NULL)
+  ),
+  with_top_dirigeant AS (
+    SELECT e.*,
+           d.person_uid AS top_dirigeant_person_uid,
+           d.nom || ' ' || d.prenom AS top_dirigeant_full_name,
+           d.pro_ma_score AS top_dirigeant_pro_ma_score,
+           d.age_2026 AS top_dirigeant_age_2026
+    FROM eligible e
+    LEFT JOIN LATERAL (
+      SELECT person_uid, nom, prenom, pro_ma_score, age_2026
+      FROM gold.dirigeants_master
+      WHERE e.siren = ANY(sirens_mandats)
+      ORDER BY pro_ma_score DESC NULLS LAST LIMIT 1
+    ) d ON true
+  )
+  INSERT INTO gold.cibles_ma_top SELECT * FROM with_top_dirigeant
+  ON CONFLICT (siren) DO UPDATE SET ..., derniere_maj = now();
+
+indexes:
+  - "siren UNIQUE"
+  - "score_ma DESC"
+  - "top_dirigeant_person_uid"
+
+refresh_trigger: "cron=0 4 * * *"
+sla_minutes: 720

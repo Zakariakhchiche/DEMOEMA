@@ -267,6 +267,16 @@ def start_scheduler() -> None:
         log.warning("Silver engine init skipped: %s", e)
         n_silvers = 0
 
+    # Gold layer: tables physiques avec UPSERT pattern. Bootstrap au boot
+    # (5min après silver pour que les silvers soient construits avant que
+    # les golds ne tentent de les query). Refresh quotidien per gold.
+    try:
+        from ingestion.gold_engine import start_gold_scheduler
+        n_golds = start_gold_scheduler(scheduler)
+    except Exception as e:
+        log.warning("Gold engine init skipped: %s", e)
+        n_golds = 0
+
     # Bronze bootstrap : génère les fetchers manquants en arrière-plan, un par
     # tick (5 min). Permet de combler le gap specs YAML / sources/*.py sans
     # que le maintainer existant ait à les voir d'abord en source_freshness.

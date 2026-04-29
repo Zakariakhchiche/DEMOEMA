@@ -1,0 +1,194 @@
+silver_name: gold.entreprises_master
+target_schema: gold
+physical: true
+goal: >
+  🥇 MASTER TABLE ENTREPRISES — 1 row par siren avec TOUS les signaux croisés.
+  Feature store final consommé par l'API /api/entreprises/* et la page
+  Intelligence Targets. Dénormalisation complète : identité + financier +
+  signaux M&A + compliance + scoring.
+
+source_tables:
+  - silver.insee_unites_legales
+  - silver.insee_etablissements
+  - silver.inpi_comptes
+  - silver.gleif_lei
+  - silver.entreprises_signals
+  - silver.balo_operations
+  - silver.amf_signals
+  - silver.juridictions_unifiees
+  - silver.opensanctions
+  - silver.cession_events
+  - silver.bodacc_annonces
+
+grain: "1 row par siren (UNIQUE)"
+
+key_columns:
+  - entity_id
+  - siren
+  - denomination
+  - score_ma
+
+# AMELIORATIONS APPLIQUÉES AU GOLD (instructions au LLM lead-data-engineer)
+check_constraints:
+  - "siren ~ '^\\d{9}$'"
+  - "score_ma BETWEEN 0 AND 100"
+  - "score_defaillance BETWEEN 0 AND 100"
+  - "statut IN ('actif','cesse','procedure','radie')"
+  - "ca_dernier >= 0 OR ca_dernier IS NULL"
+
+composite_indexes:
+  - cols: "(siege_dept, score_ma DESC)"
+    where: "statut = 'actif' AND ca_dernier >= 1000000"
+    purpose: "Top cibles M&A actives par département (page Intelligence Targets)"
+  - cols: "(naf, score_ma DESC)"
+    where: "statut = 'actif'"
+    purpose: "Top cibles M&A par secteur"
+  - cols: "(score_ma DESC, siren)"
+    purpose: "Pagination keyset par score"
+
+partitioning:
+  by: "siege_dept_zone"
+  type: "LIST"
+  zones:
+    - {name: "idf", values: "75,77,78,91,92,93,94,95"}
+    - {name: "ara", values: "01,03,07,15,26,38,42,43,63,69,73,74"}
+    - {name: "sud_ouest", values: "09,12,24,31,32,33,40,46,47,64,65,66,81,82"}
+    - {name: "outre_mer", values: "971,972,973,974,975,976,977,978,984,986,987,988"}
+    - {name: "default", values: "REST"}
+
+lineage_field: sources_de_verite
+
+business_logic: |
+  Master golden record entreprises FR avec :
+
+  [Identité — INSEE prioritaire, fallback OpenCorporates/Wikidata]
+  - entity_id (UUID stable, sha1(siren))
+  - siren (CHAR(9) UNIQUE)
+  - denomination (NULLIF empty, INSEE > IRPI > OpenCorp)
+  - sigle, nom_commercial
+  - date_creation, forme_juridique, naf, naf_libelle
+  - lei (depuis silver.gleif_lei), wikidata_qid, isin
+
+  [Localisation — BAN normalisée]
+  - siege_siret, siege_adresse JSONB structuré
+  - siege_dept (CHAR(3)), siege_region
+  - siege_geo (POINT 4326 pour PostGIS)
+  - siege_dept_zone (= idf/ara/sud_ouest/etc., DERIVED pour partitioning)
+
+  [Taille & Finances — INPI comptes prioritaire]
+  - effectif_tranche (INSEE), effectif_exact (INPI)
+  - ca_dernier, ca_n_minus_1, ca_n_minus_2
+  - ebitda_dernier, marge_op_dernier, capitaux_propres
+  - dettes_financieres, total_bilan, date_derniers_comptes
+  - has_bilan_recent (< 18 mois)
+
+  [Statut]
+  - statut (actif/cesse/procedure/radie)
+  - date_statut, date_cessation
+
+  [Signaux M&A — depuis silver.entreprises_signals + balo_operations]
+  - n_dirigeants, n_dirigeants_60plus
+  - has_holding_patrimoniale, has_etranger_dirigeant
+  - n_bodacc_annonces_24m, n_cession_events_24m
+  - has_balo_operations_recent (90j) → opa/augmentation_capital/dividende
+  - top_balo_operation_type (catégorie la plus récente)
+
+  [Compliance — silver.amf_signals + opensanctions]
+  - has_amf_red_flag (severity HIGH dans 24m)
+  - n_amf_signals_total, top_amf_severity
+  - has_sanction (opensanctions match)
+  - sanction_programs (array)
+  - has_procedure_collective_recent
+
+  [Contentieux — silver.juridictions_unifiees]
+  - n_jugements_5y, has_contentieux_recent (24m)
+  - n_jugements_par_type (cassation/cours_appel/admin/constit jsonb)
+
+  [Scoring composite — sera alimenté par mart.scoring_ma — pour l'instant heuristique SQL]
+  - score_ma (0-100)
+  - score_defaillance (0-100, basé sur ratios financiers)
+  - score_trajectoire (signal trajectoire prédictive — feature M&A killer)
+
+  [Lineage & métadonnées]
+  - sources_de_verite (JSONB) : {"denomination": "INSEE", "ca_dernier": "INPI_comptes", "lei": "GLEIF", ...}
+  - feature_version (VARCHAR — versioning ML feature store)
+  - derniere_maj (TIMESTAMPTZ now())
+
+transformations: |
+  Pattern TABLE PHYSIQUE + procedure UPSERT (pas MV).
+
+  WITH base AS (
+    SELECT siren, denomination, naf, ...
+    FROM silver.insee_unites_legales
+    WHERE statut = 'actif'  -- pré-filtre
+  ),
+  with_etab AS (
+    SELECT b.*, e.siret AS siege_siret,
+           e.adresse_complete AS siege_adresse,
+           e.code_postal_geo AS siege_geo
+    FROM base b
+    LEFT JOIN silver.insee_etablissements e
+      ON e.siren = b.siren AND e.is_siege = true
+  ),
+  with_finance AS (
+    SELECT we.*, c.ca_net AS ca_dernier, c.resultat_net,
+           c.capitaux_propres, c.total_bilan, c.date_cloture
+    FROM with_etab we
+    LEFT JOIN LATERAL (
+      SELECT * FROM silver.inpi_comptes
+      WHERE siren = we.siren
+      ORDER BY date_cloture DESC LIMIT 1
+    ) c ON true
+  ),
+  with_lei AS (...),
+  with_signals AS (
+    SELECT * FROM with_finance wf
+    LEFT JOIN silver.entreprises_signals s ON s.siren = wf.siren
+  ),
+  with_balo AS (
+    SELECT ws.*,
+           (SELECT count(*) FROM silver.balo_operations
+            WHERE siren = ws.siren AND date_publication > now()-interval '90 days')
+            AS has_balo_recent
+    FROM with_signals ws
+  ),
+  with_compliance AS (...),
+  with_litige AS (...),
+  scored AS (
+    SELECT ...,
+      LEAST(100,
+        (CASE WHEN n_dirigeants_60plus >= 2 THEN 15 ELSE 0 END) +
+        (CASE WHEN has_holding_patrimoniale THEN 20 ELSE 0 END) +
+        (LEAST(20, ca_dernier / 5000000.0)) +
+        (CASE WHEN has_balo_recent THEN 10 ELSE 0 END) +
+        (CASE WHEN has_cession_24m THEN 15 ELSE 0 END) -
+        (CASE WHEN has_amf_red_flag THEN 30 ELSE 0 END) -
+        (CASE WHEN has_sanction THEN 50 ELSE 0 END) -
+        (CASE WHEN has_procedure_collective_recent THEN 40 ELSE 0 END)
+      ) AS score_ma
+    FROM with_litige
+  )
+  -- UPSERT plutôt que CREATE TABLE AS (table physique persistante)
+  INSERT INTO gold.entreprises_master (...)
+  SELECT * FROM scored
+  ON CONFLICT (siren) DO UPDATE SET
+    denomination = EXCLUDED.denomination,
+    score_ma = EXCLUDED.score_ma,
+    derniere_maj = now(),
+    sources_de_verite = EXCLUDED.sources_de_verite;
+
+  Stratégie refresh : table physique, refresh quotidien 03:00 UTC via stored
+  procedure. Plus tard, déclencher UPSERT incrémental via triggers AFTER UPDATE
+  sur les silvers sources.
+
+indexes:
+  - "siren UNIQUE"
+  - "naf"
+  - "siege_dept"
+  - "score_ma DESC"
+  - "denomination USING gin (denomination gin_trgm_ops)"
+  - "siege_geo USING gist"
+  - "lei WHERE lei IS NOT NULL"
+
+refresh_trigger: "cron=0 3 * * *"  # 03:00 UTC tous les jours
+sla_minutes: 1440

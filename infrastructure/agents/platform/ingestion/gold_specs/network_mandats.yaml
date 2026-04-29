@@ -1,0 +1,101 @@
+silver_name: gold.network_mandats
+target_schema: gold
+physical: true
+goal: >
+  🥇 GRAPHE PERSON × ENTREPRISE en SQL — alternative Postgres au graphe Neo4j.
+  ~50M edges. Permet queries WITH RECURSIVE pour "qui connaît qui".
+  Page "Graphe Réseau" + analyses M&A networks.
+
+source_tables:
+  - silver.inpi_dirigeants
+  - gold.entreprises_master
+  - gold.dirigeants_master
+
+grain: "1 row par mandat actif/historique (person_uid × siren × date_debut)"
+
+key_columns:
+  - mandat_id
+  - person_uid
+  - siren
+  - role_code
+  - is_active
+
+check_constraints:
+  - "date_debut <= coalesce(date_fin, now())"
+  - "role_code IS NOT NULL"
+
+composite_indexes:
+  - cols: "(person_uid, is_active, date_debut DESC)"
+    where: "is_active = true"
+    purpose: "Mandats actifs par dirigeant"
+  - cols: "(siren, is_active, role_code)"
+    where: "is_active = true"
+    purpose: "Dirigeants actifs par entreprise"
+  - cols: "(role_code, is_active)"
+    where: "role_code IN ('31','51')"  -- Président, DG
+    purpose: "Top mandataires (président/DG actuels)"
+
+business_logic: |
+  Explose silver.inpi_dirigeants (qui agrège par person_uid) en table de
+  jonctions normalisée person × entreprise. Chaque row = 1 mandat.
+
+  Schéma :
+  - mandat_id (UUID stable, sha1(person_uid||siren||date_debut))
+  - person_uid (FK gold.dirigeants_master)
+  - siren (FK gold.entreprises_master)
+  - role_code (INPI : 31=Président, 51=DG, 70=Administrateur, etc.)
+  - role_libelle
+  - date_debut, date_fin (NULL si actif)
+  - is_active (= date_fin IS NULL OR date_fin > now())
+  - source ('INPI_RNE' default)
+
+  Use cases queries :
+  -- 1. Co-mandataires d'un dirigeant
+  SELECT DISTINCT m2.person_uid
+  FROM gold.network_mandats m1
+  JOIN gold.network_mandats m2 ON m1.siren = m2.siren
+  WHERE m1.person_uid = X AND m2.person_uid != X AND m1.is_active AND m2.is_active;
+
+  -- 2. Réseau récursif niveau 2 (amis des amis)
+  WITH RECURSIVE network AS (
+    SELECT person_uid, 1 AS depth FROM gold.network_mandats WHERE siren = X AND is_active
+    UNION
+    SELECT m.person_uid, n.depth + 1
+    FROM gold.network_mandats m
+    JOIN gold.network_mandats m2 ON m.siren = m2.siren
+    JOIN network n ON n.person_uid = m2.person_uid
+    WHERE n.depth < 2
+  ) SELECT DISTINCT person_uid FROM network;
+
+transformations: |
+  WITH exploded AS (
+    SELECT
+      person_uid,
+      unnest(sirens_mandats) AS siren,
+      -- Pour chaque siren, retrouver role/dates depuis silver.inpi_dirigeants_raw
+      ...
+    FROM silver.inpi_dirigeants
+    WHERE sirens_mandats IS NOT NULL
+  )
+  INSERT INTO gold.network_mandats
+  SELECT
+    md5(person_uid || siren || coalesce(date_debut::text,'')) AS mandat_id,
+    person_uid, siren, role_code, role_libelle,
+    date_debut, date_fin,
+    (date_fin IS NULL OR date_fin > now()) AS is_active,
+    'INPI_RNE' AS source
+  FROM exploded
+  ON CONFLICT (mandat_id) DO UPDATE SET
+    is_active = EXCLUDED.is_active,
+    date_fin = EXCLUDED.date_fin;
+
+indexes:
+  - "mandat_id UNIQUE"
+  - "person_uid"
+  - "siren"
+  - "(person_uid, siren) UNIQUE WHERE is_active = true"  -- 1 mandat actif par couple
+  - "role_code"
+  - "is_active WHERE is_active = true"
+
+refresh_trigger: "cron=0 6 * * *"
+sla_minutes: 1440

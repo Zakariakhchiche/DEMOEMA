@@ -1,0 +1,91 @@
+silver_name: gold.benchmarks_sectoriels
+target_schema: gold
+physical: true
+goal: >
+  🥇 BENCHMARKS SECTORIELS pour comparaison cible vs cohorte — agrégats
+  financiers par NAF × année. Permet d'afficher "ta cible vs son secteur"
+  dans la fiche entreprise. Killer feature M&A.
+
+source_tables:
+  - silver.inpi_comptes
+  - gold.entreprises_master
+
+grain: "1 row par naf × annee × tranche_taille"
+
+key_columns:
+  - naf
+  - annee
+  - tranche_taille
+  - n_entreprises
+
+check_constraints:
+  - "naf ~ '^[0-9]{2}\\.[0-9]{2}[A-Z]?$'"
+  - "annee BETWEEN 2010 AND 2030"
+  - "tranche_taille IN ('TPE','PME','ETI','GE')"
+  - "n_entreprises >= 5"  -- anonymat statistique
+
+composite_indexes:
+  - cols: "(naf, annee DESC)"
+    purpose: "Benchmark spécifique NAF + année récente"
+  - cols: "(annee, tranche_taille, naf)"
+    purpose: "Top secteurs par catégorie taille"
+
+business_logic: |
+  Agrégats statistiques par cellule (naf, annee, tranche_taille) :
+
+  Schéma :
+  - naf, annee, tranche_taille
+  - n_entreprises (count, doit être >= 5 pour anonymat)
+  - ca_median, ca_p10, ca_p25, ca_p75, ca_p90
+  - ebitda_median, ebitda_p25, ebitda_p75
+  - marge_op_median, marge_op_p25, marge_op_p75
+  - effectif_median, effectif_p25, effectif_p75
+  - capitaux_propres_median
+  - dettes_median, ratio_dettes_capitaux_median
+
+  Cas d'usage :
+  - Fiche entreprise : afficher "ta cible CA = 5M€, médian secteur = 3M€,
+    p75 = 8M€" → positionnement secteur immédiat
+  - Identifier cibles "outliers" (top quartile CA dans leur secteur)
+  - Validation comptes annuels (cible déclare 100M€ alors que p99 = 50M€ →
+    suspect)
+
+  Anonymat statistique : aucune cellule n'a < 5 entreprises (sinon excluded).
+
+transformations: |
+  WITH last_comptes AS (
+    SELECT DISTINCT ON (siren)
+      siren, ca_net, resultat_net, ebitda, capitaux_propres, total_bilan,
+      effectif, date_cloture, EXTRACT(YEAR FROM date_cloture) AS annee
+    FROM silver.inpi_comptes
+    ORDER BY siren, date_cloture DESC
+  ),
+  enriched AS (
+    SELECT lc.*, e.naf, e.categorie_entreprise AS tranche_taille
+    FROM last_comptes lc
+    JOIN gold.entreprises_master e USING (siren)
+    WHERE e.naf IS NOT NULL AND lc.ca_net > 0
+  )
+  INSERT INTO gold.benchmarks_sectoriels
+  SELECT
+    naf, annee, tranche_taille,
+    count(*) AS n_entreprises,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY ca_net) AS ca_median,
+    percentile_cont(0.1) WITHIN GROUP (ORDER BY ca_net) AS ca_p10,
+    percentile_cont(0.25) WITHIN GROUP (ORDER BY ca_net) AS ca_p25,
+    percentile_cont(0.75) WITHIN GROUP (ORDER BY ca_net) AS ca_p75,
+    percentile_cont(0.9) WITHIN GROUP (ORDER BY ca_net) AS ca_p90,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY ebitda) AS ebitda_median,
+    ...
+  FROM enriched
+  GROUP BY naf, annee, tranche_taille
+  HAVING count(*) >= 5  -- anonymat
+  ON CONFLICT (naf, annee, tranche_taille) DO UPDATE SET ...;
+
+indexes:
+  - "(naf, annee DESC) UNIQUE"
+  - "annee DESC"
+  - "tranche_taille"
+
+refresh_trigger: "cron=0 7 1 * *"  # mensuel le 1er du mois 07:00
+sla_minutes: 1440

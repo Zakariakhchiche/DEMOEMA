@@ -1,0 +1,134 @@
+silver_name: gold.signaux_ma_feed
+target_schema: gold
+physical: true
+goal: >
+  🥇 FEED EVENTS M&A TEMPS RÉEL — 1 row par event horodaté toutes catégories
+  confondues (BALO, BODACC, AMF, mandats_changes, presse). Feed unifié
+  consommé par la page "Feed Signaux" avec filtres sévérité + dimension.
+
+source_tables:
+  - silver.balo_operations
+  - silver.cession_events
+  - silver.bodacc_annonces
+  - silver.amf_signals
+  - silver.mandats_changes
+  - silver.press_mentions_matched
+
+grain: "1 row par event (signal_uid unique)"
+
+key_columns:
+  - signal_uid
+  - signal_type
+  - severity
+  - date_event
+  - siren
+
+check_constraints:
+  - "severity IN ('LOW','MEDIUM','HIGH','CRITICAL')"
+  - "signal_type IN ('balo_operation','cession','bodacc_event','amf_decision','mandat_change','press_mention','procedure_collective')"
+  - "date_event >= '2020-01-01'"
+
+composite_indexes:
+  - cols: "(date_event DESC, signal_uid)"
+    purpose: "Feed timeline keyset pagination"
+  - cols: "(siren, date_event DESC)"
+    purpose: "Events par entreprise"
+  - cols: "(severity, date_event DESC)"
+    where: "severity IN ('HIGH','CRITICAL')"
+    purpose: "Alerts UI (filter sévère)"
+  - cols: "(signal_type, date_event DESC)"
+    purpose: "Filter par type"
+
+partitioning:
+  by: "date_event"
+  type: "RANGE"
+  partitions:
+    - {name: "current_30d", range: "now()-30d to now()"}
+    - {name: "recent_90d", range: "now()-90d to now()-30d"}
+    - {name: "history_1y", range: "now()-1y to now()-90d"}
+    - {name: "archive", range: "older"}
+
+business_logic: |
+  Union all des 6 sources d'events avec normalisation en schéma unifié :
+
+  Schéma commun :
+  - signal_uid (= sha1(source_table || event_id))
+  - signal_type (enum 7 types)
+  - severity (LOW/MEDIUM/HIGH/CRITICAL)
+  - date_event (TIMESTAMPTZ — quand l'événement a eu lieu)
+  - date_published (TIMESTAMPTZ — quand publié — utile pour journées idle)
+  - siren (entreprise concernée)
+  - person_uid (si event lié à une personne — mandats_changes)
+  - title (text court 200 chars)
+  - description (text long)
+  - source_table (origine)
+  - source_url (URL pour deep link)
+  - raw_payload JSONB
+
+  Mapping severity par type :
+  - balo_operations type='opa' → CRITICAL
+  - balo_operations type='augmentation_capital' → HIGH
+  - balo_operations type='dividende' → LOW
+  - cession_events → HIGH
+  - bodacc_event procedure_collective → CRITICAL
+  - bodacc_event modification → MEDIUM
+  - amf_signal severity HIGH → HIGH (passthrough)
+  - amf_signal severity LOW → LOW
+  - mandat_change demission → MEDIUM
+  - mandat_change nomination → LOW
+  - press_mention → LOW
+  - sanction → CRITICAL
+
+  Cas d'usage : feed temporel page Signaux. UI filtre par severity + type +
+  dept (via JOIN avec gold.entreprises_master).
+
+  Stratégie de retention :
+  - Partition current_30d : full data
+  - Partition recent_90d : full data
+  - Partition history_1y : aggregated (count par siren+type+jour)
+  - Partition archive : purgée après 2 ans (RGPD)
+
+transformations: |
+  WITH balo_events AS (
+    SELECT
+      'balo_' || announcement_id AS signal_uid,
+      'balo_operation' AS signal_type,
+      CASE
+        WHEN operation_type = 'opa' THEN 'CRITICAL'
+        WHEN operation_type IN ('augmentation_capital','fusion','cession','rachat_actions') THEN 'HIGH'
+        WHEN operation_type IN ('convocation_ag','changement_dirigeant') THEN 'MEDIUM'
+        ELSE 'LOW'
+      END AS severity,
+      date_publication AS date_event,
+      ...
+      siren, NULL::text AS person_uid,
+      titre AS title, ...
+      'silver.balo_operations' AS source_table
+    FROM silver.balo_operations
+  ),
+  cession_events AS (
+    SELECT 'cess_' || event_uid, 'cession', 'HIGH', date_event, ...
+    FROM silver.cession_events
+  ),
+  bodacc_events AS (...),
+  amf_events AS (...),
+  mandat_changes AS (...),
+  press AS (...)
+
+  SELECT * FROM balo_events
+  UNION ALL SELECT * FROM cession_events
+  UNION ALL SELECT * FROM bodacc_events
+  UNION ALL SELECT * FROM amf_events
+  UNION ALL SELECT * FROM mandat_changes
+  UNION ALL SELECT * FROM press;
+
+indexes:
+  - "signal_uid UNIQUE"
+  - "date_event DESC"
+  - "siren"
+  - "severity"
+  - "signal_type"
+  - "person_uid WHERE person_uid IS NOT NULL"
+
+refresh_trigger: "interval_hours=1"  # haute fréquence vu que c'est un feed
+sla_minutes: 60

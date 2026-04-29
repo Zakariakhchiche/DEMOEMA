@@ -1,0 +1,71 @@
+silver_name: gold.balo_operations_realtime
+target_schema: gold
+physical: true
+goal: >
+  🥇 FEED BALO TEMPS RÉEL — événements capitalistiques sociétés cotées
+  pré-classifiés par operation_type. Spécialisation pour alertes M&A
+  push (OPA, augmentations capital, fusions). Source du push notifications.
+
+source_tables:
+  - silver.balo_operations
+  - gold.entreprises_master
+
+grain: "1 row par announcement_id (UNIQUE)"
+
+key_columns:
+  - announcement_id
+  - operation_type
+  - date_publication
+  - siren
+
+check_constraints:
+  - "operation_type IN ('opa','opra','augmentation_capital','rachat_actions','fusion','cession','convocation_ag','dividende','comptes_annuels','changement_dirigeant','emission_obligations','placement_prive','note_information','autre')"
+  - "is_event_ma IN (true, false)"
+
+composite_indexes:
+  - cols: "(operation_type, date_publication DESC)"
+    where: "is_event_ma = true"
+    purpose: "Feed M&A events (OPA, fusion, cession)"
+  - cols: "(siren, date_publication DESC)"
+    purpose: "Historique BALO par société"
+  - cols: "(date_publication DESC, announcement_id)"
+    purpose: "Pagination feed récent"
+
+business_logic: |
+  Pass-through silver.balo_operations + JOIN avec gold.entreprises_master
+  pour enrichir avec denomination, naf, siege_dept (pré-calc UI).
+
+  Champs :
+  - announcement_id, operation_type, date_publication
+  - siren, denomination (= e.denomination)
+  - is_event_ma (boolean, true si opa/fusion/cession/augmentation)
+  - secteur (= e.naf_libelle court)
+  - siege_dept
+  - titre, raw_payload
+  - listed_indices (CAC40/SBF120 — JOIN avec euronext si dispo)
+
+  Cas d'usage :
+  - Push notifications WHERE is_event_ma = true (utilisateurs abonnés)
+  - Page "Sociétés cotées : derniers événements"
+  - Cross-référence avec gold.cibles_ma_top (si la cible est cotée)
+
+transformations: |
+  INSERT INTO gold.balo_operations_realtime
+  SELECT
+    bo.announcement_id, bo.operation_type, bo.date_publication,
+    bo.siren, e.denomination, e.naf_libelle AS secteur, e.siege_dept,
+    bo.is_event_ma, bo.titre, bo.raw_payload,
+    NULL::text[] AS listed_indices  -- TODO Y2 via euronext
+  FROM silver.balo_operations bo
+  LEFT JOIN gold.entreprises_master e ON e.siren = bo.siren
+  ON CONFLICT (announcement_id) DO UPDATE SET ..., derniere_maj = now();
+
+indexes:
+  - "announcement_id UNIQUE"
+  - "siren"
+  - "operation_type"
+  - "date_publication DESC"
+  - "is_event_ma WHERE is_event_ma = true"
+
+refresh_trigger: "interval_hours=2"  # haute fréquence — c'est temps réel
+sla_minutes: 120

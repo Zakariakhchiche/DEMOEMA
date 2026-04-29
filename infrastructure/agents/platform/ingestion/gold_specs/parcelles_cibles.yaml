@@ -1,0 +1,93 @@
+silver_name: gold.parcelles_cibles
+target_schema: gold
+physical: true
+goal: >
+  🥇 PATRIMOINE IMMOBILIER CONSOLIDÉ — vue dénormalisée parcelles × cibles
+  M&A. Chaque cible (siren) avec son patrimoine immo total (somme des
+  parcelles via SCI dirigeants). Permet d'identifier les groupes "asset-rich".
+
+source_tables:
+  - silver.parcelles_dirigeants
+  - gold.entreprises_master
+  - gold.dirigeants_master
+
+grain: "1 row par siren cible (entreprise principale du dirigeant)"
+
+key_columns:
+  - siren
+  - n_dirigeants_proprietaires
+  - patrimoine_total_eur
+
+check_constraints:
+  - "patrimoine_total_eur >= 0"
+  - "n_dirigeants_proprietaires >= 1"
+
+composite_indexes:
+  - cols: "(patrimoine_total_eur DESC, siren)"
+    purpose: "Top cibles asset-rich"
+  - cols: "(siren) UNIQUE"
+    purpose: "Lookup par siren"
+
+business_logic: |
+  Pour chaque entreprise siren, agrège le patrimoine immobilier de TOUS ses
+  dirigeants (via leurs SCI possédées) :
+
+  Schéma :
+  - siren (UNIQUE)
+  - denomination
+  - n_dirigeants (du gold.entreprises_master)
+  - n_dirigeants_proprietaires (= ceux ayant des parcelles)
+  - n_parcelles_total
+  - surface_totale_m2
+  - patrimoine_total_eur (somme valeur_estimee_eur)
+  - patrimoine_par_dirigeant_eur_median
+  - communes_principales TEXT[] (top 5 par valeur)
+  - is_asset_rich (= patrimoine_total_eur >= 5M€ — heuristique killer feature)
+
+  Cas d'usage :
+  - SELECT siren, denomination, patrimoine_total_eur
+    FROM gold.parcelles_cibles
+    WHERE is_asset_rich = true
+    ORDER BY patrimoine_total_eur DESC
+    LIMIT 100;
+  → top 100 cibles M&A asset-rich (intéressant pour offres LBO/LBI)
+
+transformations: |
+  WITH person_to_siren AS (
+    -- Map person_uid → sirens_mandats[] via gold.dirigeants_master
+    SELECT person_uid, unnest(sirens_mandats) AS siren
+    FROM gold.dirigeants_master
+    WHERE n_mandats_actifs >= 1
+  ),
+  parcelles_per_siren AS (
+    SELECT
+      pts.siren,
+      count(DISTINCT pts.person_uid) AS n_dirigeants_proprietaires,
+      count(p.parcelle_id) AS n_parcelles_total,
+      SUM(p.surface_m2) AS surface_totale_m2,
+      SUM(p.valeur_estimee_eur) AS patrimoine_total_eur,
+      array_agg(DISTINCT p.commune_insee ORDER BY p.commune_insee) FILTER (WHERE p.valeur_estimee_eur > 100000) AS communes_principales
+    FROM person_to_siren pts
+    JOIN silver.parcelles_dirigeants p ON p.person_uid = pts.person_uid
+    GROUP BY pts.siren
+  )
+  INSERT INTO gold.parcelles_cibles
+  SELECT
+    pps.siren, e.denomination, e.n_dirigeants,
+    pps.n_dirigeants_proprietaires, pps.n_parcelles_total,
+    pps.surface_totale_m2, pps.patrimoine_total_eur,
+    pps.patrimoine_total_eur / NULLIF(pps.n_dirigeants_proprietaires, 0) AS patrimoine_par_dirigeant_eur_median,
+    pps.communes_principales[1:5],
+    pps.patrimoine_total_eur >= 5000000 AS is_asset_rich
+  FROM parcelles_per_siren pps
+  JOIN gold.entreprises_master e USING (siren)
+  WHERE pps.patrimoine_total_eur > 0
+  ON CONFLICT (siren) DO UPDATE SET ..., derniere_maj = now();
+
+indexes:
+  - "siren UNIQUE"
+  - "patrimoine_total_eur DESC"
+  - "is_asset_rich WHERE is_asset_rich = true"
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 1440

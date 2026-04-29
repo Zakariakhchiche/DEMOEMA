@@ -1,0 +1,81 @@
+silver_name: gold.veille_reglementaire
+target_schema: gold
+physical: true
+goal: >
+  🥇 VEILLE RÉGLEMENTAIRE par secteur APE — index LEGI + JORF par mots-clés
+  sectoriels. Permet d'alerter les utilisateurs sur les réformes impactant
+  leur cible M&A (santé, finance, immobilier, énergie, etc.).
+
+source_tables:
+  - silver.legi_jorf_secteurs
+
+grain: "1 row par texte × secteur (peut être multi-secteur)"
+
+key_columns:
+  - texte_uid
+  - secteur_code
+  - date_publication
+
+check_constraints:
+  - "secteur_code IN ('sante','finance','immobilier','energie','numerique','transport','agroalim','industrie','social','fiscal','concurrence','numerique_eu')"
+  - "source_db IN ('legi','jorf')"
+  - "impact_estime IN ('LOW','MEDIUM','HIGH')"
+
+composite_indexes:
+  - cols: "(secteur_code, date_publication DESC)"
+    purpose: "Feed réformes par secteur"
+  - cols: "(date_publication DESC, secteur_code)"
+    where: "impact_estime IN ('MEDIUM','HIGH')"
+    purpose: "Alertes réformes majeures"
+
+partitioning:
+  by: "date_publication"
+  type: "RANGE"
+  partitions:
+    - {name: "current_year", range: "2026"}
+    - {name: "recent_3y", range: "2023-2025"}
+    - {name: "history", range: "older"}
+
+business_logic: |
+  Pass-through silver.legi_jorf_secteurs avec scoring impact ajouté.
+
+  Schéma :
+  - texte_uid (UNIQUE)
+  - source_db (legi/jorf)
+  - texte_id, title
+  - secteur_code, secteur_nom
+  - date_publication
+  - impact_estime (LOW/MEDIUM/HIGH) — heuristique sur mots-clés du titre :
+    * HIGH : "loi", "ordonnance", "directive", "réforme", "obligation"
+    * MEDIUM : "décret", "arrêté"
+    * LOW : "circulaire", "rapport"
+  - keywords_matched TEXT[] — pour debug/audit
+  - source_url
+  - raw_payload
+
+  Cas d'usage :
+  - WHERE secteur_code = 'sante' AND date_publication > now() - interval '90 days'
+  - Alertes Slack/email pour clients EdRCF avec cibles dans secteur affecté
+
+transformations: |
+  INSERT INTO gold.veille_reglementaire
+  SELECT
+    texte_uid, source_db, texte_id, title, secteur_code, secteur_nom,
+    date_publication,
+    CASE
+      WHEN lower(title) ~ 'loi |ordonnance|directive|réforme|obligation' THEN 'HIGH'
+      WHEN lower(title) ~ 'décret|arrêté' THEN 'MEDIUM'
+      ELSE 'LOW'
+    END AS impact_estime,
+    raw_payload
+  FROM silver.legi_jorf_secteurs
+  ON CONFLICT (texte_uid) DO UPDATE SET ..., derniere_maj = now();
+
+indexes:
+  - "texte_uid UNIQUE"
+  - "secteur_code"
+  - "date_publication DESC"
+  - "impact_estime"
+
+refresh_trigger: "interval_hours=12"
+sla_minutes: 720

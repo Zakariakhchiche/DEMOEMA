@@ -1,0 +1,71 @@
+silver_name: gold.juridictions_master
+target_schema: gold
+physical: true
+goal: >
+  🥇 INDEX JURIDICTIONS POUR SEARCH — wrap silver.juridictions_unifiees pour
+  recherche efficace par siren ou nom de partie. ~1M+ décisions indexées.
+  Endpoint /api/contentieux?siren=X ou /api/contentieux/search?q=...
+
+source_tables:
+  - silver.juridictions_unifiees
+
+grain: "1 row par decision_id (UNIQUE)"
+
+key_columns:
+  - decision_id
+  - juridiction_type
+  - date_decision
+  - sirens_mentioned
+
+check_constraints:
+  - "juridiction_type IN ('cassation','cours_appel','admin','constit')"
+  - "date_decision BETWEEN '1950-01-01' AND now() + interval '1 day'"
+
+composite_indexes:
+  - cols: "(juridiction_type, date_decision DESC)"
+    purpose: "Filter par juridiction + tri date"
+  - cols: "(date_decision DESC, decision_id)"
+    purpose: "Pagination feed décisions récentes"
+
+business_logic: |
+  Pass-through de silver.juridictions_unifiees avec optimisations search :
+
+  Champs :
+  - decision_id (UNIQUE)
+  - juridiction_type (cassation/cours_appel/admin/constit)
+  - juridiction (libellé long)
+  - chamber (civile/criminelle/etc.)
+  - date_decision
+  - titre (text 500 chars)
+  - parties_extracted (text — JOIN search)
+  - sirens_mentioned (TEXT[] avec GIN index)
+  - searchable_text (tsvector pour FTS Postgres)
+  - source_url (deep link DILA)
+  - raw_payload (JSONB pour drill-down)
+
+  Cas d'usage :
+  - SELECT * FROM gold.juridictions_master
+    WHERE 'siren' = ANY(sirens_mentioned) ORDER BY date_decision DESC
+  - SELECT ... WHERE searchable_text @@ to_tsquery('Dupont & SCI')
+
+transformations: |
+  INSERT INTO gold.juridictions_master
+  SELECT decision_id, juridiction_type, juridiction, chamber, date_decision,
+         titre, parties_extracted, sirens_mentioned,
+         to_tsvector('french', coalesce(titre,'') || ' ' || coalesce(parties_extracted,'')) AS searchable_text,
+         coalesce(raw_payload->>'URL','') AS source_url,
+         raw_payload
+  FROM silver.juridictions_unifiees
+  ON CONFLICT (decision_id) DO UPDATE
+    SET searchable_text = EXCLUDED.searchable_text,
+        derniere_maj = now();
+
+indexes:
+  - "decision_id UNIQUE"
+  - "juridiction_type"
+  - "date_decision DESC"
+  - "sirens_mentioned USING gin"
+  - "searchable_text USING gin"
+
+refresh_trigger: "cron=0 5 * * *"
+sla_minutes: 1440

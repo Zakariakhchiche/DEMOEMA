@@ -1,0 +1,142 @@
+silver_name: gold.dirigeants_master
+target_schema: gold
+physical: true
+goal: >
+  🥇 MASTER TABLE DIRIGEANTS — 1 row par person_uid avec TOUTES les features
+  cross-source. Étend silver.dirigeants_360 avec les nouveaux silvers M&A
+  (parcelles, hatvp, transparence santé, innovation, ICIJ offshore). Feature
+  store final consommé par /api/dirigeants/* et le scoring DD.
+
+source_tables:
+  - silver.dirigeants_360
+  - silver.parcelles_dirigeants
+  - silver.hatvp_conflits_interets
+  - silver.transparence_sante_dirigeants
+  - silver.crossref_hal_innovation
+  - silver.icij_offshore_match
+  - silver.mandats_changes
+
+grain: "1 row par person_uid (UNIQUE)"
+
+key_columns:
+  - person_uid
+  - nom
+  - prenom
+  - pro_ma_score
+  - n_mandats_actifs
+
+check_constraints:
+  - "pro_ma_score BETWEEN 0 AND 100"
+  - "digital_presence_score BETWEEN 0 AND 100 OR digital_presence_score IS NULL"
+  - "n_mandats_actifs >= 0"
+  - "age_2026 BETWEEN 18 AND 120 OR age_2026 IS NULL"
+  - "EXTRACT(YEAR FROM date_naissance) BETWEEN 1900 AND 2010 OR date_naissance IS NULL"
+
+composite_indexes:
+  - cols: "(pro_ma_score DESC, person_uid)"
+    purpose: "Top dirigeants M&A keyset pagination"
+  - cols: "(is_pro_ma, has_holding_patrimoniale, pro_ma_score DESC)"
+    where: "is_pro_ma = true"
+    purpose: "Pro M&A avec holding (cibles HNW)"
+  - cols: "(has_political_connection, pro_ma_score DESC)"
+    where: "has_political_connection = true"
+    purpose: "Réseau politique (page DD)"
+
+lineage_field: sources_de_verite
+
+business_logic: |
+  Étend silver.dirigeants_360 (qui couvre déjà la base : mandats + SCI +
+  finances + réseau + sanctions + bodacc + presse + digital) avec les
+  4 nouveaux silvers M&A (28/04) :
+
+  [De silver.parcelles_dirigeants — patrimoine immobilier valorisé]
+  - n_parcelles, surface_totale_m2, valeur_immo_estimee_eur
+  - has_patrimoine_immo_significatif (>= 1M€)
+
+  [De silver.hatvp_conflits_interets — politiques + élus]
+  - has_political_connection (= EXISTS HATVP declaration)
+  - declarant_function_publique (depute/senateur/ministre/...)
+  - n_entreprises_mentions_hatvp_active
+
+  [De silver.transparence_sante_dirigeants — pharma KOL]
+  - is_kol_pharma (>= 50K€/an d'avantages)
+  - total_avantages_pharma_eur, n_laboratoires_partenaires
+  - top_lab_denomination
+
+  [De silver.crossref_hal_innovation — score innovation]
+  - n_publications_total, n_publications_recent (5y)
+  - h_index_proxy (= log10(n_publications_total))
+  - has_publications_recent (signal R&D actif)
+
+  [De silver.icij_offshore_match — DD anti-blanchiment]
+  - has_offshore_match
+  - icij_databases (array : panama/pandora/paradise/bahamas)
+  - max_match_confidence (HIGH/MED/LOW)
+  - n_offshore_jurisdictions (BVI, Cayman, Panama, etc.)
+
+  [De silver.mandats_changes — chronologie]
+  - n_mandats_changes_24m
+  - last_change_type (nomination/demission/revocation)
+  - last_change_date
+  - is_high_rotation (>= 3 changes en 12 mois)
+
+  [Score recalibré pro_ma_score 2.0]
+  Étend la formule existante avec :
+  - +10 si has_political_connection (réseau)
+  - +10 si is_kol_pharma (autorité scientifique)
+  - +5 si has_publications_recent (innovation)
+  - -30 si has_offshore_match HIGH (red flag DD)
+  - -10 si is_high_rotation (instabilité)
+
+  [Lineage]
+  - sources_de_verite JSONB : {"identite": "silver.inpi_dirigeants",
+    "patrimoine_immo": "silver.parcelles_dirigeants", ...}
+  - feature_version
+
+transformations: |
+  Pattern table physique + UPSERT.
+
+  Base : silver.dirigeants_360 (déjà tout calculé, on ajoute les 4 nouveaux silvers).
+
+  WITH base AS (
+    SELECT * FROM silver.dirigeants_360
+  ),
+  with_immo AS (
+    SELECT b.*,
+           (SELECT count(*) FROM silver.parcelles_dirigeants p
+            WHERE p.person_uid = b.person_uid) AS n_parcelles,
+           (SELECT SUM(p.valeur_estimee_eur) FROM silver.parcelles_dirigeants p
+            WHERE p.person_uid = b.person_uid) AS valeur_immo_estimee_eur
+    FROM base b
+  ),
+  with_hatvp AS (...),
+  with_pharma AS (...),
+  with_innov AS (...),
+  with_icij AS (...),
+  with_changes AS (...),
+  scored AS (
+    SELECT ...,
+      LEAST(100, base.pro_ma_score
+        + (CASE WHEN has_political_connection THEN 10 ELSE 0 END)
+        + (CASE WHEN is_kol_pharma THEN 10 ELSE 0 END)
+        + (CASE WHEN has_publications_recent THEN 5 ELSE 0 END)
+        - (CASE WHEN has_offshore_match THEN 30 ELSE 0 END)
+        - (CASE WHEN is_high_rotation THEN 10 ELSE 0 END)
+      ) AS pro_ma_score_v2
+    FROM ...
+  )
+  INSERT INTO gold.dirigeants_master (...) SELECT * FROM scored
+  ON CONFLICT (person_uid) DO UPDATE SET ..., derniere_maj = now();
+
+indexes:
+  - "person_uid UNIQUE"
+  - "pro_ma_score DESC"
+  - "lower(nom) USING gin (lower(nom) gin_trgm_ops)"
+  - "sirens_mandats USING gin"
+  - "co_mandataires USING gin"
+  - "has_offshore_match WHERE has_offshore_match = true"
+  - "has_political_connection WHERE has_political_connection = true"
+  - "has_holding_patrimoniale WHERE has_holding_patrimoniale = true"
+
+refresh_trigger: "cron=30 3 * * *"
+sla_minutes: 1440

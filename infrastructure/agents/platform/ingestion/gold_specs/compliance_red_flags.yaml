@@ -1,0 +1,109 @@
+silver_name: gold.compliance_red_flags
+target_schema: gold
+physical: true
+goal: >
+  🥇 RED FLAGS COMPLIANCE pour Due Diligence M&A — 1 row par siren présentant
+  un risque (sanctions, AMF, ICIJ offshore, procédures collectives, gels).
+  Module KYC + page Compliance.
+
+source_tables:
+  - silver.opensanctions
+  - silver.amf_signals
+  - silver.icij_offshore_match
+  - silver.bodacc_annonces
+  - silver.gels_avoirs
+  - gold.entreprises_master
+
+grain: "1 row par siren (consolidé multi-flag)"
+
+key_columns:
+  - siren
+  - flag_severity_max
+  - n_flags
+
+check_constraints:
+  - "flag_severity_max IN ('HIGH','CRITICAL')"
+  - "n_flags >= 1"
+
+composite_indexes:
+  - cols: "(flag_severity_max, n_flags DESC)"
+    purpose: "Top red flags pour DD"
+  - cols: "(siren, flag_severity_max)"
+    purpose: "Lookup direct par siren"
+
+business_logic: |
+  Pour chaque siren, agrège tous les types de red flags :
+
+  Types de flags :
+  - sanction_opensanctions (CRITICAL)
+  - amf_red_flag (HIGH si severity HIGH dans amf_signals)
+  - icij_offshore_match (CRITICAL si confidence HIGH, HIGH si MEDIUM)
+  - procedure_collective_active (CRITICAL)
+  - gel_avoir_actif (CRITICAL)
+  - dirigeant_sanctionne (HIGH si dirigeant a sanction)
+
+  Schéma :
+  - siren
+  - n_flags (total)
+  - flag_severity_max (CRITICAL/HIGH)
+  - sanctions_array JSONB [{program, date_inscription, source}]
+  - amf_signals_array JSONB
+  - offshore_matches_array JSONB
+  - has_procedure_collective_active
+  - has_gel_avoir_actif
+  - n_dirigeants_sanctionnes
+  - last_flag_date (date du flag le plus récent)
+
+  Cas d'usage :
+  - SELECT * FROM gold.compliance_red_flags WHERE siren = X (DD ponctuelle)
+  - JOIN avec gold.entreprises_master sur sirens en commun pour filtrer cibles
+  - Endpoint /api/admin/compliance/check?siren=X
+
+transformations: |
+  WITH sanctions_per_siren AS (
+    SELECT siren, jsonb_agg(jsonb_build_object('program',sanction_program,'date',date_publication)) AS sanctions_array,
+           count(*) AS n_sanctions
+    FROM silver.opensanctions
+    WHERE matched_siren IS NOT NULL
+    GROUP BY siren
+  ),
+  amf_per_siren AS (
+    SELECT siren, jsonb_agg(jsonb_build_object('type',signal_type,'severity',severity,'date',date_signal)) FILTER (WHERE severity = 'HIGH') AS amf_signals_array,
+           count(*) FILTER (WHERE severity = 'HIGH') AS n_amf_high
+    FROM silver.amf_signals WHERE siren IS NOT NULL
+    GROUP BY siren
+  ),
+  icij_per_siren AS (...),  -- via dirigeants → sirens_mandats
+  procedures AS (
+    SELECT DISTINCT siren, true AS has_procedure_collective_active
+    FROM silver.bodacc_annonces
+    WHERE type = 'procedure_collective' AND statut_active = true
+  ),
+  gels AS (...)
+
+  SELECT
+    coalesce(sp.siren, ap.siren, pr.siren) AS siren,
+    GREATEST(
+      CASE WHEN n_sanctions > 0 THEN 'CRITICAL' ELSE 'HIGH' END,
+      CASE WHEN has_procedure_collective_active THEN 'CRITICAL' ELSE 'HIGH' END
+    ) AS flag_severity_max,
+    coalesce(n_sanctions,0) + coalesce(n_amf_high,0) + ... AS n_flags,
+    sanctions_array, amf_signals_array, offshore_matches_array,
+    coalesce(has_procedure_collective_active, false),
+    coalesce(has_gel_avoir_actif, false),
+    GREATEST(last_sanction_date, last_amf_date, last_procedure_date) AS last_flag_date
+  FROM sanctions_per_siren sp
+  FULL OUTER JOIN amf_per_siren ap USING (siren)
+  FULL OUTER JOIN icij_per_siren ic USING (siren)
+  FULL OUTER JOIN procedures pr USING (siren)
+  FULL OUTER JOIN gels USING (siren)
+  WHERE n_flags >= 1;
+
+indexes:
+  - "siren UNIQUE"
+  - "flag_severity_max"
+  - "last_flag_date DESC"
+  - "n_flags DESC"
+
+refresh_trigger: "interval_hours=6"
+sla_minutes: 360
