@@ -202,8 +202,9 @@ async def fiche_entreprise(req: Request, siren: str):
             "SELECT * FROM gold.entreprises_master WHERE siren = $1", siren
         )
     if not fiche:
-        # Fallback : JOIN inpi_comptes (CA/EBITDA) + osint_companies (NAF/dept/forme)
-        # + meta-stats agrégées (n_dirigeants/n_signaux/n_sanctions).
+        # Skip osint_companies_enriched (bloqué actuellement). On dérive le
+        # dept/ville depuis silver.bodacc_annonces. Les colonnes NAF/forme/
+        # capital social restent NULL en attendant déblocage osint ou gold.
         fiche = await pool.fetchrow(
             """WITH last_compte AS (
                   SELECT DISTINCT ON (siren) siren, denomination,
@@ -225,15 +226,11 @@ async def fiche_entreprise(req: Request, siren: str):
                       LIMIT 5
                   ) h
                ),
-               osint AS (
-                  SELECT siren, code_ape AS naf,
-                         forme_juridique, montant_capital AS capital_social,
-                         adresse_code_postal, date_immatriculation,
-                         denomination AS osint_denomination,
-                         primary_domain, has_linkedin_page, has_github_org,
-                         linkedin_employees, digital_presence_score
-                  FROM silver.osint_companies_enriched
-                  WHERE siren = $1
+               loc AS (
+                  SELECT code_dept AS dept, ville, region
+                  FROM silver.bodacc_annonces
+                  WHERE siren = $1 AND code_dept IS NOT NULL
+                  ORDER BY date_parution DESC LIMIT 1
                ),
                counts AS (
                   SELECT
@@ -242,7 +239,7 @@ async def fiche_entreprise(req: Request, siren: str):
                     (SELECT COUNT(*)::int FROM silver.opensanctions WHERE $1 = ANY(sirens_fr)) AS n_sanctions
                )
                SELECT lc.siren,
-                      COALESCE(lc.denomination, o.osint_denomination) AS denomination,
+                      lc.denomination,
                       lc.ca_net AS ca_dernier,
                       lc.resultat_net AS ebitda_dernier,
                       lc.capitaux_propres,
@@ -253,19 +250,15 @@ async def fiche_entreprise(req: Request, siren: str):
                         THEN ROUND((lc.resultat_net::numeric / lc.ca_net) * 100, 1)
                         ELSE NULL
                       END AS marge_pct,
-                      o.naf,
-                      o.forme_juridique,
-                      o.capital_social,
-                      o.adresse_code_postal,
-                      LEFT(o.adresse_code_postal, 2) AS dept,
-                      EXTRACT(YEAR FROM o.date_immatriculation)::int AS annee_creation,
-                      o.primary_domain, o.has_linkedin_page, o.has_github_org,
-                      o.linkedin_employees, o.digital_presence_score,
+                      NULL::text AS naf,
+                      NULL::text AS forme_juridique,
+                      NULL::numeric AS capital_social,
+                      l.dept, l.ville, l.region,
                       h.ca_history, h.exercices,
                       cnt.n_dirigeants, cnt.n_bodacc, cnt.n_sanctions,
                       'actif' AS statut
                FROM last_compte lc
-               LEFT JOIN osint o ON o.siren = lc.siren
+               LEFT JOIN loc l ON true
                CROSS JOIN history h
                CROSS JOIN counts cnt""",
             siren,
@@ -395,16 +388,19 @@ async def dashboard(req: Request):
                WHERE n.nspname = 'silver' AND c.relname = 'osint_companies_enriched') AS n_osint"""
     )
 
+    # Heatmap dérivée de silver.bodacc_annonces (75k, code_dept indexé probable)
+    # — distribution des activités économiques visible par département.
     heatmap = await pool.fetch(
-        """SELECT LEFT(adresse_code_postal, 2) AS dept,
+        """SELECT code_dept AS dept,
                   COUNT(*)::int AS count
-           FROM silver.osint_companies_enriched
-           WHERE adresse_code_postal IS NOT NULL
-             AND length(adresse_code_postal) >= 2
-           GROUP BY LEFT(adresse_code_postal, 2)
+           FROM silver.bodacc_annonces
+           WHERE code_dept IS NOT NULL
+             AND length(code_dept) >= 2
+             AND date_parution >= CURRENT_DATE - INTERVAL '90 days'
+           GROUP BY code_dept
            ORDER BY count DESC
            LIMIT 12"""
-    )
+    ) if await _table_exists(pool, "silver", "bodacc_annonces") else []
 
     DEPT_LABELS = {
         "01": "Ain", "02": "Aisne", "03": "Allier", "06": "Alpes-Maritimes",
@@ -764,14 +760,13 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
             params.append(f"%{q}%")
             where.append(f"c.denomination ILIKE ${len(params)}")
 
-    # Filtres NAF / dept appliqués sur le résultat enrichi (osint)
+    # Filtres dept appliqués post-aggregation (sur dept dérivé de bodacc)
     post_where: list[str] = []
-    if naf:
-        params.append(f"{naf}%")
-        post_where.append(f"e.code_ape ILIKE ${len(params)}")
     if dept:
-        params.append(f"{dept}%")
-        post_where.append(f"e.adresse_code_postal ILIKE ${len(params)}")
+        params.append(dept)
+        post_where.append(f"dept = ${len(params)}")
+    # NAF skip — osint_companies_enriched bloqué, on n'a pas le NAF par siren ailleurs
+    _ = naf  # noqa
 
     order_sql = {
         "score_ma": "lc.ca_net DESC NULLS LAST",
@@ -781,6 +776,8 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
 
     extra_where = (" AND " + " AND ".join(post_where)) if post_where else ""
 
+    # Skip JOIN osint_companies_enriched (table actuellement bloquée). On
+    # garde inpi_comptes pur + bodacc pour le dept (indexé).
     sql = f"""
         WITH last_compte AS (
             SELECT DISTINCT ON (c.siren) c.siren, c.denomination,
@@ -791,36 +788,44 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
             WHERE {' AND '.join(where)}
             ORDER BY c.siren, c.date_cloture DESC
             LIMIT {int(limit) * 4}
+        ),
+        with_dept AS (
+            SELECT lc.*,
+                   (SELECT b.code_dept FROM silver.bodacc_annonces b
+                    WHERE b.siren = lc.siren AND b.code_dept IS NOT NULL
+                    ORDER BY b.date_parution DESC LIMIT 1) AS dept,
+                   (SELECT b.ville FROM silver.bodacc_annonces b
+                    WHERE b.siren = lc.siren AND b.ville IS NOT NULL
+                    ORDER BY b.date_parution DESC LIMIT 1) AS ville
+            FROM last_compte lc
         )
-        SELECT lc.siren,
-               COALESCE(lc.denomination, e.denomination) AS denomination,
-               e.code_ape AS naf,
-               COALESCE(e.code_ape, '') AS naf_libelle,
-               e.forme_juridique,
-               LEFT(e.adresse_code_postal, 2) AS dept,
-               e.adresse_code_postal,
-               EXTRACT(YEAR FROM e.date_immatriculation)::text AS date_creation,
+        SELECT siren,
+               denomination,
+               NULL::text AS naf,
+               NULL::text AS naf_libelle,
+               NULL::text AS forme_juridique,
+               dept,
+               ville,
+               date_cloture AS date_creation,
                'actif' AS statut,
-               lc.ca_net AS ca_dernier,
-               lc.resultat_net AS ebitda_dernier,
-               lc.date_cloture AS date_derniers_comptes,
-               lc.effectif_moyen::int AS effectif_exact,
-               lc.capitaux_propres,
+               ca_net AS ca_dernier,
+               resultat_net AS ebitda_dernier,
+               date_cloture AS date_derniers_comptes,
+               effectif_moyen::int AS effectif_exact,
+               capitaux_propres,
                CASE
-                 WHEN lc.ca_net IS NULL THEN 0
-                 WHEN lc.resultat_net IS NULL THEN 0
-                 ELSE ROUND((lc.resultat_net::numeric / NULLIF(lc.ca_net, 0)) * 100, 1)
+                 WHEN ca_net IS NULL OR ca_net = 0 OR resultat_net IS NULL THEN NULL
+                 ELSE ROUND((resultat_net::numeric / ca_net) * 100, 1)
                END AS marge_pct,
-               LEAST(95, 50 + (COALESCE(lc.ca_net, 0) / 200000)::int) AS score_ma,
-               (COALESCE(lc.ca_net, 0) >= 14000000) AS is_pro_ma,
+               LEAST(95, 50 + (COALESCE(ca_net, 0) / 200000)::int) AS score_ma,
+               (COALESCE(ca_net, 0) >= 14000000) AS is_pro_ma,
                false AS is_asset_rich,
                EXISTS(
                  SELECT 1 FROM silver.opensanctions os
-                 WHERE lc.siren = ANY(os.sirens_fr)
+                 WHERE siren = ANY(os.sirens_fr)
                ) AS has_compliance_red_flag,
                false AS is_listed
-        FROM last_compte lc
-        LEFT JOIN silver.osint_companies_enriched e ON e.siren = lc.siren
+        FROM with_dept
         WHERE 1=1 {extra_where}
         ORDER BY {order_sql}
         LIMIT {int(limit)} OFFSET {int(offset)}
