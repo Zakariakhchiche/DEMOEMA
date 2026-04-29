@@ -1683,7 +1683,9 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
                    -- precis quand l utilisateur clique sur une cible. Pour le listing
                    -- on garde des cibles rapides (sub-seconde).
             FROM last_compte lc
-            LEFT JOIN silver.insee_unites_legales ul ON ul.siren = lc.siren
+            -- insee_unites_legales.siren = text, lc.siren = char(9). Sans cast
+            -- explicite Postgres ne peut pas utiliser l'index btree → 29M scan.
+            LEFT JOIN silver.insee_unites_legales ul ON ul.siren = lc.siren::text
             LEFT JOIN silver.osint_companies_enriched oce ON oce.siren = lc.siren::char(9)
             -- insee_etablissements 43M rows fait timeout meme avec LATERAL
             -- LIMIT 1. On utilise osint pour code_postal + bodacc pour ville/dept.
