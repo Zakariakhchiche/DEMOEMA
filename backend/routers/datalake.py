@@ -480,9 +480,11 @@ async def fiche_entreprise(req: Request, siren: str):
     else:
         dirigeants = dirigeants_silver
 
-    # Override n_dirigeants if we got data from gouv fallback
-    if isinstance(fiche, dict) and not dirigeants_silver and dirigeants:
-        fiche["n_dirigeants"] = len(dirigeants)
+    # Override compteurs si fallback fourni des données.
+    # Évite l'incohérence "tab Dirigeants 3 / cellule DIRIGEANTS 0" en bas de fiche.
+    if isinstance(fiche, dict):
+        if dirigeants and (fiche.get("n_dirigeants") or 0) < len(dirigeants):
+            fiche["n_dirigeants"] = len(dirigeants)
 
     # Signaux M&A — BODACC (annonces commerciales). Silver d'abord, fallback
     # API gov BODACC live si vide.
@@ -503,7 +505,9 @@ async def fiche_entreprise(req: Request, siren: str):
         )
 
     if not signaux:
-        # Fallback live BODACC datadila API
+        # Fallback live BODACC datadila API. Si succès, on récupère aussi le
+        # COUNT total via nhits (pas juste les 20 affichés) pour que le
+        # compteur n_bodacc soit fidèle.
         try:
             import httpx as _httpx2
             async with _httpx2.AsyncClient(timeout=5.0) as client:
@@ -526,6 +530,9 @@ async def fiche_entreprise(req: Request, siren: str):
                         }
                         for r in (data.get("records") or [])
                     ]
+                    # Update n_bodacc avec le total réel (nhits) du dataset
+                    if isinstance(fiche, dict):
+                        fiche["n_bodacc"] = data.get("nhits", len(signaux))
         except Exception as e:
             print(f"[fiche] BODACC live API failed: {type(e).__name__}: {str(e)[:80]}")
 
@@ -608,6 +615,15 @@ async def fiche_entreprise(req: Request, siren: str):
                         })
         except Exception as e:
             print(f"[fiche] Google News RSS failed: {type(e).__name__}: {str(e)[:80]}")
+
+    # Synchronise les compteurs avec les données réellement fetched (silver + fallbacks)
+    if isinstance(fiche, dict):
+        if signaux and (fiche.get("n_bodacc") or 0) < len(signaux):
+            fiche["n_bodacc"] = len(signaux)
+        if red_flags:
+            fiche["n_sanctions"] = len(red_flags)
+        fiche["n_presse"] = len(presse)
+        fiche["n_network"] = len(network)
 
     return {
         "fiche": _serialize(fiche) if hasattr(fiche, "items") and not isinstance(fiche, dict) else fiche,
