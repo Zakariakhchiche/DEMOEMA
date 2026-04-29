@@ -217,6 +217,151 @@ COPILOT_TOOLS = [
             },
         },
     },
+    # ====== Tools avancés sourcing ======
+    {
+        "type": "function",
+        "function": {
+            "name": "search_dirigeants_60plus",
+            "description": "Cherche dirigeants 60+ avec multi-mandats (signal succession M&A imminente). Source silver.inpi_dirigeants (8.1M).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "min_mandats": {"type": "integer", "description": "Mandats actifs minimum (default 3)"},
+                    "limit": {"type": "integer", "description": "Default 10, max 50"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_sci_patrimoine",
+            "description": "Top dirigeants par capital SCI cumulé (fortunes cachées + signal asset-rich). Source silver.dirigeant_sci_patrimoine (3.5M).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "min_capital": {"type": "integer", "description": "Capital SCI cumulé minimum en €"},
+                    "limit": {"type": "integer", "description": "Default 10"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_co_mandats",
+            "description": "Réseau co-mandataires d'une entreprise (qui sont les autres entreprises où ses dirigeants siègent). Pattern key pour M&A relationship mapping.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "siren": {"type": "string", "description": "SIREN 9 chiffres"},
+                },
+                "required": ["siren"],
+            },
+        },
+    },
+    # ====== Tools compliance & DD avancée ======
+    {
+        "type": "function",
+        "function": {
+            "name": "check_offshore",
+            "description": "Match ICIJ Panama/Paradise/Pandora Papers pour un dirigeant ou société. Red flag DD majeur.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Nom personne ou entité"},
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_lobbying",
+            "description": "Inscription HATVP / activité lobbying d'une entreprise (transparence registre français).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "siren": {"type": "string", "description": "SIREN 9 chiffres"},
+                    "name": {"type": "string", "description": "Nom entreprise (alternatif)"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_jurisprudence",
+            "description": "Décisions de justice (Cour cassation, Cour appel, Conseil constit, JADE). Source silver.judilibre_decisions (15k).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "search": {"type": "string", "description": "Mots-clés (denomination, secteur, type contentieux)"},
+                    "limit": {"type": "integer", "description": "Default 10"},
+                },
+            },
+        },
+    },
+    # ====== Tools marché & éco ======
+    {
+        "type": "function",
+        "function": {
+            "name": "search_marches_publics",
+            "description": "Marchés publics attribués (BOAMP + DECP). Permet de mesurer dépendance commande publique d'une cible.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "siren": {"type": "string", "description": "SIREN du titulaire"},
+                    "search": {"type": "string", "description": "Mots-clés (acheteur, secteur)"},
+                    "limit": {"type": "integer", "description": "Default 10"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_lei_code",
+            "description": "Code LEI international (Legal Entity Identifier) — utile pour cross-border M&A et identification des filiales étrangères.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "siren": {"type": "string", "description": "SIREN 9 chiffres"},
+                    "name": {"type": "string", "description": "Raison sociale"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_dvf_zones",
+            "description": "Transactions immobilières DVF (15M) par code postal ou département. Permet cross-référencer patrimoine immo dirigeants.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code_postal": {"type": "string", "description": "Code postal 5 chiffres"},
+                    "min_valeur": {"type": "integer", "description": "Valeur foncière minimum en €"},
+                    "limit": {"type": "integer", "description": "Default 10"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_press_recent",
+            "description": "Articles de presse récents Google News RSS pour une entreprise. Utilise /api/datalake/fiche qui retourne les 10 derniers articles.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "siren": {"type": "string", "description": "SIREN 9 chiffres"},
+                },
+                "required": ["siren"],
+            },
+        },
+    },
 ]
 
 
@@ -322,6 +467,152 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
                     return {"n_signaux": len(data.get("rows", [])), "signaux": data.get("rows", [])[:10]}
                 return {"error": f"HTTP {r.status_code}", "signaux": []}
 
+        # ====== Sourcing avancé ======
+        elif name == "search_dirigeants_60plus":
+            min_mandats = args.get("min_mandats", 3)
+            limit = min(args.get("limit", 10), 50)
+            params = {"limit": limit, "order": "-n_mandats_actifs",
+                      "filter": f"age_2026.gte.60,n_mandats_actifs.gte.{min_mandats}"}
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(f"{datalake_base}/api/datalake/silver/inpi_dirigeants", params=params)
+                if r.status_code == 200:
+                    rows = r.json().get("rows", [])
+                    return {"n": len(rows), "dirigeants": [
+                        {k: v for k, v in d.items() if k in ("nom", "prenom", "age_2026",
+                                                              "n_mandats_actifs", "n_sci",
+                                                              "total_capital_sci")}
+                        for d in rows[:20]
+                    ]}
+                return {"error": f"HTTP {r.status_code}"}
+
+        elif name == "search_sci_patrimoine":
+            min_capital = args.get("min_capital", 500000)
+            limit = min(args.get("limit", 10), 50)
+            params = {"limit": limit, "order": "-total_capital_sci",
+                      "filter": f"total_capital_sci.gte.{min_capital}"}
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(f"{datalake_base}/api/datalake/silver/dirigeant_sci_patrimoine", params=params)
+                if r.status_code == 200:
+                    rows = r.json().get("rows", [])
+                    return {"n": len(rows), "dirigeants_top_patrimoine": rows[:20]}
+                return {"error": f"HTTP {r.status_code}"}
+
+        elif name == "get_co_mandats":
+            siren = args.get("siren", "")
+            if not siren.isdigit() or len(siren) != 9:
+                return {"error": "siren invalide"}
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.get(f"{datalake_base}/api/datalake/co-mandats/{siren}")
+                if r.status_code == 200:
+                    return r.json()
+                return {"error": f"HTTP {r.status_code}"}
+
+        # ====== Compliance & DD avancée ======
+        elif name == "check_offshore":
+            search_name = args.get("name", "")
+            if not search_name:
+                return {"error": "name requis"}
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(
+                    f"{datalake_base}/api/datalake/silver/icij_offshore_match",
+                    params={"q": search_name, "limit": 10},
+                )
+                if r.status_code == 200:
+                    rows = r.json().get("rows", [])
+                    return {"offshore_match": len(rows) > 0, "n_matches": len(rows), "details": rows[:5]}
+                return {"error": f"HTTP {r.status_code} (silver.icij_offshore_match peut etre absent)"}
+
+        elif name == "check_lobbying":
+            siren = args.get("siren", "")
+            search_name = args.get("name", "")
+            params = {"limit": 5}
+            if siren:
+                params["search"] = siren
+            elif search_name:
+                params["q"] = search_name
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(
+                    f"{datalake_base}/api/datalake/silver/hatvp_conflits_interets",
+                    params=params,
+                )
+                if r.status_code == 200:
+                    rows = r.json().get("rows", [])
+                    return {"is_lobbying_registered": len(rows) > 0, "n": len(rows), "details": rows[:5]}
+                return {"error": f"HTTP {r.status_code}"}
+
+        elif name == "search_jurisprudence":
+            search = args.get("search", "")
+            params = {"limit": args.get("limit", 10)}
+            if search:
+                params["q"] = search
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(f"{datalake_base}/api/datalake/silver/judilibre_decisions", params=params)
+                if r.status_code == 200:
+                    rows = r.json().get("rows", [])
+                    return {"n": len(rows), "decisions": rows[:10]}
+                return {"error": f"HTTP {r.status_code}"}
+
+        # ====== Marché & éco ======
+        elif name == "search_marches_publics":
+            siren = args.get("siren", "")
+            search = args.get("search", "")
+            params = {"limit": args.get("limit", 10)}
+            if siren:
+                params["search"] = siren
+            elif search:
+                params["q"] = search
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(f"{datalake_base}/api/datalake/silver/marches_publics_unifies", params=params)
+                if r.status_code == 200:
+                    rows = r.json().get("rows", [])
+                    return {"n": len(rows), "marches": rows[:10]}
+                return {"error": f"HTTP {r.status_code}"}
+
+        elif name == "get_lei_code":
+            siren = args.get("siren", "")
+            search_name = args.get("name", "")
+            params = {"limit": 3}
+            if siren:
+                params["search"] = siren
+            elif search_name:
+                params["q"] = search_name
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(f"{datalake_base}/api/datalake/silver/gleif_lei", params=params)
+                if r.status_code == 200:
+                    rows = r.json().get("rows", [])
+                    return {"n": len(rows), "lei": rows[:3]}
+                return {"error": f"HTTP {r.status_code}"}
+
+        elif name == "search_dvf_zones":
+            cp = args.get("code_postal", "")
+            min_valeur = args.get("min_valeur", 500000)
+            limit = args.get("limit", 10)
+            params = {"limit": limit, "order": "-valeur_fonciere"}
+            if cp:
+                params["search"] = cp
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(f"{datalake_base}/api/datalake/silver/dvf_transactions", params=params)
+                if r.status_code == 200:
+                    rows = r.json().get("rows", [])
+                    filtered = [t for t in rows if (t.get("valeur_fonciere") or 0) >= min_valeur][:10]
+                    return {"n": len(filtered), "transactions": filtered}
+                return {"error": f"HTTP {r.status_code}"}
+
+        elif name == "get_press_recent":
+            siren = args.get("siren", "")
+            if not siren.isdigit() or len(siren) != 9:
+                return {"error": "siren invalide"}
+            async with httpx.AsyncClient(timeout=20) as client:
+                r = await client.get(f"{datalake_base}/api/datalake/fiche/{siren}")
+                if r.status_code == 200:
+                    presse = (r.json() or {}).get("presse", [])
+                    return {"n_articles": len(presse), "articles": [
+                        {"title": a.get("title"), "url": a.get("url"),
+                         "published_at": a.get("published_at"), "source": a.get("source")}
+                        for a in presse[:10]
+                    ]}
+                return {"error": f"HTTP {r.status_code}"}
+
         return {"error": f"Tool {name} inconnu"}
     except Exception as e:
         return {"error": f"{type(e).__name__}: {str(e)[:200]}"}
@@ -330,15 +621,32 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
 _SYSTEM_PROMPT_TOOLS = (
     "Tu es le Copilot IA d'EdRCF 6.0, plateforme M&A pour Edmond de Rothschild Corporate Finance.\n"
     "Réponds en français, concis et professionnel, en markdown.\n\n"
-    "Tu as accès au datalake DEMOEMA via 6 tools :\n"
-    "- search_cibles : recherche cibles M&A par texte/dept/score\n"
-    "- get_fiche_entreprise : fiche complète d'une entreprise par SIREN\n"
-    "- get_dirigeant : profil dirigeant complet (mandats, SCI, OSINT, sanctions)\n"
-    "- get_scoring_detail : score M&A 123 signaux × 13 dimensions\n"
-    "- search_sanctions : sanctions consolidées (AMF, OpenSanctions, ICIJ, DGCCRF, CNIL)\n"
-    "- search_signaux_bodacc : annonces BODACC (cessions, holdings, procédures)\n\n"
-    "**RÈGLE CRITIQUE** : tu DOIS appeler les tools pour répondre. Ne jamais hallucinerR de données.\n"
+    "Tu as accès au datalake DEMOEMA (107M rows silver) via 16 tools :\n"
+    "**Identité & sourcing** :\n"
+    "- search_cibles : cibles M&A par texte/dept/score\n"
+    "- get_fiche_entreprise : fiche complète par SIREN\n"
+    "- search_dirigeants_60plus : dirigeants 60+ multi-mandats (succession)\n"
+    "- search_sci_patrimoine : top dirigeants par capital SCI cumulé\n"
+    "**Dirigeants** :\n"
+    "- get_dirigeant : profil complet (mandats, SCI, OSINT, sanctions)\n"
+    "- get_co_mandats : réseau co-mandataires d'une entreprise\n"
+    "**Scoring M&A** :\n"
+    "- get_scoring_detail : score 123 signaux × 13 dimensions\n"
+    "**Compliance & DD** :\n"
+    "- search_sanctions : sanctions consolidées (AMF/OpenSanctions/ICIJ/DGCCRF/CNIL)\n"
+    "- check_offshore : match ICIJ Panama/Paradise Papers\n"
+    "- check_lobbying : inscription HATVP / lobbying\n"
+    "- search_jurisprudence : décisions de justice\n"
+    "**Signaux M&A** :\n"
+    "- search_signaux_bodacc : annonces BODACC (cessions/holdings/procédures)\n"
+    "- get_press_recent : articles presse récents\n"
+    "**Marché & cross-border** :\n"
+    "- search_marches_publics : marchés publics gagnés (BOAMP/DECP)\n"
+    "- get_lei_code : code LEI international (filiales étrangères)\n"
+    "- search_dvf_zones : transactions immobilières par CP/dept\n\n"
+    "**RÈGLE CRITIQUE** : tu DOIS appeler les tools pour répondre. Ne jamais halluciner de données.\n"
     "Si on te demande une entreprise (TotalEnergies, Renault, Carrefour...), appelle search_cibles ou get_fiche_entreprise.\n"
+    "Combine plusieurs tools si pertinent (ex: get_fiche + check_offshore + check_lobbying pour DD).\n"
     "Si tu ne trouves rien, dis-le clairement plutôt qu'inventer.\n"
 )
 
