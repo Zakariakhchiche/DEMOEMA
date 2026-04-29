@@ -682,43 +682,158 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
                     <Icon name="check" size={32} color="var(--accent-emerald)" />
                     <div style={{ fontSize: 16, fontWeight: 600, marginTop: 8 }}>Aucun red flag identifié</div>
                     <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginTop: 4 }}>
-                      Source : silver.opensanctions (UE/US/UK/UN, ICIJ, PEP)
+                      Sources auditées : <span className="dem-mono">silver.sanctions</span>
+                      {" "}(AMF · OpenSanctions UE/US/UN/UK · ICIJ Pandora/Paradise/Panama · DGCCRF · CNIL RGPD)
                     </div>
                   </div>
                 ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {data?.red_flags.map((f, i) => (
-                      <div key={i} className="dem-glass" style={{
-                        padding: 16, borderRadius: 12,
-                        borderColor: "rgba(251,113,133,0.30)",
-                        background: "rgba(251,113,133,0.04)",
-                        display: "flex", gap: 12,
-                      }}>
-                        <Icon name="warning" size={20} color="var(--accent-rose)" />
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--accent-rose)" }}>{String(f.caption ?? f.entity_id)}</div>
-                          <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", marginTop: 4 }}>
-                            Schema : <span className="dem-mono">{String(f.schema)}</span>
-                            {Array.isArray(f.topics) && f.topics.length > 0 && (
-                              <> · Topics : <span className="dem-mono">{(f.topics as string[]).join(", ")}</span></>
-                            )}
-                          </div>
-                          {Array.isArray(f.sanctions_programs) && f.sanctions_programs.length > 0 && (
-                            <div style={{ fontSize: 11, color: "var(--accent-rose)", marginTop: 4 }}>
-                              Programmes : {(f.sanctions_programs as string[]).join(" · ")}
+                  <div>
+                    {/* Récap sources */}
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+                      {(() => {
+                        const sources = (data?.red_flags || []).reduce<Record<string, number>>((acc, f) => {
+                          const s = String(f._source || "?");
+                          acc[s] = (acc[s] || 0) + 1;
+                          return acc;
+                        }, {});
+                        return Object.entries(sources).map(([s, n]) => (
+                          <span key={s} className="dem-chip" style={{
+                            background: "rgba(251,113,133,0.08)",
+                            borderColor: "rgba(251,113,133,0.25)",
+                            color: "var(--accent-rose)",
+                            fontSize: 11,
+                          }}>
+                            <span style={{ textTransform: "uppercase", fontWeight: 600 }}>{s}</span>
+                            <span className="dem-mono">{n}</span>
+                          </span>
+                        ));
+                      })()}
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {data?.red_flags.map((f, i) => {
+                        const sev = String(f.severity || "high").toLowerCase();
+                        const sevColor =
+                          sev === "critical" ? "var(--accent-rose)" :
+                          sev === "high" ? "var(--accent-rose)" :
+                          sev === "medium" ? "var(--accent-amber)" :
+                          "var(--accent-cyan)";
+                        const sevBg =
+                          sev === "critical" ? "rgba(251,113,133,0.04)" :
+                          sev === "high" ? "rgba(251,113,133,0.04)" :
+                          sev === "medium" ? "rgba(251,191,36,0.04)" :
+                          "rgba(103,232,249,0.03)";
+                        const sevBorder =
+                          sev === "critical" ? "rgba(251,113,133,0.30)" :
+                          sev === "high" ? "rgba(251,113,133,0.30)" :
+                          sev === "medium" ? "rgba(251,191,36,0.30)" :
+                          "rgba(103,232,249,0.20)";
+                        const matchType = String(f._match_type || "");
+                        const source = String(f._source || "?");
+                        const montant = f.montant_amende as number | null;
+                        return (
+                          <div key={i} className="dem-glass" style={{
+                            padding: 16, borderRadius: 12,
+                            borderColor: sevBorder,
+                            background: sevBg,
+                            display: "flex", gap: 12,
+                          }}>
+                            <Icon name="warning" size={20} color={sevColor} />
+                            <div style={{ flex: 1 }}>
+                              {/* Header : caption + chip source + chip severity */}
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                <span style={{ fontSize: 13, fontWeight: 600, color: sevColor }}>
+                                  {String(f.caption ?? f.entity_id)}
+                                </span>
+                                <span style={{
+                                  fontSize: 10, padding: "1px 7px", borderRadius: 4,
+                                  background: "rgba(255,255,255,0.06)",
+                                  border: "1px solid rgba(255,255,255,0.10)",
+                                  color: "var(--text-secondary)",
+                                  textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.06em",
+                                }}>{source}</span>
+                                <span style={{
+                                  fontSize: 10, padding: "1px 7px", borderRadius: 4,
+                                  background: sevColor + "22", color: sevColor,
+                                  border: `1px solid ${sevColor}55`,
+                                  textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.06em",
+                                }}>{sev}</span>
+                                {matchType === "siren_match" && (
+                                  <span style={{
+                                    fontSize: 10, padding: "1px 7px", borderRadius: 4,
+                                    background: "rgba(96,165,250,0.10)",
+                                    color: "var(--accent-blue)",
+                                    border: "1px solid rgba(96,165,250,0.30)",
+                                    fontWeight: 600,
+                                  }}>siren match</span>
+                                )}
+                                {montant != null && Number(montant) > 0 && (
+                                  <span className="dem-mono tab-num" style={{
+                                    fontSize: 11, fontWeight: 600, color: sevColor, marginLeft: "auto",
+                                  }}>
+                                    {Number(montant) >= 1e6
+                                      ? `${(Number(montant) / 1e6).toFixed(1)} M€`
+                                      : Number(montant) >= 1e3
+                                      ? `${(Number(montant) / 1e3).toFixed(0)} k€`
+                                      : `${Number(montant).toFixed(0)} €`}
+                                  </span>
+                                )}
+                              </div>
+
+                              {(() => {
+                                const topicsArr: string[] = Array.isArray(f.topics)
+                                  ? (f.topics as unknown[]).map((t) => String(t)).filter((t) => t && t !== sev)
+                                  : [];
+                                const progsArr: string[] = Array.isArray(f.sanctions_programs)
+                                  ? (f.sanctions_programs as unknown[]).map((p) => String(p)).filter(Boolean)
+                                  : [];
+                                return (
+                                  <>
+                                    <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", marginTop: 6 }}>
+                                      <span className="dem-mono">{String(f.schema ?? "")}</span>
+                                      {topicsArr.length > 0 ? <> · {topicsArr.join(" · ")}</> : null}
+                                    </div>
+                                    {progsArr.length > 0 && (
+                                      <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginTop: 4 }}>
+                                        Motif : {progsArr.join(" · ")}
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
+
+                              {(() => {
+                                const countriesArr: string[] = Array.isArray(f.countries)
+                                  ? (f.countries as unknown[]).map((c) => String(c)).filter(Boolean)
+                                  : [];
+                                const juris = f.jurisdiction ? String(f.jurisdiction) : "";
+                                if (countriesArr.length === 0 && !juris) return null;
+                                return (
+                                  <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 2 }}>
+                                    {countriesArr.length > 0 && (
+                                      <>Pays : <span className="dem-mono">{countriesArr.join(", ")}</span></>
+                                    )}
+                                    {juris && <> · Juridiction : <span className="dem-mono">{juris}</span></>}
+                                  </div>
+                                );
+                              })()}
+
+                              {(() => {
+                                const fs = f.first_seen ? fmtDate(f.first_seen) : "";
+                                const ls = f.last_seen ? fmtDate(f.last_seen) : "";
+                                if (!fs && !ls) return null;
+                                return (
+                                  <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 6 }}>
+                                    {fs && `Date : ${fs}`}
+                                    {ls && ls !== fs ? ` · MAJ ${ls}` : ""}
+                                  </div>
+                                );
+                              })()}
                             </div>
-                          )}
-                          {Array.isArray(f.countries) && (
-                            <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 2 }}>
-                              Pays : {(f.countries as string[]).join(", ")}
-                            </div>
-                          )}
-                          <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 4 }}>
-                            Détecté {fmtDate(f.first_seen)} · MAJ {fmtDate(f.last_seen)}
                           </div>
-                        </div>
-                      </div>
-                    ))}
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
               </div>
