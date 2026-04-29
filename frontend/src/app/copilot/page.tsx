@@ -2,11 +2,11 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles } from "lucide-react";
+import { Sparkles, AlertTriangle } from "lucide-react";
 import { ChatMessage } from "@/components/copilot/ChatMessage";
 import { ChatInput } from "@/components/copilot/ChatInput";
 import { ConversationsSidebar } from "@/components/copilot/ConversationsSidebar";
-import { mockCibles } from "@/lib/mock/cibles";
+import { datalakeApi, streamCopilot } from "@/lib/api";
 import type { ChatMessage as Msg, Conversation, Cible } from "@/lib/types/dem";
 
 const STARTER_PROMPTS = [
@@ -17,54 +17,26 @@ const STARTER_PROMPTS = [
   "Sociétés cotées avec OPA récente",
 ];
 
-const SUGGESTED_REPLIES = (lastMessage?: Msg): { label: string; prompt: string }[] => {
-  if (!lastMessage?.cards?.length) return [];
-  return [
-    { label: "Affiner: Score >= 70", prompt: "Filtre uniquement Score >= 70" },
-    { label: "Sans red flags", prompt: "Exclure les cibles avec red flags compliance" },
-    { label: "Top 10 dirigeants", prompt: "Donne-moi les top 10 dirigeants de cette liste" },
-    { label: "Compare top 3", prompt: "Compare les 3 premières cibles sur 5 critères" },
-    { label: "Export en watchlist", prompt: "Sauve ces résultats dans une nouvelle watchlist" },
-  ];
-};
-
 /**
- * Mock AI response generator — simule streaming et retourne des cards mock.
+ * Heuristique légère pour décider si un prompt mérite des cards cibles M&A.
+ * Si oui, on lance en parallèle un fetch /api/datalake/cibles avec extraction
+ * naïve dept/score depuis le texte.
  */
-function* mockStreamResponse(prompt: string): Generator<{ chunk: string; done: boolean; cards?: Msg["cards"] }> {
-  const lower = prompt.toLowerCase();
-  let response = "";
-  let cards: Msg["cards"] = [];
+function shouldFetchCibles(prompt: string): boolean {
+  return /cible|target|m&a|score|dirigeant|opa|holding|patrimoine|société|entreprise|sci/i.test(
+    prompt
+  );
+}
 
-  if (/^\d{9}$/.test(prompt)) {
-    // SIREN direct
-    const target = mockCibles.find((c) => c.siren === prompt) ?? mockCibles[0];
-    response = `${target.denomination} détecté.\n\nVoici la fiche synthèse :`;
-    cards = [{ type: "cible", payload: target }];
-  } else if (/compare/i.test(lower)) {
-    response = `Comparaison de 2 cibles M&A demandée. Voici les fiches détaillées :`;
-    cards = mockCibles.slice(0, 2).map((c) => ({ type: "cible", payload: c }));
-  } else if (/dd|compliance|red flag/i.test(lower)) {
-    response = `Due diligence compliance lancée. Aucun red flag majeur détecté sur Acme Industries SAS. Liste des sources auditées : OpenSanctions, AMF, ICIJ Offshore, BODACC procédures, gels avoirs.`;
-    cards = [{ type: "cible", payload: mockCibles[0] }];
-  } else if (/cible|target|m&a/i.test(lower) || /score/i.test(lower)) {
-    response = `J'ai trouvé ${mockCibles.length} cibles correspondant à tes critères. Voici les ${Math.min(5, mockCibles.length)} premières par score décroissant :`;
-    cards = mockCibles
-      .sort((a, b) => b.pro_ma_score - a.pro_ma_score)
-      .slice(0, 5)
-      .map((c) => ({ type: "cible", payload: c }));
-  } else {
-    response = `Je peux t'aider à : trouver des cibles M&A, comparer plusieurs entreprises, faire une DD compliance, explorer le réseau dirigeants. Pose-moi une question concrète.`;
-  }
+function extractDept(prompt: string): string | undefined {
+  const m = prompt.match(/\b(7[5-8]|9[1-5]|13|33|59|69|13|2[ABab]|97[1-8])\b/);
+  return m?.[1]?.toUpperCase();
+}
 
-  // Stream word-by-word
-  const words = response.split(" ");
-  let acc = "";
-  for (const w of words) {
-    acc += (acc ? " " : "") + w;
-    yield { chunk: acc, done: false };
-  }
-  yield { chunk: acc, done: true, cards };
+function extractMinScore(prompt: string): number | undefined {
+  const m = prompt.match(/score\s*[>\s>=]+\s*(\d{1,3})/i);
+  if (m) return parseInt(m[1], 10);
+  return undefined;
 }
 
 export default function CopilotPage() {
@@ -79,11 +51,12 @@ export default function CopilotPage() {
   });
   const [activeId, setActiveId] = useState<string | undefined>(conversations[0]?.id);
   const [streaming, setStreaming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const activeConv = conversations.find((c) => c.id === activeId);
 
-  // Persist conversations
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -91,7 +64,6 @@ export default function CopilotPage() {
     } catch {}
   }, [conversations]);
 
-  // Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [activeConv?.messages.length]);
@@ -110,6 +82,7 @@ export default function CopilotPage() {
 
   const sendMessage = useCallback(
     async (prompt: string) => {
+      setError(null);
       let convId = activeId;
       if (!convId) {
         const c: Conversation = {
@@ -155,48 +128,123 @@ export default function CopilotPage() {
 
       setStreaming(true);
 
-      // Streaming simulation
-      const gen = mockStreamResponse(prompt);
-      for await (const _ of [0]) {} // tick
-      let lastResult: { chunk: string; done: boolean; cards?: Msg["cards"] } | null = null;
-      for (const result of gen) {
-        await new Promise((r) => setTimeout(r, 30));
-        lastResult = result;
-        setConversations((prev) =>
-          prev.map((c) =>
-            c.id === convId
-              ? {
-                  ...c,
-                  messages: c.messages.map((m) =>
-                    m.id === aiMsgId
-                      ? {
-                          ...m,
-                          content: result.chunk,
-                          streaming: !result.done,
-                          cards: result.done ? result.cards : undefined,
-                          quick_replies: result.done
-                            ? [
-                                { label: "Affiner: Score >= 70", prompt: "Filtre Score >= 70" },
-                                { label: "Sans red flags", prompt: "Exclure red flags" },
-                                { label: "Compare top 3", prompt: "Compare top 3" },
-                              ]
-                            : undefined,
-                        }
-                      : m
-                  ),
-                }
-              : c
-          )
-        );
+      // En parallèle : fetch des cibles M&A pour cards (real DB) ───────────
+      const cibleSearchP = shouldFetchCibles(prompt)
+        ? datalakeApi
+            .searchCibles({
+              q: prompt.length < 50 ? undefined : undefined, // on évite de polluer la recherche avec la phrase complète
+              dept: extractDept(prompt),
+              minScore: extractMinScore(prompt),
+              isProMa: /pro\s*m&a|dirigeant.*60|holding/i.test(prompt) ? true : undefined,
+              isAssetRich: /patrimo|asset|sci|immobilier/i.test(prompt) ? true : undefined,
+              hasRedFlags: /sans\s+red\s+flag|exclure.*red.*flag/i.test(prompt)
+                ? false
+                : /red\s+flag|sanction|compliance/i.test(prompt)
+                ? true
+                : undefined,
+              limit: 5,
+              sort: "score_ma",
+            })
+            .catch((e) => {
+              console.warn("[copilot] cibles search failed:", e);
+              return null;
+            })
+        : Promise.resolve(null);
+
+      // Streaming SSE depuis backend ─────────────────────────────────────
+      const ac = new AbortController();
+      abortRef.current = ac;
+      let acc = "";
+      try {
+        for await (const ev of streamCopilot(prompt, ac.signal)) {
+          if (ev.chunk) {
+            acc += ev.chunk;
+            setConversations((prev) =>
+              prev.map((c) =>
+                c.id === convId
+                  ? {
+                      ...c,
+                      messages: c.messages.map((m) =>
+                        m.id === aiMsgId
+                          ? { ...m, content: acc, streaming: true }
+                          : m
+                      ),
+                    }
+                  : c
+              )
+            );
+          }
+          if (ev.done) {
+            const cibleRes = await cibleSearchP;
+            const cards = cibleRes?.cibles?.length
+              ? cibleRes.cibles.map((c) => ({
+                  type: "cible" as const,
+                  payload: c as Cible,
+                }))
+              : undefined;
+            setConversations((prev) =>
+              prev.map((c) =>
+                c.id === convId
+                  ? {
+                      ...c,
+                      messages: c.messages.map((m) =>
+                        m.id === aiMsgId
+                          ? {
+                              ...m,
+                              content: acc,
+                              streaming: false,
+                              cards,
+                              quick_replies: cards
+                                ? [
+                                    { label: "Affiner: Score ≥ 70", prompt: "Filtre Score >= 70" },
+                                    { label: "Sans red flags", prompt: "Exclure red flags compliance" },
+                                    { label: "Compare top 3", prompt: "Compare les 3 premières cibles" },
+                                  ]
+                                : undefined,
+                            }
+                          : m
+                      ),
+                    }
+                  : c
+              )
+            );
+          }
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!msg.includes("aborted")) {
+          setError(msg);
+          setConversations((prev) =>
+            prev.map((c) =>
+              c.id === convId
+                ? {
+                    ...c,
+                    messages: c.messages.map((m) =>
+                      m.id === aiMsgId
+                        ? {
+                            ...m,
+                            content:
+                              acc ||
+                              "Erreur backend. Vérifie que /api/copilot/stream est joignable.",
+                            streaming: false,
+                          }
+                        : m
+                    ),
+                  }
+                : c
+            )
+          );
+        }
+      } finally {
+        setStreaming(false);
+        abortRef.current = null;
       }
-      setStreaming(false);
     },
     [activeId]
   );
 
   return (
     <div className="flex h-screen overflow-hidden bg-zinc-950 text-zinc-100">
-      {/* Aurora background subtle */}
       <div
         className="pointer-events-none fixed inset-0 -z-10"
         style={{
@@ -205,7 +253,6 @@ export default function CopilotPage() {
         }}
       />
 
-      {/* Sidebar */}
       <ConversationsSidebar
         conversations={conversations}
         activeId={activeId}
@@ -213,9 +260,7 @@ export default function CopilotPage() {
         onNew={newConversation}
       />
 
-      {/* Main chat */}
       <main className="flex flex-1 flex-col">
-        {/* Header */}
         <header className="flex items-center justify-between border-b border-white/[0.04] bg-zinc-950/40 px-6 py-3 backdrop-blur-xl">
           <div className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-purple-400" />
@@ -224,11 +269,23 @@ export default function CopilotPage() {
             </span>
           </div>
           <div className="flex items-center gap-3">
+            <a
+              href="/explorer"
+              className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-1 text-[11px] font-medium text-zinc-400 transition-all hover:border-blue-400/40 hover:bg-blue-500/10 hover:text-blue-200"
+            >
+              Data Explorer
+            </a>
             <span className="text-[11px] text-zinc-500">Anne Dupont · EdRCF</span>
           </div>
         </header>
 
-        {/* Messages */}
+        {error && (
+          <div className="flex items-start gap-2 border-b border-amber-500/20 bg-amber-500/5 px-6 py-2 text-[12px] text-amber-200">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
         <div className="flex-1 overflow-y-auto px-6 py-6">
           {!activeConv || activeConv.messages.length === 0 ? (
             <EmptyState onPromptClick={sendMessage} />
@@ -239,7 +296,9 @@ export default function CopilotPage() {
                   <ChatMessage
                     key={m.id}
                     message={m}
-                    onCardView={(siren) => console.log("View", siren)}
+                    onCardView={(siren) => {
+                      window.location.href = `/explorer?siren=${siren}`;
+                    }}
                     onCardSave={(siren) => console.log("Save", siren)}
                     onCardCompare={(siren) => console.log("Compare", siren)}
                     onQuickReply={sendMessage}
@@ -251,13 +310,10 @@ export default function CopilotPage() {
           )}
         </div>
 
-        {/* Input */}
         <div className="border-t border-white/[0.04] bg-zinc-950/40 px-6 py-4 backdrop-blur-xl">
           <div className="mx-auto max-w-3xl">
             <ChatInput
               onSubmit={sendMessage}
-              // Suggestions chips dans l'input UNIQUEMENT après une réponse
-              // (pas en empty state — on a déjà la grid de starter prompts).
               suggestions={
                 activeConv?.messages.length && !streaming
                   ? ["Affiner par dept", "Compare top 3", "DD compliance"]
@@ -290,8 +346,8 @@ function EmptyState({ onPromptClick }: { onPromptClick: (p: string) => void }) {
         Bonjour Anne ☕
       </h1>
       <p className="mt-2 max-w-md text-sm text-zinc-400">
-        Pose une question sur tes cibles M&A. Je query les 27 silvers + 13 golds DEMOEMA
-        pour te répondre avec fiches détaillées + sources auditables.
+        Pose une question sur tes cibles M&A. Réponses ancrées sur les 13 tables gold
+        + presse temps réel — DeepSeek + datalake DEMOEMA.
       </p>
 
       <div className="mt-8 grid w-full grid-cols-1 gap-2 sm:grid-cols-2">

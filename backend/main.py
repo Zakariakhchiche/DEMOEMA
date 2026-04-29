@@ -90,6 +90,19 @@ async def lifespan(app):
         follow_redirects=True,
     )
 
+    # Pool asyncpg vers le datalake (gold + silver). Optionnel : si DATALAKE_*
+    # n'est pas configuré (Vercel legacy), reste à None et /api/datalake/* renvoie 503.
+    try:
+        from datalake import create_pool as _create_dl_pool
+        app.state.dl_pool = await _create_dl_pool()
+        if app.state.dl_pool:
+            print("[EdRCF] Datalake pool ready (asyncpg → datalake-db)")
+        else:
+            print("[EdRCF] Datalake pool DISABLED (DATALAKE_* env absent)")
+    except Exception as e:
+        print(f"[EdRCF] Datalake pool init failed: {e}")
+        app.state.dl_pool = None
+
     # 1. Supabase first — persistent, survives cold starts (fast)
     db_targets = await load_from_supabase()
     if db_targets:
@@ -121,6 +134,13 @@ async def lifespan(app):
         # Cleanup pool httpx au shutdown
         try:
             await app.state.http.aclose()
+        except Exception:
+            pass
+        # Cleanup pool asyncpg datalake
+        try:
+            pool = getattr(app.state, "dl_pool", None)
+            if pool is not None:
+                await pool.close()
         except Exception:
             pass
 
@@ -177,11 +197,13 @@ from routers.news import router as _news_router
 from routers.scoring import router as _scoring_router
 from routers.signals import router as _signals_router
 from routers.pipeline import router as _pipeline_router
+from routers.datalake import router as _datalake_router
 app.include_router(_admin_router)
 app.include_router(_news_router)
 app.include_router(_scoring_router)
 app.include_router(_signals_router)
 app.include_router(_pipeline_router)
+app.include_router(_datalake_router)
 
 # Note (audit PERF-2) : le _load_targets_sync() au module-level a été retiré.
 # Avant : double load (lifespan + module-level) → 100-500ms cold-start gaspillés.

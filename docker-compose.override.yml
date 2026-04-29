@@ -3,6 +3,7 @@ services:
     networks:
       - web
       - shared-supabase
+      - agents-net
   caddy:
     networks:
       - web
@@ -12,3 +13,9 @@ networks:
   shared-supabase:
     external: true
     name: shared-supabase
+  # Réseau du stack agents (datalake-db). Permet au backend EdRCF d'attaquer
+  # gold.entreprises_master / silver.press_mentions_matched directement en
+  # asyncpg via le hostname interne `datalake-db:5432`.
+  agents-net:
+    external: true
+    name: demoema-agents_agents-net
