@@ -409,14 +409,34 @@ async def fiche_entreprise(req: Request, siren: str):
         siren,
     )
 
-    # Fallback : si silver vide, dérive depuis le gouv API (déjà fetché)
+    # Fallback : si silver vide, dérive depuis le gouv API (déjà fetché).
+    # Gestion des 2 types de dirigeants :
+    #   - personne physique : nom + prenoms + annee_de_naissance + qualite
+    #   - personne morale   : siren + denomination + qualite
     if not dirigeants_silver and gouv and gouv.get("dirigeants"):
-        dirigeants = [
-            {
-                "nom": d.get("nom", ""),
-                "prenom": d.get("prenoms", ""),
-                "date_naissance": d.get("date_de_naissance"),
-                "age": None,
+        def _map_dirig(d: dict) -> dict:
+            type_d = d.get("type_dirigeant") or ("personne physique" if d.get("nom") or d.get("prenoms") else "personne morale")
+            is_phys = type_d == "personne physique"
+            if is_phys:
+                nom = (d.get("nom") or "").strip()
+                prenom = (d.get("prenoms") or "").strip()
+                annee = d.get("annee_de_naissance") or d.get("date_de_naissance")
+                age = (2026 - int(annee)) if annee and str(annee).isdigit() else None
+                date_n = d.get("date_de_naissance") or (str(annee) if annee else None)
+            else:
+                # personne morale : utiliser denomination comme "nom"
+                nom = (d.get("denomination") or d.get("nom") or "").strip()
+                prenom = ""
+                age = None
+                date_n = None
+            return {
+                "nom": nom,
+                "prenom": prenom,
+                "date_naissance": date_n,
+                "age": age,
+                "qualite": d.get("qualite") or "",
+                "type_dirigeant": type_d,
+                "siren_dirigeant": d.get("siren") if not is_phys else None,
                 "n_mandats_actifs": 1,
                 "n_mandats_total": 1,
                 "sirens_mandats": [siren],
@@ -431,8 +451,7 @@ async def fiche_entreprise(req: Request, siren: str):
                 "n_total_social": None,
                 "is_sanctioned": False,
             }
-            for d in gouv["dirigeants"][:10]
-        ]
+        dirigeants = [_map_dirig(d) for d in gouv["dirigeants"][:10]]
     else:
         dirigeants = dirigeants_silver
 

@@ -350,7 +350,34 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                        <span style={{ fontSize: 14, fontWeight: 600 }}>{String(d.prenom ?? "")} {String(d.nom ?? "")}</span>
+                        <span style={{ fontSize: 14, fontWeight: 600 }}>
+                          {String(d.prenom ?? "")} {String(d.nom ?? "")}
+                        </span>
+                        {Boolean(d.qualite) && (
+                          <span style={{
+                            fontSize: 10.5, padding: "2px 7px", borderRadius: 999,
+                            background: "rgba(96,165,250,0.10)",
+                            color: "#cfe1fb",
+                            border: "1px solid rgba(96,165,250,0.30)",
+                          }}>
+                            {String(d.qualite)}
+                          </span>
+                        )}
+                        {d.type_dirigeant === "personne morale" && (
+                          <span style={{
+                            fontSize: 10, padding: "2px 6px", borderRadius: 4,
+                            background: "rgba(167,139,250,0.10)",
+                            color: "var(--accent-purple)",
+                            border: "1px solid rgba(167,139,250,0.30)",
+                          }}>
+                            Personne morale
+                          </span>
+                        )}
+                        {Boolean(d.siren_dirigeant) && (
+                          <span className="dem-mono" style={{ fontSize: 10.5, color: "var(--text-tertiary)" }}>
+                            siren {String(d.siren_dirigeant)}
+                          </span>
+                        )}
                         <span className="dem-mono" style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
                           {d.age != null ? `${d.age} ans` : ""}
                         </span>
