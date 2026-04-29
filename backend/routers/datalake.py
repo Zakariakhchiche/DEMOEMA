@@ -1016,6 +1016,183 @@ async def _dirigeant_full(
     }
 
 
+@router.get("/scoring/{siren}")
+async def scoring_detail(req: Request, siren: str):
+    """Détail du scoring M&A 103 signaux pour un siren — décomposé en 12
+    dimensions, signaux détectés, score brut, multiplicateur composite,
+    classification finale.
+
+    Source : gold.scoring_ma (matérialisée par silver_runner depuis le yaml
+    gold_specs/scoring_ma.yaml). Si la table n'existe pas encore, retourne
+    503 avec message "scoring_ma pas encore matérialisée".
+    """
+    if not siren.isdigit() or len(siren) != 9:
+        raise HTTPException(status_code=400, detail="SIREN invalide")
+    pool = _pool(req)
+
+    if not await _table_exists(pool, "gold", "scoring_ma"):
+        raise HTTPException(
+            status_code=503,
+            detail="gold.scoring_ma pas encore matérialisée — silver_runner en cours",
+        )
+
+    row = await _safe(pool.fetchrow(
+        "SELECT row_to_json(s.*) AS r FROM gold.scoring_ma s WHERE s.siren = $1",
+        siren,
+    ), timeout_s=4.0)
+
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Pas de scoring pour {siren}")
+
+    data = row["r"]
+    if isinstance(data, str):
+        data = json.loads(data)
+
+    # Décompose les signaux par dimension pour l'UI
+    DIM_SIGNALS = {
+        "1_maturite": [
+            ("sig_founder_60_no_successor", "Fondateur 60+ sans successeur", 7),
+            ("sig_founder_over_65", "Dirigeant 65+", 6),
+            ("sig_director_withdrawal", "Retrait progressif fondateur", 5),
+            ("sig_spouse_director_departure", "Départ conjoint co-dirigeant", 5),
+            ("sig_founder_age_55_65", "Dirigeant 55-65 ans", 3),
+            ("sig_director_mandate_20plus", "Mandat > 20 ans", 2),
+            ("sig_dirigeant_multi_mandats", "Multi-mandats", 3),
+            ("sig_director_new_ventures", "Nouveaux projets", 2),
+            ("sig_director_speaker", "Conférences / speaker", 2),
+            ("sig_director_health_proxy", "Activité réduite (proxy)", 1),
+        ],
+        "2_patrimoniaux": [
+            ("sig_holding_creation", "Création holding patrimoniale", 7),
+            ("sig_bodacc_cession", "BODACC cession", 7),
+            ("sig_apport_cession_structure", "Apport-cession 150-0 B ter", 6),
+            ("sig_share_sale_by_director", "Cession parts dirigeant", 6),
+            ("sig_beneficiaire_effectif_change", "Changement BE", 5),
+            ("sig_bodacc_capital_change", "Modif capital BODACC", 5),
+            ("sig_legal_form_change", "Transformation SARL→SAS", 4),
+            ("sig_big4_audit", "Nomination Big 4", 4),
+            ("sig_infogreffe_capital_change", "Modif capital Infogreffe", 4),
+            ("sig_sci_creation_linked", "SCI liée (separation immo)", 3),
+            ("sig_bodacc_dissolution", "Dissolution / liquidation", 3),
+            ("sig_donation_partage", "Donation-partage", 3),
+            ("sig_pacte_dutreil", "Pacte Dutreil", 2),
+            ("sig_auditor_change", "Changement CAC", 2),
+            ("sig_hq_relocation", "Déménagement siège", 1),
+        ],
+        "3_financier": [
+            ("sig_procedure_collective", "Procédure collective", 6),
+            ("sig_lbo_4_years", "LBO > 4 ans", 5),
+            ("sig_revenue_decline_2years", "Baisse CA > 10%", 4),
+            ("sig_ebitda_margin_compression", "Compression marge EBITDA", 4),
+            ("sig_pret_garanti_etat", "PGE en cours", 3),
+            ("sig_debt_ratio_deterioration", "Ratio endettement > 4x EBITDA", 3),
+            ("sig_exceptional_dividend", "Dividende exceptionnel", 3),
+            ("sig_ca_growth_2years", "Croissance CA > 15%", 3),
+            ("sig_score_defaillance_interne", "Score défaillance élevé", 3),
+            ("sig_headcount_growth_20", "Croissance effectifs > 20%", 2),
+            ("sig_late_filing", "Retard dépôt comptes", 2),
+            ("sig_working_capital_stress", "Tension BFR", 2),
+            ("sig_capex_decline", "Baisse capex", 1),
+            ("sig_new_establishment", "Nouvel établissement", 1),
+            ("sig_bpifrance_aid", "Aide BPI", 1),
+            ("sig_presse_levee_fonds", "Presse : levée fonds", 2),
+            ("sig_presse_difficultes", "Presse : difficultés", 4),
+        ],
+        "4_rh": [
+            ("sig_daf_pe_recruitment", "Recrutement DAF ex-PE/Big4", 5),
+            ("sig_key_hire_manda", "Recrutement directeur M&A", 5),
+            ("sig_interim_management", "Manager de transition", 4),
+            ("sig_infogreffe_nouveau_dirigeant", "Nouveau dirigeant", 4),
+            ("sig_management_package_setup", "Management package BSPCE/AGA", 3),
+            ("sig_cofounder_departure", "Départ co-fondateur", 3),
+            ("sig_board_composition_change", "Modif conseil", 3),
+            ("sig_mass_layoff_plan", "Plan licenciement", 2),
+            ("sig_cse_information_consultation", "Info-consult CSE", 2),
+            ("sig_linkedin_turnover_spike", "Pic turnover", 1),
+        ],
+        "5_consolidation": [
+            ("sig_pe_platform_in_sector", "Plateforme PE active", 4),
+            ("sig_competitor_acquired", "Concurrent racheté", 4),
+            ("sig_infogreffe_fusion_absorption", "Fusion / absorption", 4),
+            ("sig_sector_consolidation", "Consolidation sectorielle", 3),
+            ("sig_foreign_buyer_entry", "Acquéreur étranger", 2),
+            ("sig_sector_regulation_change", "Reg. sectorielle", 2),
+            ("sig_presse_partenariat", "Partenariat", 2),
+            ("sig_ma_event", "Transaction M&A secteur", 1),
+            ("sig_sector_multiple_expansion", "Multiples valorisation", 1),
+        ],
+        "6_juridique": [
+            ("sig_mandat_ad_hoc", "Mandat ad hoc", 4),
+            ("sig_conciliation_procedure", "Conciliation", 4),
+            ("sig_commercial_court_filing", "Tribunal Commerce", 3),
+            ("sig_sanction_detected", "Sanction (gels/AMF/ACPR)", 3),
+            ("sig_infogreffe_transfert_siege", "Transfert siège", 2),
+            ("sig_change_of_purpose", "Modif objet social", 1),
+            ("sig_litigation_signal", "Contentieux", 1),
+            ("sig_rgpd_sanction", "Sanction CNIL/RGPD", 1),
+            ("sig_environmental_sanction", "Sanction environnementale", 1),
+        ],
+        "13_proprietaires": [
+            ("sig_dirigeant_high_net_worth", "Dirigeant fortuné (capital SCI > 5 M€)", 3),
+            ("sig_dvf_dirigeant_cash_out", "Achat immo dirigeant > 1 M€ post-cession", 3),
+            ("sig_clan_familial", "Clan familial (≥3 dirigeants même nom)", 2),
+            ("sig_micro_empire", "Empire mandats (CA<5M + ≥10 mandats)", 2),
+            ("sig_immo_corporelles_high", "Immo corporelles > 50% actif", 2),
+            ("sig_treasury_excess", "Trésorerie excessive (CP > 70% passif)", 2),
+            ("sig_ca_export_high", "Export > 30% CA", 1),
+            ("sig_capex_underinvest", "Sous-investissement chronique", 1),
+            ("sig_digital_powerhouse", "Tech-forward (LinkedIn 100+ + GitHub)", 2),
+            ("sig_low_profile_target", "Fortune cachée (CA>5M sans présence digitale)", 3),
+            ("sig_has_lei_code", "Code LEI international actif", 1),
+            ("sig_active_lobbying_recent", "Lobbying HATVP < 24m", 1),
+            ("sig_high_lobbying_budget", "Budget lobbying > 200 k€/an", 2),
+            ("sig_dirigeant_pep", "Dirigeant PEP (Politically Exposed)", 3),
+            ("sig_offshore_link", "Match ICIJ Panama/Paradise Papers", 4),
+            ("sig_litigation_pattern", "≥3 cassations/CA en 5 ans", 2),
+            ("sig_radiation_proche", "Radiation BODACC < 3m", 3),
+            ("sig_avis_de_tiers", "Avis de tiers (créancier opposé)", 1),
+            ("sig_phantom_holding", "Holding silencieuse + CA décroît", 3),
+            ("sig_geographic_expansion", "Expansion ≥3 départements en 12m", 1),
+        ],
+    }
+
+    dimensions_detail = []
+    for dim_key, signals in DIM_SIGNALS.items():
+        active = [{"key": k, "label": l, "points": p} for k, l, p in signals if data.get(k)]
+        max_points = {
+            "1_maturite": 20, "2_patrimoniaux": 20, "3_financier": 15,
+            "4_rh": 12, "5_consolidation": 10, "6_juridique": 8,
+            "13_proprietaires": 15,
+        }[dim_key]
+        score_key = f"score_dim{dim_key.split('_')[0]}"
+        dimensions_detail.append({
+            "dim": dim_key,
+            "score": data.get(score_key, 0),
+            "max": max_points,
+            "active_signals": active,
+            "n_total_signals": len(signals),
+        })
+
+    composites_active = [
+        {"key": k, "active": data.get(k, False)}
+        for k in ["composite_triple_patrimoine", "composite_exit_preparation",
+                  "composite_distressed", "composite_succession_urgency", "composite_sector_wave"]
+    ]
+
+    return {
+        "siren": siren,
+        "score_total": data.get("score_total"),
+        "score_brut": data.get("score_brut"),
+        "priority_class": data.get("priority_class"),
+        "composite_multiplier": float(data.get("composite_multiplier") or 1.0),
+        "n_signals_detected": data.get("n_signals_detected"),
+        "feature_version": data.get("feature_version"),
+        "derniere_maj": data.get("derniere_maj"),
+        "dimensions": dimensions_detail,
+        "composites": composites_active,
+    }
+
+
 @router.get("/dirigeant/{nom}/{prenom}/{date_naissance}")
 async def dirigeant_full_with_dn(
     req: Request, nom: str, prenom: str, date_naissance: str
@@ -1659,6 +1836,18 @@ async def cibles_search(
 
 
 async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_rich, has_red_flags, sort, limit, offset):
+    # Si gold.scoring_ma existe (matérialisée par silver_runner), on l'utilise
+    # comme source de vérité pour le score (103 signaux × 12 dimensions).
+    # Sinon fallback sur entreprises_master.score_ma (formule heuristique 8
+    # signaux). À terme cette branche disparaîtra et entreprises_master sera
+    # alimentée par scoring_ma directement.
+    has_scoring = await _table_exists(pool, "gold", "scoring_ma")
+    score_join = ""
+    score_col = "score_ma"
+    if has_scoring:
+        score_join = " LEFT JOIN gold.scoring_ma sm ON sm.siren = t.siren"
+        score_col = "COALESCE(sm.score_total, t.score_ma)"
+
     where: list[str] = ["statut = 'actif'"]
     params: list[Any] = []
     if q:
@@ -1686,9 +1875,11 @@ async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_r
     elif has_red_flags is False:
         where.append("COALESCE(has_compliance_red_flag, false) = false")
 
-    order_col = {"score_ma": "score_ma", "ca_dernier": "ca_dernier", "date_creation": "date_creation"}[sort]
+    order_col = {"score_ma": score_col, "ca_dernier": "t.ca_dernier", "date_creation": "t.date_creation"}[sort]
     sql = f"""
-        SELECT row_to_json(t.*) AS row FROM gold.entreprises_master t
+        SELECT row_to_json(t.*) AS row, {score_col} AS score_ma_resolved
+        FROM gold.entreprises_master t
+        {score_join}
         WHERE {' AND '.join(where)}
         ORDER BY {order_col} DESC NULLS LAST
         LIMIT {int(limit)} OFFSET {int(offset)}
@@ -1699,8 +1890,11 @@ async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_r
         v = r["row"]
         if isinstance(v, str):
             v = json.loads(v)
+        # Override score_ma avec la vraie valeur 103-signaux si dispo
+        if "score_ma_resolved" in r and r["score_ma_resolved"] is not None:
+            v["score_ma"] = r["score_ma_resolved"]
         cibles.append(v)
-    return {"cibles": cibles, "limit": limit, "offset": offset, "has_more": len(cibles) == limit, "source": "gold"}
+    return {"cibles": cibles, "limit": limit, "offset": offset, "has_more": len(cibles) == limit, "source": "gold", "scoring_v2": has_scoring}
 
 
 async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset):

@@ -1,0 +1,899 @@
+silver_name: gold.scoring_ma
+target_schema: gold
+physical: true
+goal: >
+  🎯 SCORING M&A 103 SIGNAUX × 12 DIMENSIONS — implémentation de la spec
+  docs/SIGNAUX_MA.md. 1 row par siren avec : 103 colonnes booléennes (1 par
+  signal), 12 scores dimension (cappés au max), score_total /100, classification
+  (Action Prioritaire / Qualification / Monitoring / Veille), 5 multiplicateurs
+  composites. Source de vérité pour score_ma dans gold.entreprises_master.
+
+source_tables:
+  - silver.inpi_dirigeants
+  - silver.inpi_comptes
+  - silver.bodacc_annonces
+  - silver.opensanctions
+  - silver.judilibre_decisions
+  - silver.dirigeant_sci_patrimoine
+  - silver.osint_persons_enriched
+  - silver.osint_companies_enriched
+  - silver.dvf_transactions
+  - silver.insee_unites_legales
+  - silver.insee_etablissements
+  - silver.gleif_lei
+
+grain: "1 row par siren"
+
+key_columns:
+  - siren
+  - score_total
+  - priority_class
+
+check_constraints:
+  - "score_total BETWEEN 0 AND 100"
+  - "priority_class IN ('Action Prioritaire','Qualification','Monitoring','Veille Passive')"
+  - "score_dim1 BETWEEN 0 AND 20"
+  - "score_dim2 BETWEEN 0 AND 20"
+  - "score_dim3 BETWEEN 0 AND 15"
+  - "score_dim13 BETWEEN 0 AND 15"
+
+composite_indexes:
+  - cols: "(score_total DESC, siren)"
+    purpose: "Top scoring keyset pagination"
+  - cols: "(priority_class, score_total DESC)"
+    purpose: "Filtre par classe priorité"
+  - cols: "(score_dim1 DESC) WHERE score_dim1 > 0"
+    purpose: "Top maturité dirigeant"
+  - cols: "(score_dim2 DESC) WHERE score_dim2 > 0"
+    purpose: "Top patrimoniaux"
+
+business_logic: |
+  Implémentation littérale de docs/SIGNAUX_MA.md.
+
+  123 signaux groupés en 13 dimensions :
+    Dim 1 — Maturité dirigeant      (max 20pts, 10 signaux)
+    Dim 2 — Patrimoniaux            (max 20pts, 15 signaux)
+    Dim 3 — Dynamique financière    (max 15pts, 17 signaux)
+    Dim 4 — RH & Gouvernance        (max 12pts, 10 signaux)
+    Dim 5 — Consolidation           (max 10pts,  9 signaux)
+    Dim 6 — Juridique               (max  8pts,  9 signaux)
+    Dim 7 — Presse                  (max  8pts,  6 signaux)
+    Dim 8 — Innovation & PI         (max  6pts,  5 signaux)
+    Dim 9 — Immobilier & Actifs     (max  5pts,  5 signaux)
+    Dim10 — ESG & Conformité        (max  5pts,  4 signaux)
+    Dim11 — International           (max  5pts,  4 signaux)
+    Dim12 — Marchés publics         (max  4pts,  4 signaux)
+    Dim13 — Signaux PROPRIÉTAIRES   (max 15pts, 20 signaux) -- edge alpha DEMOEMA
+    TOTAL : ~133 brut, plafonné 100
+
+  Multiplicateurs composites (cluster détecté → multiplie le score) :
+    triple_signal_patrimoine    holding+sci+big4         x1.5
+    exit_preparation_cluster    daf+forme+holding/mp     x1.5
+    distressed_cluster          revenue+ebitda+late      x1.3
+    succession_urgency          founder65+conjoint+!dut  x1.5
+    sector_wave_target          pe+competitor+ca         x1.3
+
+  Schéma table (extrait — colonnes clés) :
+    siren CHAR(9) PK
+    score_total INT (0-100)
+    priority_class TEXT ('Action Prioritaire'|'Qualification'|'Monitoring'|'Veille Passive')
+    score_dim1..score_dim12 INT (cappés)
+    score_brut INT (avant cap, avant composites)
+    composite_multiplier NUMERIC(3,2) (1.0..2.25 si plusieurs composites)
+    --- 103 booléens ---
+    sig_founder_60_no_successor BOOL
+    sig_founder_over_65 BOOL
+    sig_director_withdrawal BOOL
+    ... (etc, 1 colonne par signal)
+    --- métadonnées ---
+    n_signals_detected INT
+    derniere_maj TIMESTAMPTZ
+    feature_version TEXT  -- 'v1.0' (103 signaux), 'v1.1' (corrections)...
+
+  Phase 1 (cette PR) : implémente les signaux directement dérivables de silver
+  existant (~50 signaux sur 103). Les autres (LinkedIn, presse fine, brevets
+  expirations, etc.) nécessitent ingestion supplémentaire et seront ajoutés dans
+  une v1.1 / v1.2 — mais leurs colonnes existent déjà avec FALSE par défaut.
+
+  Phase 2 : enrichir les signaux qui dépendent de sources non-encore-ingérées
+  (CFNews PE, presse Les Echos, INPI brevets dates expiration, LinkedIn turnover).
+
+transformations: |
+  -- ============================================================
+  -- DIM 1 — MATURITÉ DIRIGEANT (20pts, 10 signaux)
+  -- ============================================================
+  WITH dim1_signals AS (
+    SELECT
+      siren,
+      -- founder_60_no_successor : 1 dirigeant 60+ + n_dirigeants <= 2 (proxy)
+      bool_or(d.age_2026 >= 60 AND d.n_mandats_actifs >= 1) FILTER (
+        WHERE NOT EXISTS (
+          SELECT 1 FROM silver.inpi_dirigeants d2
+          WHERE siren = ANY(d2.sirens_mandats) AND d2.age_2026 < 50
+        )
+      ) AS sig_founder_60_no_successor,
+      bool_or(d.age_2026 > 65) AS sig_founder_over_65,
+      false AS sig_director_withdrawal,                     -- Phase 2 (LinkedIn)
+      false AS sig_spouse_director_departure,               -- Phase 2 (BODACC parsing fin)
+      bool_or(d.age_2026 BETWEEN 55 AND 65) AS sig_founder_age_55_65,
+      bool_or(
+        d.first_mandat_date IS NOT NULL
+        AND (CURRENT_DATE - d.first_mandat_date) >= INTERVAL '20 years'
+      ) AS sig_director_mandate_20plus,
+      bool_or(d.is_multi_mandat) AS sig_dirigeant_multi_mandats,
+      false AS sig_director_new_ventures,                   -- Phase 2
+      false AS sig_director_speaker,                        -- Phase 2 (Google News)
+      false AS sig_director_health_proxy                    -- Phase 2 (LinkedIn activité)
+    FROM (SELECT DISTINCT unnest(sirens_mandats) AS siren FROM silver.inpi_dirigeants) s
+    LEFT JOIN silver.inpi_dirigeants d ON s.siren = ANY(d.sirens_mandats)
+    GROUP BY s.siren
+  ),
+
+  -- ============================================================
+  -- DIM 2 — PATRIMONIAUX (20pts, 15 signaux)
+  -- ============================================================
+  dim2_signals AS (
+    SELECT
+      b.siren,
+      -- holding_creation : creation d une holding patrimoniale dans bodacc < 24m
+      bool_or(b.familleavis_lib ILIKE '%creation%' AND b.familleavis_lib ILIKE '%holding%')
+        FILTER (WHERE b.date_parution > CURRENT_DATE - INTERVAL '24 months') AS sig_holding_creation,
+      -- bodacc_cession : cession de fonds ou parts < 24m
+      bool_or(b.familleavis_lib ILIKE '%cession%') FILTER (
+        WHERE b.date_parution > CURRENT_DATE - INTERVAL '24 months'
+      ) AS sig_bodacc_cession,
+      false AS sig_apport_cession_structure,                -- Phase 2 (Infogreffe parsing)
+      false AS sig_share_sale_by_director,                  -- Phase 2
+      false AS sig_beneficiaire_effectif_change,            -- Phase 2 (INPI BE)
+      bool_or(b.familleavis_lib ILIKE '%capital%' OR b.typeavis_lib ILIKE '%capital%')
+        FILTER (WHERE b.date_parution > CURRENT_DATE - INTERVAL '24 months') AS sig_bodacc_capital_change,
+      false AS sig_legal_form_change,                       -- Phase 2 (BODACC parsing fin)
+      false AS sig_big4_audit,                              -- Phase 2 (presse)
+      false AS sig_infogreffe_capital_change,               -- doublon bodacc_capital_change
+      false AS sig_sci_creation_linked,                     -- complete plus bas via dirigeants
+      bool_or(b.familleavis_lib ILIKE '%dissolution%' OR b.familleavis_lib ILIKE '%liquidation%')
+        FILTER (WHERE b.date_parution > CURRENT_DATE - INTERVAL '24 months') AS sig_bodacc_dissolution,
+      false AS sig_donation_partage,                        -- Phase 2 (notaires)
+      false AS sig_pacte_dutreil,                           -- Phase 2 (presse + notaires)
+      false AS sig_auditor_change,                          -- Phase 2 (INPI parsing fin)
+      false AS sig_hq_relocation                            -- Phase 2 (BODACC fin)
+    FROM silver.bodacc_annonces b
+    GROUP BY b.siren
+  ),
+
+  -- Patrimoine SCI lié au dirigeant principal de l'entreprise → sig_sci_creation_linked
+  dim2_sci AS (
+    SELECT DISTINCT s.siren,
+           true AS sig_sci_creation_linked
+    FROM (SELECT DISTINCT unnest(sirens_mandats) AS siren FROM silver.inpi_dirigeants) s
+    JOIN silver.inpi_dirigeants d ON s.siren = ANY(d.sirens_mandats)
+    JOIN silver.dirigeant_sci_patrimoine sci
+      ON sci.nom = d.nom AND sci.prenom = d.prenom
+    WHERE sci.n_sci > 0
+  ),
+
+  -- ============================================================
+  -- DIM 3 — DYNAMIQUE FINANCIÈRE (15pts, 17 signaux)
+  -- ============================================================
+  dim3_signals AS (
+    SELECT
+      siren,
+      -- procedure_collective : BODACC RJ/LJ < 24m
+      EXISTS(
+        SELECT 1 FROM silver.bodacc_annonces b
+        WHERE b.siren = c.siren
+          AND (b.familleavis_lib ILIKE '%redress%'
+            OR b.familleavis_lib ILIKE '%liquid%'
+            OR b.familleavis_lib ILIKE '%proc%coll%')
+          AND b.date_parution > CURRENT_DATE - INTERVAL '24 months'
+      ) AS sig_procedure_collective,
+      false AS sig_lbo_4_years,                             -- Phase 2 (CFNews)
+      -- revenue_decline_2years : CA exercice N < 90% CA exercice N-1
+      (c.ca_net_n IS NOT NULL AND c.ca_net_n1 IS NOT NULL
+        AND c.ca_net_n < c.ca_net_n1 * 0.90) AS sig_revenue_decline_2years,
+      -- ebitda_margin_compression : marge EBITDA / CA recul > 3pts
+      (c.ebitda_n IS NOT NULL AND c.ebitda_n1 IS NOT NULL
+        AND c.ca_net_n > 0 AND c.ca_net_n1 > 0
+        AND ((c.ebitda_n1::numeric / c.ca_net_n1) - (c.ebitda_n::numeric / c.ca_net_n)) > 0.03)
+        AS sig_ebitda_margin_compression,
+      false AS sig_pret_garanti_etat,                       -- Phase 2 (INPI bilans parsing fin)
+      -- debt_ratio_deterioration : emprunts / EBITDA > 4
+      (c.emprunts_n IS NOT NULL AND c.ebitda_n IS NOT NULL AND c.ebitda_n > 0
+        AND c.emprunts_n::numeric / c.ebitda_n > 4) AS sig_debt_ratio_deterioration,
+      false AS sig_exceptional_dividend,                    -- Phase 2
+      -- ca_growth_2years : CA N > CA N-1 * 1.15
+      (c.ca_net_n IS NOT NULL AND c.ca_net_n1 IS NOT NULL
+        AND c.ca_net_n > c.ca_net_n1 * 1.15) AS sig_ca_growth_2years,
+      false AS sig_score_defaillance_interne,               -- Phase 2 (calcul interne)
+      false AS sig_headcount_growth_20,                     -- Phase 2 (URSSAF historique)
+      false AS sig_late_filing,                             -- Phase 2 (date_depot vs date_cloture)
+      false AS sig_working_capital_stress,                  -- Phase 2
+      false AS sig_capex_decline,                           -- Phase 2
+      false AS sig_new_establishment,                       -- Phase 2
+      false AS sig_bpifrance_aid,                           -- Phase 2 (data.subvention)
+      false AS sig_presse_levee_fonds,                      -- Phase 2 (Google News)
+      false AS sig_presse_difficultes                       -- Phase 2 (Google News)
+    FROM (
+      -- CTE pour avoir les 2 derniers exercices côte à côte
+      SELECT DISTINCT ON (siren)
+             siren,
+             ca_net AS ca_net_n,
+             resultat_net AS ebitda_n,
+             emprunts_dettes AS emprunts_n,
+             LAG(ca_net) OVER (PARTITION BY siren ORDER BY date_cloture) AS ca_net_n1,
+             LAG(resultat_net) OVER (PARTITION BY siren ORDER BY date_cloture) AS ebitda_n1
+      FROM silver.inpi_comptes
+      ORDER BY siren, date_cloture DESC
+    ) c
+  ),
+
+  -- ============================================================
+  -- DIM 4 — RH & GOUVERNANCE (12pts, 10 signaux) — la plupart Phase 2
+  -- ============================================================
+  dim4_signals AS (
+    SELECT
+      siren,
+      false AS sig_daf_pe_recruitment,                      -- Phase 2 (LinkedIn)
+      false AS sig_key_hire_manda,                          -- Phase 2 (LinkedIn)
+      false AS sig_interim_management,                      -- Phase 2 (LinkedIn)
+      -- nouveau dirigeant : BODACC familleavis nomination/changement < 12m
+      bool_or(b.familleavis_lib ILIKE '%nominati%'
+        OR b.familleavis_lib ILIKE '%changement%dirigeant%'
+        OR b.familleavis_lib ILIKE '%modificat%direct%') FILTER (
+          WHERE b.date_parution > CURRENT_DATE - INTERVAL '12 months'
+      ) AS sig_infogreffe_nouveau_dirigeant,
+      false AS sig_management_package_setup,                -- Phase 2 (Infogreffe BSPCE/AGA)
+      false AS sig_cofounder_departure,                     -- Phase 2
+      false AS sig_board_composition_change,                -- Phase 2
+      false AS sig_mass_layoff_plan,                        -- Phase 2 (presse + DIRECCTE)
+      false AS sig_cse_information_consultation,            -- Phase 2
+      false AS sig_linkedin_turnover_spike                  -- Phase 2 (LinkedIn)
+    FROM silver.bodacc_annonces b
+    GROUP BY b.siren
+  ),
+
+  -- ============================================================
+  -- DIM 5 — CONSOLIDATION (10pts, 9 signaux) — la plupart Phase 2 (CFNews)
+  -- ============================================================
+  dim5_signals AS (
+    SELECT
+      siren,
+      false AS sig_pe_platform_in_sector,                   -- Phase 2 (CFNews)
+      false AS sig_competitor_acquired,                     -- Phase 2 (CFNews)
+      bool_or(b.familleavis_lib ILIKE '%fusion%' OR b.familleavis_lib ILIKE '%absorpt%')
+        FILTER (WHERE b.date_parution > CURRENT_DATE - INTERVAL '24 months')
+        AS sig_infogreffe_fusion_absorption,
+      false AS sig_sector_consolidation,                    -- Phase 2 (config sectorielle)
+      false AS sig_foreign_buyer_entry,                     -- Phase 2 (presse)
+      false AS sig_sector_regulation_change,                -- Phase 2 (LEGI/JORF)
+      false AS sig_presse_partenariat,                      -- Phase 2
+      false AS sig_ma_event,                                -- Phase 2 (CFNews)
+      false AS sig_sector_multiple_expansion                -- Phase 2 (rapports)
+    FROM silver.bodacc_annonces b
+    GROUP BY b.siren
+  ),
+
+  -- ============================================================
+  -- DIM 6 — JURIDIQUE (8pts, 9 signaux)
+  -- ============================================================
+  dim6_signals AS (
+    SELECT
+      s.siren,
+      false AS sig_mandat_ad_hoc,                           -- Phase 2 (BODACC parsing fin)
+      EXISTS(
+        SELECT 1 FROM silver.bodacc_annonces b
+        WHERE b.siren = s.siren AND b.familleavis_lib ILIKE '%conciliation%'
+          AND b.date_parution > CURRENT_DATE - INTERVAL '24 months'
+      ) AS sig_conciliation_procedure,
+      EXISTS(
+        SELECT 1 FROM silver.bodacc_annonces b
+        WHERE b.siren = s.siren AND b.tribunal IS NOT NULL
+          AND b.date_parution > CURRENT_DATE - INTERVAL '12 months'
+      ) AS sig_commercial_court_filing,
+      EXISTS(
+        SELECT 1 FROM silver.opensanctions os
+        WHERE s.siren = ANY(os.sirens_fr)
+      ) AS sig_sanction_detected,
+      bool_or(b.familleavis_lib ILIKE '%transfert%si%ge%')
+        FILTER (WHERE b.date_parution > CURRENT_DATE - INTERVAL '24 months')
+        AS sig_infogreffe_transfert_siege,
+      bool_or(b.familleavis_lib ILIKE '%objet social%')
+        FILTER (WHERE b.date_parution > CURRENT_DATE - INTERVAL '24 months')
+        AS sig_change_of_purpose,
+      false AS sig_litigation_signal,                       -- Phase 2 (judilibre matching siren)
+      false AS sig_rgpd_sanction,                           -- Phase 2 (silver.cnil_sanctions)
+      false AS sig_environmental_sanction                   -- Phase 2 (DREAL)
+    FROM (SELECT DISTINCT siren FROM silver.bodacc_annonces) s
+    LEFT JOIN silver.bodacc_annonces b ON b.siren = s.siren
+    GROUP BY s.siren
+  ),
+
+  -- ============================================================
+  -- DIM 13 — SIGNAUX PROPRIÉTAIRES DEMOEMA (15pts, 20 signaux)
+  -- Edge alpha : cross-joins silver originaux non listés dans benchmarks publics.
+  -- ============================================================
+  dim13_signals AS (
+    SELECT
+      lc.siren,
+      -- Patrimoine dirigeant cross-DVF
+      EXISTS(
+        SELECT 1
+        FROM silver.inpi_dirigeants d
+        JOIN silver.dirigeant_sci_patrimoine sci
+          ON UPPER(unaccent(sci.nom)) = UPPER(unaccent(d.nom))
+         AND UPPER(unaccent(sci.prenom)) = UPPER(unaccent(d.prenom))
+        WHERE lc.siren::char(9) = ANY(d.sirens_mandats)
+          AND COALESCE(sci.total_capital_sci, 0) > 5000000
+      ) AS sig_dirigeant_high_net_worth,
+      false AS sig_dvf_dirigeant_cash_out,                  -- Phase 2 (cross BODACC date-window)
+      EXISTS(
+        SELECT nom, COUNT(*) AS cnt
+        FROM silver.inpi_dirigeants d2
+        WHERE lc.siren::char(9) = ANY(d2.sirens_mandats)
+        GROUP BY nom
+        HAVING COUNT(*) >= 3
+      ) AS sig_clan_familial,
+      EXISTS(
+        SELECT 1 FROM silver.inpi_dirigeants d3
+        WHERE lc.siren::char(9) = ANY(d3.sirens_mandats)
+          AND d3.n_mandats_actifs >= 10
+          AND lc.ca_net < 5000000
+      ) AS sig_micro_empire,
+      -- Bilan financier ratios
+      (lc.total_actif IS NOT NULL AND lc.immo_corporelles IS NOT NULL
+        AND lc.total_actif > 0
+        AND lc.immo_corporelles::numeric / lc.total_actif > 0.5) AS sig_immo_corporelles_high,
+      (lc.capitaux_propres IS NOT NULL AND lc.total_passif IS NOT NULL
+        AND lc.total_passif > 0
+        AND lc.capitaux_propres::numeric / lc.total_passif > 0.7) AS sig_treasury_excess,
+      (lc.ca_export IS NOT NULL AND lc.ca_net IS NOT NULL AND lc.ca_net > 0
+        AND lc.ca_export::numeric / lc.ca_net > 0.3) AS sig_ca_export_high,
+      false AS sig_capex_underinvest,                       -- besoin LAG immo_corp 3 ans
+      -- Présence digitale paradoxale
+      EXISTS(
+        SELECT 1 FROM silver.osint_companies_enriched oce
+        WHERE oce.siren = lc.siren::char(9)
+          AND oce.linkedin_employees > 100
+          AND oce.has_github_org = true
+      ) AS sig_digital_powerhouse,
+      EXISTS(
+        SELECT 1 FROM silver.osint_companies_enriched oce
+        WHERE oce.siren = lc.siren::char(9)
+          AND COALESCE(oce.domains_count, 0) = 0
+          AND COALESCE(oce.has_linkedin_page, false) = false
+          AND lc.ca_net > 5000000
+      ) AS sig_low_profile_target,
+      -- Internationalisation & influence
+      EXISTS(
+        SELECT 1 FROM silver.gleif_lei l
+        WHERE l.siren_fr = lc.siren::text
+          AND l.status = 'ACTIVE'
+      ) AS sig_has_lei_code,
+      false AS sig_active_lobbying_recent,                  -- Phase 2 (silver.hatvp_lobbying)
+      false AS sig_high_lobbying_budget,                    -- Phase 2 (silver.hatvp_lobbying)
+      -- Compliance avancée
+      EXISTS(
+        SELECT 1 FROM silver.opensanctions s
+        WHERE s.schema = 'Person'
+          AND s.topics @> ARRAY['pep']
+          AND EXISTS(
+            SELECT 1 FROM silver.inpi_dirigeants d4
+            WHERE lc.siren::char(9) = ANY(d4.sirens_mandats)
+              AND LOWER(s.name) ILIKE '%' || LOWER(d4.prenom) || '%'
+              AND LOWER(s.name) ILIKE '%' || LOWER(d4.nom) || '%'
+          )
+      ) AS sig_dirigeant_pep,
+      false AS sig_offshore_link,                           -- Phase 2 (silver.icij_offshore_match)
+      -- Patterns judiciaires
+      (
+        SELECT COUNT(*) FROM silver.judilibre_decisions j
+        WHERE j.juridiction ILIKE ANY(ARRAY['%cassation%', '%cour%appel%'])
+          AND j.date_decision > CURRENT_DATE - INTERVAL '5 years'
+      ) >= 3 AS sig_litigation_pattern,                     -- approx (judilibre n'a pas siren direct)
+      EXISTS(
+        SELECT 1 FROM silver.bodacc_annonces b
+        WHERE b.siren = lc.siren
+          AND (b.familleavis_lib ILIKE '%radiation%' OR b.typeavis_lib ILIKE '%radiation%')
+          AND b.date_parution > CURRENT_DATE - INTERVAL '3 months'
+      ) AS sig_radiation_proche,
+      EXISTS(
+        SELECT 1 FROM silver.bodacc_annonces b
+        WHERE b.siren = lc.siren
+          AND (b.familleavis_lib ILIKE '%avis%tier%' OR b.typeavis_lib ILIKE '%avis%tier%')
+          AND b.date_parution > CURRENT_DATE - INTERVAL '24 months'
+      ) AS sig_avis_de_tiers,
+      -- Composites
+      false AS sig_phantom_holding,                         -- Phase 2 (cross BODACC + comptes 24m)
+      (
+        SELECT COUNT(DISTINCT code_dept)
+        FROM silver.insee_etablissements
+        WHERE siren = lc.siren
+          AND date_creation > CURRENT_DATE - INTERVAL '12 months'
+      ) >= 3 AS sig_geographic_expansion
+    FROM (
+      SELECT DISTINCT ON (siren)
+             siren, ca_net, total_actif, total_passif,
+             immo_corporelles, capitaux_propres, ca_export
+      FROM silver.inpi_comptes
+      ORDER BY siren, date_cloture DESC
+    ) lc
+  ),
+
+  -- ============================================================
+  -- DIMS 7-12 : presse, innovation, immo, ESG, intl, marchés publics — Phase 2
+  -- (signaux nécessitent ingestion supplémentaire — colonnes posees a FALSE)
+  -- ============================================================
+  dims_phase2 AS (
+    SELECT DISTINCT siren,
+      -- Dim 7 — Presse
+      false AS sig_presse_cession,
+      false AS sig_press_advisor_mandate,
+      false AS sig_press_strategic_review,
+      false AS sig_press_succession_mention,
+      false AS sig_press_award_ranking,
+      false AS sig_press_regional,
+      -- Dim 8 — Innovation & PI
+      false AS sig_key_patent_expiry,
+      false AS sig_patent_portfolio_growth,
+      false AS sig_cir_cii_beneficiary,
+      false AS sig_patent_licensing_activity,
+      false AS sig_tech_obsolescence_risk,
+      -- Dim 9 — Immobilier (sale_leaseback / real_estate_sale via DVF)
+      false AS sig_sale_leaseback,
+      false AS sig_real_estate_sale,
+      false AS sig_site_closure,
+      false AS sig_lease_expiry_approaching,
+      -- Dim 10 — ESG
+      false AS sig_bilan_ges_publie,
+      false AS sig_carbon_regulation_exposure,
+      false AS sig_bcorp_certification,
+      false AS sig_social_audit_failure,
+      -- Dim 11 — International
+      false AS sig_foreign_shareholder_entry,
+      false AS sig_ie_foreign_investment_screening,
+      false AS sig_foreign_subsidiary_creation,
+      false AS sig_export_dependency_high,
+      -- Dim 12 — Marchés publics
+      false AS sig_major_contract_loss,
+      false AS sig_public_contract_concentration,
+      false AS sig_major_contract_win,
+      false AS sig_client_concentration_risk
+    FROM silver.bodacc_annonces
+  ),
+
+  -- ============================================================
+  -- AGRÉGATION : 1 row par siren avec tous les signaux
+  -- ============================================================
+  all_signals AS (
+    SELECT
+      COALESCE(d1.siren, d2.siren, d3.siren, d4.siren, d5.siren, d6.siren, d13.siren, p2.siren) AS siren,
+      -- Dim 1
+      COALESCE(d1.sig_founder_60_no_successor, false) AS sig_founder_60_no_successor,
+      COALESCE(d1.sig_founder_over_65, false) AS sig_founder_over_65,
+      COALESCE(d1.sig_director_withdrawal, false) AS sig_director_withdrawal,
+      COALESCE(d1.sig_spouse_director_departure, false) AS sig_spouse_director_departure,
+      COALESCE(d1.sig_founder_age_55_65, false) AS sig_founder_age_55_65,
+      COALESCE(d1.sig_director_mandate_20plus, false) AS sig_director_mandate_20plus,
+      COALESCE(d1.sig_dirigeant_multi_mandats, false) AS sig_dirigeant_multi_mandats,
+      COALESCE(d1.sig_director_new_ventures, false) AS sig_director_new_ventures,
+      COALESCE(d1.sig_director_speaker, false) AS sig_director_speaker,
+      COALESCE(d1.sig_director_health_proxy, false) AS sig_director_health_proxy,
+      -- Dim 2
+      COALESCE(d2.sig_holding_creation, false) AS sig_holding_creation,
+      COALESCE(d2.sig_bodacc_cession, false) AS sig_bodacc_cession,
+      COALESCE(d2.sig_apport_cession_structure, false) AS sig_apport_cession_structure,
+      COALESCE(d2.sig_share_sale_by_director, false) AS sig_share_sale_by_director,
+      COALESCE(d2.sig_beneficiaire_effectif_change, false) AS sig_beneficiaire_effectif_change,
+      COALESCE(d2.sig_bodacc_capital_change, false) AS sig_bodacc_capital_change,
+      COALESCE(d2.sig_legal_form_change, false) AS sig_legal_form_change,
+      COALESCE(d2.sig_big4_audit, false) AS sig_big4_audit,
+      COALESCE(d2.sig_infogreffe_capital_change, false) AS sig_infogreffe_capital_change,
+      COALESCE(sci.sig_sci_creation_linked, false) AS sig_sci_creation_linked,
+      COALESCE(d2.sig_bodacc_dissolution, false) AS sig_bodacc_dissolution,
+      COALESCE(d2.sig_donation_partage, false) AS sig_donation_partage,
+      COALESCE(d2.sig_pacte_dutreil, false) AS sig_pacte_dutreil,
+      COALESCE(d2.sig_auditor_change, false) AS sig_auditor_change,
+      COALESCE(d2.sig_hq_relocation, false) AS sig_hq_relocation,
+      -- Dim 3
+      COALESCE(d3.sig_procedure_collective, false) AS sig_procedure_collective,
+      COALESCE(d3.sig_lbo_4_years, false) AS sig_lbo_4_years,
+      COALESCE(d3.sig_revenue_decline_2years, false) AS sig_revenue_decline_2years,
+      COALESCE(d3.sig_ebitda_margin_compression, false) AS sig_ebitda_margin_compression,
+      COALESCE(d3.sig_pret_garanti_etat, false) AS sig_pret_garanti_etat,
+      COALESCE(d3.sig_debt_ratio_deterioration, false) AS sig_debt_ratio_deterioration,
+      COALESCE(d3.sig_exceptional_dividend, false) AS sig_exceptional_dividend,
+      COALESCE(d3.sig_ca_growth_2years, false) AS sig_ca_growth_2years,
+      COALESCE(d3.sig_score_defaillance_interne, false) AS sig_score_defaillance_interne,
+      COALESCE(d3.sig_headcount_growth_20, false) AS sig_headcount_growth_20,
+      COALESCE(d3.sig_late_filing, false) AS sig_late_filing,
+      COALESCE(d3.sig_working_capital_stress, false) AS sig_working_capital_stress,
+      COALESCE(d3.sig_capex_decline, false) AS sig_capex_decline,
+      COALESCE(d3.sig_new_establishment, false) AS sig_new_establishment,
+      COALESCE(d3.sig_bpifrance_aid, false) AS sig_bpifrance_aid,
+      COALESCE(d3.sig_presse_levee_fonds, false) AS sig_presse_levee_fonds,
+      COALESCE(d3.sig_presse_difficultes, false) AS sig_presse_difficultes,
+      -- Dim 4
+      COALESCE(d4.sig_daf_pe_recruitment, false) AS sig_daf_pe_recruitment,
+      COALESCE(d4.sig_key_hire_manda, false) AS sig_key_hire_manda,
+      COALESCE(d4.sig_interim_management, false) AS sig_interim_management,
+      COALESCE(d4.sig_infogreffe_nouveau_dirigeant, false) AS sig_infogreffe_nouveau_dirigeant,
+      COALESCE(d4.sig_management_package_setup, false) AS sig_management_package_setup,
+      COALESCE(d4.sig_cofounder_departure, false) AS sig_cofounder_departure,
+      COALESCE(d4.sig_board_composition_change, false) AS sig_board_composition_change,
+      COALESCE(d4.sig_mass_layoff_plan, false) AS sig_mass_layoff_plan,
+      COALESCE(d4.sig_cse_information_consultation, false) AS sig_cse_information_consultation,
+      COALESCE(d4.sig_linkedin_turnover_spike, false) AS sig_linkedin_turnover_spike,
+      -- Dim 5
+      COALESCE(d5.sig_pe_platform_in_sector, false) AS sig_pe_platform_in_sector,
+      COALESCE(d5.sig_competitor_acquired, false) AS sig_competitor_acquired,
+      COALESCE(d5.sig_infogreffe_fusion_absorption, false) AS sig_infogreffe_fusion_absorption,
+      COALESCE(d5.sig_sector_consolidation, false) AS sig_sector_consolidation,
+      COALESCE(d5.sig_foreign_buyer_entry, false) AS sig_foreign_buyer_entry,
+      COALESCE(d5.sig_sector_regulation_change, false) AS sig_sector_regulation_change,
+      COALESCE(d5.sig_presse_partenariat, false) AS sig_presse_partenariat,
+      COALESCE(d5.sig_ma_event, false) AS sig_ma_event,
+      COALESCE(d5.sig_sector_multiple_expansion, false) AS sig_sector_multiple_expansion,
+      -- Dim 6
+      COALESCE(d6.sig_mandat_ad_hoc, false) AS sig_mandat_ad_hoc,
+      COALESCE(d6.sig_conciliation_procedure, false) AS sig_conciliation_procedure,
+      COALESCE(d6.sig_commercial_court_filing, false) AS sig_commercial_court_filing,
+      COALESCE(d6.sig_sanction_detected, false) AS sig_sanction_detected,
+      COALESCE(d6.sig_infogreffe_transfert_siege, false) AS sig_infogreffe_transfert_siege,
+      COALESCE(d6.sig_change_of_purpose, false) AS sig_change_of_purpose,
+      COALESCE(d6.sig_litigation_signal, false) AS sig_litigation_signal,
+      COALESCE(d6.sig_rgpd_sanction, false) AS sig_rgpd_sanction,
+      COALESCE(d6.sig_environmental_sanction, false) AS sig_environmental_sanction,
+      -- Dim 13 — Signaux propriétaires DEMOEMA
+      COALESCE(d13.sig_dirigeant_high_net_worth, false) AS sig_dirigeant_high_net_worth,
+      COALESCE(d13.sig_dvf_dirigeant_cash_out, false) AS sig_dvf_dirigeant_cash_out,
+      COALESCE(d13.sig_clan_familial, false) AS sig_clan_familial,
+      COALESCE(d13.sig_micro_empire, false) AS sig_micro_empire,
+      COALESCE(d13.sig_immo_corporelles_high, false) AS sig_immo_corporelles_high,
+      COALESCE(d13.sig_treasury_excess, false) AS sig_treasury_excess,
+      COALESCE(d13.sig_ca_export_high, false) AS sig_ca_export_high,
+      COALESCE(d13.sig_capex_underinvest, false) AS sig_capex_underinvest,
+      COALESCE(d13.sig_digital_powerhouse, false) AS sig_digital_powerhouse,
+      COALESCE(d13.sig_low_profile_target, false) AS sig_low_profile_target,
+      COALESCE(d13.sig_has_lei_code, false) AS sig_has_lei_code,
+      COALESCE(d13.sig_active_lobbying_recent, false) AS sig_active_lobbying_recent,
+      COALESCE(d13.sig_high_lobbying_budget, false) AS sig_high_lobbying_budget,
+      COALESCE(d13.sig_dirigeant_pep, false) AS sig_dirigeant_pep,
+      COALESCE(d13.sig_offshore_link, false) AS sig_offshore_link,
+      COALESCE(d13.sig_litigation_pattern, false) AS sig_litigation_pattern,
+      COALESCE(d13.sig_radiation_proche, false) AS sig_radiation_proche,
+      COALESCE(d13.sig_avis_de_tiers, false) AS sig_avis_de_tiers,
+      COALESCE(d13.sig_phantom_holding, false) AS sig_phantom_holding,
+      COALESCE(d13.sig_geographic_expansion, false) AS sig_geographic_expansion,
+      -- Phase 2 columns (Dim 7-12, FALSE par defaut)
+      false AS sig_presse_cession,
+      false AS sig_press_advisor_mandate,
+      false AS sig_press_strategic_review,
+      false AS sig_press_succession_mention,
+      false AS sig_press_award_ranking,
+      false AS sig_press_regional,
+      false AS sig_key_patent_expiry,
+      false AS sig_patent_portfolio_growth,
+      false AS sig_cir_cii_beneficiary,
+      false AS sig_patent_licensing_activity,
+      false AS sig_tech_obsolescence_risk,
+      false AS sig_sale_leaseback,
+      false AS sig_real_estate_sale,
+      false AS sig_site_closure,
+      false AS sig_lease_expiry_approaching,
+      false AS sig_bilan_ges_publie,
+      false AS sig_carbon_regulation_exposure,
+      false AS sig_bcorp_certification,
+      false AS sig_social_audit_failure,
+      false AS sig_foreign_shareholder_entry,
+      false AS sig_ie_foreign_investment_screening,
+      false AS sig_foreign_subsidiary_creation,
+      false AS sig_export_dependency_high,
+      false AS sig_major_contract_loss,
+      false AS sig_public_contract_concentration,
+      false AS sig_major_contract_win,
+      false AS sig_client_concentration_risk
+    FROM dim1_signals d1
+    FULL OUTER JOIN dim2_signals d2 USING (siren)
+    FULL OUTER JOIN dim2_sci sci USING (siren)
+    FULL OUTER JOIN dim3_signals d3 USING (siren)
+    FULL OUTER JOIN dim4_signals d4 USING (siren)
+    FULL OUTER JOIN dim5_signals d5 USING (siren)
+    FULL OUTER JOIN dim6_signals d6 USING (siren)
+    FULL OUTER JOIN dim13_signals d13 USING (siren)
+    FULL OUTER JOIN dims_phase2 p2 USING (siren)
+    WHERE COALESCE(d1.siren, d2.siren, d3.siren, d4.siren, d5.siren, d6.siren, d13.siren) IS NOT NULL
+  ),
+
+  -- ============================================================
+  -- SCORING : points par dimension (cappes au max), total, classification
+  -- ============================================================
+  scored AS (
+    SELECT
+      siren,
+      -- Dim 1 (cap 20)
+      LEAST(20,
+        (CASE WHEN sig_founder_60_no_successor THEN 7 ELSE 0 END) +
+        (CASE WHEN sig_founder_over_65 THEN 6 ELSE 0 END) +
+        (CASE WHEN sig_director_withdrawal THEN 5 ELSE 0 END) +
+        (CASE WHEN sig_spouse_director_departure THEN 5 ELSE 0 END) +
+        (CASE WHEN sig_founder_age_55_65 THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_director_mandate_20plus THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_dirigeant_multi_mandats THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_director_new_ventures THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_director_speaker THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_director_health_proxy THEN 1 ELSE 0 END)
+      )::int AS score_dim1,
+      -- Dim 2 (cap 20)
+      LEAST(20,
+        (CASE WHEN sig_holding_creation THEN 7 ELSE 0 END) +
+        (CASE WHEN sig_bodacc_cession THEN 7 ELSE 0 END) +
+        (CASE WHEN sig_apport_cession_structure THEN 6 ELSE 0 END) +
+        (CASE WHEN sig_share_sale_by_director THEN 6 ELSE 0 END) +
+        (CASE WHEN sig_beneficiaire_effectif_change THEN 5 ELSE 0 END) +
+        (CASE WHEN sig_bodacc_capital_change THEN 5 ELSE 0 END) +
+        (CASE WHEN sig_legal_form_change THEN 4 ELSE 0 END) +
+        (CASE WHEN sig_big4_audit THEN 4 ELSE 0 END) +
+        (CASE WHEN sig_infogreffe_capital_change THEN 4 ELSE 0 END) +
+        (CASE WHEN sig_sci_creation_linked THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_bodacc_dissolution THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_donation_partage THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_pacte_dutreil THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_auditor_change THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_hq_relocation THEN 1 ELSE 0 END)
+      )::int AS score_dim2,
+      -- Dim 3 (cap 15)
+      LEAST(15,
+        (CASE WHEN sig_procedure_collective THEN 6 ELSE 0 END) +
+        (CASE WHEN sig_lbo_4_years THEN 5 ELSE 0 END) +
+        (CASE WHEN sig_revenue_decline_2years THEN 4 ELSE 0 END) +
+        (CASE WHEN sig_ebitda_margin_compression THEN 4 ELSE 0 END) +
+        (CASE WHEN sig_pret_garanti_etat THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_debt_ratio_deterioration THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_exceptional_dividend THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_ca_growth_2years THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_score_defaillance_interne THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_headcount_growth_20 THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_late_filing THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_working_capital_stress THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_capex_decline THEN 1 ELSE 0 END) +
+        (CASE WHEN sig_new_establishment THEN 1 ELSE 0 END) +
+        (CASE WHEN sig_bpifrance_aid THEN 1 ELSE 0 END) +
+        (CASE WHEN sig_presse_levee_fonds THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_presse_difficultes THEN 4 ELSE 0 END)
+      )::int AS score_dim3,
+      -- Dim 4 (cap 12)
+      LEAST(12,
+        (CASE WHEN sig_daf_pe_recruitment THEN 5 ELSE 0 END) +
+        (CASE WHEN sig_key_hire_manda THEN 5 ELSE 0 END) +
+        (CASE WHEN sig_interim_management THEN 4 ELSE 0 END) +
+        (CASE WHEN sig_infogreffe_nouveau_dirigeant THEN 4 ELSE 0 END) +
+        (CASE WHEN sig_management_package_setup THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_cofounder_departure THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_board_composition_change THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_mass_layoff_plan THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_cse_information_consultation THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_linkedin_turnover_spike THEN 1 ELSE 0 END)
+      )::int AS score_dim4,
+      -- Dim 5 (cap 10)
+      LEAST(10,
+        (CASE WHEN sig_pe_platform_in_sector THEN 4 ELSE 0 END) +
+        (CASE WHEN sig_competitor_acquired THEN 4 ELSE 0 END) +
+        (CASE WHEN sig_infogreffe_fusion_absorption THEN 4 ELSE 0 END) +
+        (CASE WHEN sig_sector_consolidation THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_foreign_buyer_entry THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_sector_regulation_change THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_presse_partenariat THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_ma_event THEN 1 ELSE 0 END) +
+        (CASE WHEN sig_sector_multiple_expansion THEN 1 ELSE 0 END)
+      )::int AS score_dim5,
+      -- Dim 6 (cap 8)
+      LEAST(8,
+        (CASE WHEN sig_mandat_ad_hoc THEN 4 ELSE 0 END) +
+        (CASE WHEN sig_conciliation_procedure THEN 4 ELSE 0 END) +
+        (CASE WHEN sig_commercial_court_filing THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_sanction_detected THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_infogreffe_transfert_siege THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_change_of_purpose THEN 1 ELSE 0 END) +
+        (CASE WHEN sig_litigation_signal THEN 1 ELSE 0 END) +
+        (CASE WHEN sig_rgpd_sanction THEN 1 ELSE 0 END) +
+        (CASE WHEN sig_environmental_sanction THEN 1 ELSE 0 END)
+      )::int AS score_dim6,
+      -- Dim 7-12 (Phase 2, score 0)
+      0::int AS score_dim7, 0::int AS score_dim8, 0::int AS score_dim9,
+      0::int AS score_dim10, 0::int AS score_dim11, 0::int AS score_dim12,
+      -- Dim 13 — Signaux propriétaires (cap 15)
+      LEAST(15,
+        (CASE WHEN sig_dirigeant_high_net_worth THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_dvf_dirigeant_cash_out THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_clan_familial THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_micro_empire THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_immo_corporelles_high THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_treasury_excess THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_ca_export_high THEN 1 ELSE 0 END) +
+        (CASE WHEN sig_capex_underinvest THEN 1 ELSE 0 END) +
+        (CASE WHEN sig_digital_powerhouse THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_low_profile_target THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_has_lei_code THEN 1 ELSE 0 END) +
+        (CASE WHEN sig_active_lobbying_recent THEN 1 ELSE 0 END) +
+        (CASE WHEN sig_high_lobbying_budget THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_dirigeant_pep THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_offshore_link THEN 4 ELSE 0 END) +
+        (CASE WHEN sig_litigation_pattern THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_radiation_proche THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_avis_de_tiers THEN 1 ELSE 0 END) +
+        (CASE WHEN sig_phantom_holding THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_geographic_expansion THEN 1 ELSE 0 END)
+      )::int AS score_dim13,
+      -- Composites (Dim 1+2+3 fournit une base, multiplie ensuite)
+      (sig_holding_creation AND sig_sci_creation_linked AND sig_big4_audit) AS composite_triple_patrimoine,
+      (sig_daf_pe_recruitment AND sig_legal_form_change
+        AND (sig_holding_creation OR sig_management_package_setup)) AS composite_exit_preparation,
+      (sig_revenue_decline_2years AND sig_ebitda_margin_compression
+        AND (sig_late_filing OR sig_score_defaillance_interne)) AS composite_distressed,
+      (sig_founder_over_65 AND sig_spouse_director_departure AND NOT sig_pacte_dutreil) AS composite_succession_urgency,
+      (sig_pe_platform_in_sector AND sig_competitor_acquired AND sig_ca_growth_2years) AS composite_sector_wave,
+      *
+    FROM all_signals
+  ),
+
+  with_total AS (
+    SELECT
+      siren,
+      score_dim1, score_dim2, score_dim3, score_dim4, score_dim5, score_dim6,
+      score_dim7, score_dim8, score_dim9, score_dim10, score_dim11, score_dim12, score_dim13,
+      (score_dim1 + score_dim2 + score_dim3 + score_dim4 + score_dim5 + score_dim6
+       + score_dim7 + score_dim8 + score_dim9 + score_dim10 + score_dim11 + score_dim12
+       + score_dim13)::int AS score_brut,
+      composite_triple_patrimoine,
+      composite_exit_preparation,
+      composite_distressed,
+      composite_succession_urgency,
+      composite_sector_wave,
+      -- Multiplicateur composite (max 1 actif retenu — le plus eleve)
+      GREATEST(
+        CASE WHEN composite_triple_patrimoine THEN 1.5 ELSE 1.0 END,
+        CASE WHEN composite_exit_preparation THEN 1.5 ELSE 1.0 END,
+        CASE WHEN composite_succession_urgency THEN 1.5 ELSE 1.0 END,
+        CASE WHEN composite_distressed THEN 1.3 ELSE 1.0 END,
+        CASE WHEN composite_sector_wave THEN 1.3 ELSE 1.0 END
+      )::numeric(3,2) AS composite_multiplier,
+      *
+    FROM scored
+  ),
+
+  finalized AS (
+    SELECT
+      siren,
+      score_dim1, score_dim2, score_dim3, score_dim4, score_dim5, score_dim6,
+      score_dim7, score_dim8, score_dim9, score_dim10, score_dim11, score_dim12, score_dim13,
+      score_brut,
+      composite_multiplier,
+      composite_triple_patrimoine, composite_exit_preparation,
+      composite_distressed, composite_succession_urgency, composite_sector_wave,
+      LEAST(100, ROUND(score_brut * composite_multiplier))::int AS score_total,
+      CASE
+        WHEN LEAST(100, ROUND(score_brut * composite_multiplier))::int >= 65 THEN 'Action Prioritaire'
+        WHEN LEAST(100, ROUND(score_brut * composite_multiplier))::int >= 45 THEN 'Qualification'
+        WHEN LEAST(100, ROUND(score_brut * composite_multiplier))::int >= 25 THEN 'Monitoring'
+        ELSE 'Veille Passive'
+      END AS priority_class,
+      -- 103 booleens
+      sig_founder_60_no_successor, sig_founder_over_65, sig_director_withdrawal,
+      sig_spouse_director_departure, sig_founder_age_55_65, sig_director_mandate_20plus,
+      sig_dirigeant_multi_mandats, sig_director_new_ventures, sig_director_speaker,
+      sig_director_health_proxy,
+      sig_holding_creation, sig_bodacc_cession, sig_apport_cession_structure,
+      sig_share_sale_by_director, sig_beneficiaire_effectif_change, sig_bodacc_capital_change,
+      sig_legal_form_change, sig_big4_audit, sig_infogreffe_capital_change,
+      sig_sci_creation_linked, sig_bodacc_dissolution, sig_donation_partage,
+      sig_pacte_dutreil, sig_auditor_change, sig_hq_relocation,
+      sig_procedure_collective, sig_lbo_4_years, sig_revenue_decline_2years,
+      sig_ebitda_margin_compression, sig_pret_garanti_etat, sig_debt_ratio_deterioration,
+      sig_exceptional_dividend, sig_ca_growth_2years, sig_score_defaillance_interne,
+      sig_headcount_growth_20, sig_late_filing, sig_working_capital_stress,
+      sig_capex_decline, sig_new_establishment, sig_bpifrance_aid,
+      sig_presse_levee_fonds, sig_presse_difficultes,
+      sig_daf_pe_recruitment, sig_key_hire_manda, sig_interim_management,
+      sig_infogreffe_nouveau_dirigeant, sig_management_package_setup,
+      sig_cofounder_departure, sig_board_composition_change, sig_mass_layoff_plan,
+      sig_cse_information_consultation, sig_linkedin_turnover_spike,
+      sig_pe_platform_in_sector, sig_competitor_acquired, sig_infogreffe_fusion_absorption,
+      sig_sector_consolidation, sig_foreign_buyer_entry, sig_sector_regulation_change,
+      sig_presse_partenariat, sig_ma_event, sig_sector_multiple_expansion,
+      sig_mandat_ad_hoc, sig_conciliation_procedure, sig_commercial_court_filing,
+      sig_sanction_detected, sig_infogreffe_transfert_siege, sig_change_of_purpose,
+      sig_litigation_signal, sig_rgpd_sanction, sig_environmental_sanction,
+      -- Dim 13 — Signaux propriétaires DEMOEMA
+      sig_dirigeant_high_net_worth, sig_dvf_dirigeant_cash_out,
+      sig_clan_familial, sig_micro_empire,
+      sig_immo_corporelles_high, sig_treasury_excess,
+      sig_ca_export_high, sig_capex_underinvest,
+      sig_digital_powerhouse, sig_low_profile_target,
+      sig_has_lei_code, sig_active_lobbying_recent, sig_high_lobbying_budget,
+      sig_dirigeant_pep, sig_offshore_link,
+      sig_litigation_pattern, sig_radiation_proche, sig_avis_de_tiers,
+      sig_phantom_holding, sig_geographic_expansion,
+      -- Phase 2
+      sig_presse_cession, sig_press_advisor_mandate, sig_press_strategic_review,
+      sig_press_succession_mention, sig_press_award_ranking, sig_press_regional,
+      sig_key_patent_expiry, sig_patent_portfolio_growth, sig_cir_cii_beneficiary,
+      sig_patent_licensing_activity, sig_tech_obsolescence_risk,
+      sig_sale_leaseback, sig_real_estate_sale, sig_site_closure, sig_lease_expiry_approaching,
+      sig_bilan_ges_publie, sig_carbon_regulation_exposure, sig_bcorp_certification,
+      sig_social_audit_failure,
+      sig_foreign_shareholder_entry, sig_ie_foreign_investment_screening,
+      sig_foreign_subsidiary_creation, sig_export_dependency_high,
+      sig_major_contract_loss, sig_public_contract_concentration,
+      sig_major_contract_win, sig_client_concentration_risk,
+      -- Compteur
+      (
+        sig_founder_60_no_successor::int + sig_founder_over_65::int + sig_director_withdrawal::int
+        + sig_spouse_director_departure::int + sig_founder_age_55_65::int
+        + sig_director_mandate_20plus::int + sig_dirigeant_multi_mandats::int
+        + sig_director_new_ventures::int + sig_director_speaker::int + sig_director_health_proxy::int
+        + sig_holding_creation::int + sig_bodacc_cession::int + sig_apport_cession_structure::int
+        + sig_share_sale_by_director::int + sig_beneficiaire_effectif_change::int
+        + sig_bodacc_capital_change::int + sig_legal_form_change::int + sig_big4_audit::int
+        + sig_infogreffe_capital_change::int + sig_sci_creation_linked::int
+        + sig_bodacc_dissolution::int + sig_donation_partage::int + sig_pacte_dutreil::int
+        + sig_auditor_change::int + sig_hq_relocation::int
+        + sig_procedure_collective::int + sig_lbo_4_years::int + sig_revenue_decline_2years::int
+        + sig_ebitda_margin_compression::int + sig_pret_garanti_etat::int
+        + sig_debt_ratio_deterioration::int + sig_exceptional_dividend::int
+        + sig_ca_growth_2years::int + sig_score_defaillance_interne::int
+        + sig_headcount_growth_20::int + sig_late_filing::int + sig_working_capital_stress::int
+        + sig_capex_decline::int + sig_new_establishment::int + sig_bpifrance_aid::int
+        + sig_presse_levee_fonds::int + sig_presse_difficultes::int
+        + sig_daf_pe_recruitment::int + sig_key_hire_manda::int + sig_interim_management::int
+        + sig_infogreffe_nouveau_dirigeant::int + sig_management_package_setup::int
+        + sig_cofounder_departure::int + sig_board_composition_change::int
+        + sig_mass_layoff_plan::int + sig_cse_information_consultation::int
+        + sig_linkedin_turnover_spike::int
+        + sig_pe_platform_in_sector::int + sig_competitor_acquired::int
+        + sig_infogreffe_fusion_absorption::int + sig_sector_consolidation::int
+        + sig_foreign_buyer_entry::int + sig_sector_regulation_change::int
+        + sig_presse_partenariat::int + sig_ma_event::int + sig_sector_multiple_expansion::int
+        + sig_mandat_ad_hoc::int + sig_conciliation_procedure::int
+        + sig_commercial_court_filing::int + sig_sanction_detected::int
+        + sig_infogreffe_transfert_siege::int + sig_change_of_purpose::int
+        + sig_litigation_signal::int + sig_rgpd_sanction::int + sig_environmental_sanction::int
+        -- Dim 13
+        + sig_dirigeant_high_net_worth::int + sig_dvf_dirigeant_cash_out::int
+        + sig_clan_familial::int + sig_micro_empire::int
+        + sig_immo_corporelles_high::int + sig_treasury_excess::int
+        + sig_ca_export_high::int + sig_capex_underinvest::int
+        + sig_digital_powerhouse::int + sig_low_profile_target::int
+        + sig_has_lei_code::int + sig_active_lobbying_recent::int + sig_high_lobbying_budget::int
+        + sig_dirigeant_pep::int + sig_offshore_link::int
+        + sig_litigation_pattern::int + sig_radiation_proche::int + sig_avis_de_tiers::int
+        + sig_phantom_holding::int + sig_geographic_expansion::int
+      )::int AS n_signals_detected,
+      'v1.0'::text AS feature_version,
+      NOW() AS derniere_maj
+    FROM with_total
+  )
+
+  -- ============================================================
+  -- INSERT/UPSERT dans gold.scoring_ma
+  -- ============================================================
+  INSERT INTO gold.scoring_ma SELECT * FROM finalized
+  ON CONFLICT (siren) DO UPDATE SET
+    score_total = EXCLUDED.score_total,
+    priority_class = EXCLUDED.priority_class,
+    score_brut = EXCLUDED.score_brut,
+    composite_multiplier = EXCLUDED.composite_multiplier,
+    score_dim1 = EXCLUDED.score_dim1, score_dim2 = EXCLUDED.score_dim2,
+    score_dim3 = EXCLUDED.score_dim3, score_dim4 = EXCLUDED.score_dim4,
+    score_dim5 = EXCLUDED.score_dim5, score_dim6 = EXCLUDED.score_dim6,
+    score_dim13 = EXCLUDED.score_dim13,
+    derniere_maj = NOW(),
+    feature_version = EXCLUDED.feature_version;
+
+indexes:
+  - "siren UNIQUE"
+  - "score_total DESC"
+  - "priority_class"
+  - "(priority_class, score_total DESC)"
+
+refresh_trigger: "interval_hours=12"
+sla_minutes: 1500

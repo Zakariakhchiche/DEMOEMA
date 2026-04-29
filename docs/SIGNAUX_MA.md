@@ -1,29 +1,35 @@
 # Signaux M&A — Scoring sur 100 points
 
-## Systeme de scoring : 12 dimensions, 103 signaux
+## Systeme de scoring : 13 dimensions, 123 signaux
 
 Chaque entreprise cible recoit un score global sur 100 points.
-Les points sont repartis sur 12 dimensions avec un plafond par dimension.
+Les points sont repartis sur 13 dimensions avec un plafond par dimension.
 Un score >= 65 = Action Prioritaire, >= 45 = Qualification,
 >= 25 = Monitoring, < 25 = Veille Passive.
+
+La dimension 13 « Signaux propriétaires » est l'edge alpha DEMOEMA :
+20 signaux non listés dans les benchmarks publics, dérivés de cross-joins
+silver (DVF + SCI patrimoine, ICIJ + opensanctions, ratios financiers fins,
+pattern judiciaire) qui font la différence vs concurrents Pappers/Infogreffe.
 
 ## Repartition des dimensions
 
 | # | Dimension | Max pts | Poids | Nb signaux |
 |---|-----------|---------|-------|------------|
-| 1 | Maturite du dirigeant | 20 | 20% | 10 |
-| 2 | Signaux patrimoniaux | 20 | 20% | 15 |
-| 3 | Dynamique financiere | 15 | 15% | 17 |
-| 4 | RH & Gouvernance | 12 | 12% | 10 |
-| 5 | Consolidation sectorielle | 10 | 10% | 9 |
+| 1 | Maturite du dirigeant | 20 | 17% | 10 |
+| 2 | Signaux patrimoniaux | 20 | 17% | 15 |
+| 3 | Dynamique financiere | 15 | 13% | 17 |
+| 4 | RH & Gouvernance | 12 | 10% | 10 |
+| 5 | Consolidation sectorielle | 10 | 9% | 9 |
 | 6 | Juridique & Reglementaire | 8 | 7% | 9 |
-| 7 | Presse & Media | 8 | 5% | 6 |
-| 8 | Innovation & PI | 6 | 3% | 5 |
-| 9 | Immobilier & Actifs | 5 | 3% | 5 |
-| 10 | ESG & Conformite | 5 | 2% | 4 |
-| 11 | International & Cross-border | 5 | 2% | 4 |
-| 12 | Marches publics & Dependance | 4 | 1% | 4 |
-| | **TOTAL** | **~118 brut, plafonne a 100** | **100%** | **103** |
+| 7 | Presse & Media | 8 | 6% | 6 |
+| 8 | Innovation & PI | 6 | 5% | 5 |
+| 9 | Immobilier & Actifs | 5 | 4% | 5 |
+| 10 | ESG & Conformite | 5 | 4% | 4 |
+| 11 | International & Cross-border | 5 | 4% | 4 |
+| 12 | Marches publics & Dependance | 4 | 3% | 4 |
+| 13 | **Signaux propriétaires DEMOEMA** | **15** | **13%** | **20** |
+| | **TOTAL** | **~133 brut, plafonne a 100** | **100%** | **123** |
 
 ---
 
@@ -184,6 +190,67 @@ Un score >= 65 = Action Prioritaire, >= 45 = Qualification,
 | public_contract_concentration | Concentration marches publics > 40% CA | FAIBLE | 1 | BOAMP, DECP |
 | major_contract_win | Gain contrat majeur | FAIBLE | 1 | BOAMP, Presse |
 | client_concentration_risk | Concentration client > 30% CA | FAIBLE | 1 | INPI bilans |
+
+## DIMENSION 13 : SIGNAUX PROPRIETAIRES DEMOEMA (max 15 pts)
+
+20 signaux derives de cross-joins silver originaux non listes dans les
+benchmarks publics. C'est l'edge alpha de DEMOEMA — la difference vs
+Pappers/Infogreffe qui n'exploitent que les signaux "evidents".
+
+### Patrimoine dirigeant cross-DVF (4 signaux)
+
+| Signal | Label | Force | Points | Source |
+|--------|-------|-------|--------|--------|
+| dirigeant_high_net_worth | Capital SCI cumulé dirigeant > 5 M€ | FORT | 3 | silver.dirigeant_sci_patrimoine |
+| dvf_dirigeant_cash_out | Achat immo dirigeant > 1 M€ < 6m apres cession parts | FORT | 3 | silver.dvf_transactions + bodacc |
+| clan_familial | >= 3 dirigeants meme nom | MOYEN | 2 | silver.inpi_dirigeants |
+| micro_empire | CA < 5 M€ mais dirigeant >= 10 mandats | MOYEN | 2 | silver.inpi_comptes + silver.inpi_dirigeants |
+
+### Bilan financier ratios fins (4 signaux)
+
+| Signal | Label | Force | Points | Source |
+|--------|-------|-------|--------|--------|
+| immo_corporelles_high | Immo corporelles > 50% total actif | FORT | 2 | silver.inpi_comptes |
+| treasury_excess | Capitaux propres > 70% passif (excess cash) | MOYEN | 2 | silver.inpi_comptes |
+| ca_export_high | ca_export > 30% ca_net | MOYEN | 1 | silver.inpi_comptes |
+| capex_underinvest | Immo corporelles N < N-3 sur 3 ans | FAIBLE | 1 | silver.inpi_comptes |
+
+### Presence digitale paradoxale (2 signaux)
+
+| Signal | Label | Force | Points | Source |
+|--------|-------|-------|--------|--------|
+| digital_powerhouse | LinkedIn > 100 employes + GitHub org | MOYEN | 2 | silver.osint_companies_enriched |
+| low_profile_target | Pas de domain ni LinkedIn malgre CA > 5 M€ (fortune cachee) | FORT | 3 | silver.osint_companies_enriched |
+
+### Internationalisation & influence (3 signaux)
+
+| Signal | Label | Force | Points | Source |
+|--------|-------|-------|--------|--------|
+| has_lei_code | Code LEI international actif | FAIBLE | 1 | silver.gleif_lei |
+| active_lobbying_recent | Inscrit HATVP < 24 mois | MOYEN | 1 | silver.hatvp_lobbying |
+| high_lobbying_budget | Budget lobbying > 200 k€/an | FORT | 2 | silver.hatvp_lobbying |
+
+### Compliance & DD red flags avances (2 signaux)
+
+| Signal | Label | Force | Points | Source |
+|--------|-------|-------|--------|--------|
+| dirigeant_pep | Dirigeant PEP (Politically Exposed Person) | FORT | 3 | silver.opensanctions topics=pep |
+| offshore_link | Match ICIJ Panama/Paradise/Pandora Papers | FORT | 4 | silver.icij_offshore_match |
+
+### Patterns judiciaires & BODACC (3 signaux)
+
+| Signal | Label | Force | Points | Source |
+|--------|-------|-------|--------|--------|
+| litigation_pattern | >= 3 decisions cassation/CA en 5 ans | MOYEN | 2 | silver.judilibre_decisions |
+| radiation_proche | Annonce radiation BODACC < 3 mois | FORT | 3 | silver.bodacc_annonces |
+| avis_de_tiers | Avis de tiers (creancier qui s'oppose) | MOYEN | 1 | silver.bodacc_annonces |
+
+### Composites originaux (2 signaux)
+
+| Signal | Label | Force | Points | Source |
+|--------|-------|-------|--------|--------|
+| phantom_holding | Creation holding 24m + CA cible decroit (preparation cession silencieuse) | FORT | 3 | bodacc + silver.inpi_comptes |
+| geographic_expansion | Nouveaux etablissements dans >= 3 dept en 12m | MOYEN | 1 | silver.insee_etablissements |
 
 ---
 
