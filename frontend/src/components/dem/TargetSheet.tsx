@@ -181,22 +181,89 @@ function formeJuridiqueLabel(code: string): string {
 function BarChart({ data, labels }: { data: number[]; labels: string[] }) {
   if (data.length === 0) return null;
   const max = Math.max(...data, 1);
+  const min = Math.min(...data, 0);
+  const BAR_AREA = 160; // hauteur du graph en px
   return (
-    <div style={{ display: "flex", alignItems: "flex-end", gap: 12, height: 120, marginTop: 14 }}>
-      {data.map((v, i) => (
-        <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-          <div className="dem-mono tab-num" style={{ fontSize: 11, color: "var(--text-secondary)" }}>{fmtEur(v)}</div>
-          <div style={{
-            width: "100%", height: `${(v / max) * 80}%`,
-            background: i === data.length - 1
-              ? "linear-gradient(180deg, var(--accent-blue), rgba(96,165,250,0.30))"
-              : "rgba(255,255,255,0.10)",
-            borderRadius: 4,
-            boxShadow: i === data.length - 1 ? "0 0 16px -2px rgba(96,165,250,0.40)" : "none",
-          }} />
-          <div className="dem-mono" style={{ fontSize: 10.5, color: "var(--text-tertiary)" }}>{labels[i]}</div>
+    <div style={{ marginTop: 14 }}>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${data.length}, 1fr)`,
+        gap: 14,
+        alignItems: "end",
+        height: BAR_AREA,
+      }}>
+        {data.map((v, i) => {
+          const isLatest = i === data.length - 1;
+          const prev = i > 0 ? data[i - 1] : null;
+          const yoy = prev && prev !== 0 ? ((v - prev) / Math.abs(prev)) * 100 : null;
+          const heightPx = Math.max(8, Math.round((v / max) * (BAR_AREA - 36)));
+          return (
+            <div key={i} style={{
+              display: "flex", flexDirection: "column",
+              alignItems: "center", justifyContent: "flex-end",
+              height: "100%", position: "relative",
+            }}>
+              {/* YoY badge */}
+              {yoy != null && (
+                <div className="dem-mono tab-num" style={{
+                  fontSize: 10, fontWeight: 600,
+                  color: yoy >= 0 ? "var(--accent-emerald)" : "var(--accent-rose)",
+                  marginBottom: 2,
+                }}>
+                  {yoy >= 0 ? "+" : ""}{yoy.toFixed(0)}%
+                </div>
+              )}
+              {/* Value */}
+              <div className="dem-mono tab-num" style={{
+                fontSize: 11, fontWeight: 600,
+                color: isLatest ? "var(--accent-blue)" : "var(--text-secondary)",
+                marginBottom: 4,
+              }}>
+                {fmtEur(v)}
+              </div>
+              {/* Bar */}
+              <div style={{
+                width: "70%", maxWidth: 60,
+                height: heightPx,
+                background: isLatest
+                  ? "linear-gradient(180deg, var(--accent-blue), rgba(96,165,250,0.20))"
+                  : "linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.06))",
+                borderRadius: "6px 6px 0 0",
+                boxShadow: isLatest
+                  ? "0 0 18px -2px rgba(96,165,250,0.55), inset 0 1px 0 rgba(255,255,255,0.25)"
+                  : "inset 0 1px 0 rgba(255,255,255,0.08)",
+                transition: "height 0.4s cubic-bezier(.4,1.2,.3,1)",
+              }} />
+            </div>
+          );
+        })}
+      </div>
+      {/* Year labels */}
+      <div style={{
+        display: "grid", gridTemplateColumns: `repeat(${data.length}, 1fr)`, gap: 14,
+        marginTop: 8, paddingTop: 6,
+        borderTop: "1px solid var(--border-subtle)",
+      }}>
+        {labels.map((l, i) => (
+          <div key={i} className="dem-mono" style={{
+            fontSize: 11, color: "var(--text-tertiary)",
+            textAlign: "center", fontWeight: i === labels.length - 1 ? 600 : 500,
+          }}>
+            {l}
+          </div>
+        ))}
+      </div>
+      {/* Min/max axis hint */}
+      {min !== max && (
+        <div style={{
+          marginTop: 10, fontSize: 10.5, color: "var(--text-muted)",
+          display: "flex", justifyContent: "space-between",
+        }}>
+          <span>min {fmtEur(min)}</span>
+          <span>max {fmtEur(max)}</span>
+          <span>CAGR {data.length >= 2 ? ((Math.pow(data[data.length - 1] / data[0], 1 / (data.length - 1)) - 1) * 100).toFixed(1) : "0"}%</span>
         </div>
-      ))}
+      )}
     </div>
   );
 }
