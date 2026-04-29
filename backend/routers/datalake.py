@@ -1677,18 +1677,11 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
                     ORDER BY b.date_parution DESC LIMIT 1) AS dept_bodacc,
                    (SELECT b.ville FROM silver.bodacc_annonces b
                     WHERE b.siren = lc.siren AND b.ville IS NOT NULL
-                    ORDER BY b.date_parution DESC LIMIT 1) AS ville_bodacc,
-                   -- Top dirigeant M&A : plus grand nombre de mandats actifs
-                   td.nom AS td_nom, td.prenom AS td_prenom,
-                   td.age_2026 AS td_age,
-                   td.n_mandats_actifs AS td_mandats,
-                   -- Score M&A naïf : multi-mandat + age 50-65 = pro M&A
-                   CASE
-                     WHEN COALESCE(td.n_mandats_actifs, 0) >= 5 AND COALESCE(td.age_2026, 0) BETWEEN 50 AND 65 THEN 90
-                     WHEN COALESCE(td.n_mandats_actifs, 0) >= 3 AND COALESCE(td.age_2026, 0) >= 55 THEN 75
-                     WHEN COALESCE(td.n_mandats_actifs, 0) >= 1 THEN 60
-                     ELSE 50
-                   END AS td_score
+                    ORDER BY b.date_parution DESC LIMIT 1) AS ville_bodacc
+                   -- Top dirigeant pas joint ici : LATERAL sur silver.inpi_dirigeants
+                   -- (8M rows) timeout même avec GIN. /fiche/{siren} fait le drill-down
+                   -- précis quand l'utilisateur clique sur une cible. Pour le listing
+                   -- on garde des cibles rapides (<1s).
             FROM last_compte lc
             LEFT JOIN silver.insee_unites_legales ul ON ul.siren = lc.siren
             LEFT JOIN silver.osint_companies_enriched oce ON oce.siren = lc.siren::char(9)
@@ -1698,15 +1691,6 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
                 WHERE siren = lc.siren AND etablissement_siege = true
                 LIMIT 1
             ) et ON true
-            -- Top dirigeant via && (operator overlap) → utilise l'index GIN sur
-            -- sirens_mandats. ANY(...) ne peut pas utiliser GIN et timeout sur 8M rows.
-            LEFT JOIN LATERAL (
-                SELECT nom, prenom, age_2026, n_mandats_actifs
-                FROM silver.inpi_dirigeants
-                WHERE sirens_mandats && ARRAY[lc.siren]::bpchar[]
-                ORDER BY n_mandats_actifs DESC NULLS LAST
-                LIMIT 1
-            ) td ON true
         )
         SELECT siren,
                denomination,
@@ -1735,13 +1719,13 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
                  WHERE siren = ANY(os.sirens_fr)
                ) AS has_compliance_red_flag,
                false AS is_listed,
-               -- Top dirigeant exposé pour CompareView et Chat
-               td_nom AS top_dirigeant_nom,
-               td_prenom AS top_dirigeant_prenom,
-               TRIM(COALESCE(td_prenom, '') || ' ' || COALESCE(td_nom, '')) AS top_dirigeant_full_name,
-               td_age AS top_dirigeant_age,
-               td_mandats AS top_dirigeant_n_mandats,
-               td_score AS top_dirigeant_pro_ma_score
+               -- top_dirigeant_* exposés via /fiche/{siren} (drill-down rapide)
+               NULL::text AS top_dirigeant_nom,
+               NULL::text AS top_dirigeant_prenom,
+               NULL::text AS top_dirigeant_full_name,
+               NULL::int AS top_dirigeant_age,
+               NULL::int AS top_dirigeant_n_mandats,
+               NULL::int AS top_dirigeant_pro_ma_score
         FROM enriched
         WHERE 1=1 {extra_where}
         ORDER BY {order_sql}
