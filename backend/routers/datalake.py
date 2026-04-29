@@ -423,14 +423,29 @@ async def fiche_entreprise(req: Request, siren: str):
     # Dirigeants détaillés — top 10 par mandats actifs, joint avec patrimoine SCI.
     # On essaie d'abord en silver (8M dirigeants), fallback sur l'API gouv si vide.
     dirigeants_silver = await pool.fetch(
-        """WITH dirig AS (
-              SELECT nom, prenom, date_naissance, age_2026 AS age,
+        """WITH dirig_raw AS (
+              -- Identité = (nom, prenom, date_naissance). Si silver a plusieurs
+              -- rows pour la même personne (ex : 1 par siren_main), on garde la
+              -- row avec le plus grand n_mandats_actifs.
+              SELECT DISTINCT ON (
+                       UPPER(unaccent(nom)),
+                       UPPER(unaccent(prenom)),
+                       COALESCE(date_naissance, '')
+                     )
+                     nom, prenom, date_naissance, age_2026 AS age,
                      n_mandats_actifs, n_mandats_total,
                      sirens_mandats, denominations, formes_juridiques,
                      roles, is_multi_mandat,
                      first_mandat_date, last_mandat_date
               FROM silver.inpi_dirigeants
               WHERE $1::char(9) = ANY(sirens_mandats)
+              ORDER BY UPPER(unaccent(nom)),
+                       UPPER(unaccent(prenom)),
+                       COALESCE(date_naissance, ''),
+                       n_mandats_actifs DESC NULLS LAST
+           ),
+           dirig AS (
+              SELECT * FROM dirig_raw
               ORDER BY n_mandats_actifs DESC NULLS LAST
               LIMIT 10
            ),
