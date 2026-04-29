@@ -150,10 +150,11 @@ export function CompareView() {
   const [anchorSiren, setAnchorSiren] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
+  // Cache enrichissement par siren — chaque cible affichée fetche /fiche/<siren>
+  // pour avoir effectif/ville/dept/naf/dirigeant qui manquent dans /cibles listing.
+  const [enrichments, setEnrichments] = useState<Record<string, Record<string, unknown>>>({});
 
   useEffect(() => {
-    // Pool large (50) pour pouvoir ajouter et chercher d'autres cibles que les
-    // 3 initiales — sinon le picker n'a presque rien à proposer.
     fetchTargets({ limit: 50 }).then((ts) => {
       setPool(ts);
       const initial = ts.slice(0, 3).map((t) => t.siren);
@@ -162,9 +163,68 @@ export function CompareView() {
     });
   }, []);
 
+  // Enrichit chaque cible sélectionnée via /fiche/<siren> (données complètes :
+  // effectif, ville, dept, naf, top dirigeant). Le listing /cibles ne donne
+  // qu'un sous-ensemble pour rester rapide ; on complète à la demande.
+  useEffect(() => {
+    selected.forEach(async (siren) => {
+      if (enrichments[siren]) return;
+      try {
+        const r = await fetch(`/api/datalake/fiche/${siren}`);
+        if (!r.ok) return;
+        const data = await r.json();
+        const f = data.fiche || {};
+        const top = (data.dirigeants || [])[0] || {};
+        setEnrichments((prev) => ({
+          ...prev,
+          [siren]: {
+            naf: f.naf,
+            naf_libelle: f.naf_libelle,
+            forme_juridique: f.forme_juridique,
+            ville: f.ville,
+            dept: f.dept,
+            adresse_code_postal: f.adresse_code_postal,
+            effectif_exact: f.effectif_exact,
+            tranche_effectifs: f.tranche_effectifs,
+            annee_creation: f.annee_creation,
+            categorie_entreprise: f.categorie_entreprise,
+            n_etablissements: f.n_etablissements,
+            n_dirigeants: f.n_dirigeants,
+            n_bodacc: f.n_bodacc,
+            n_sanctions: f.n_sanctions,
+            top_dirigeant_full_name: top.nom && top.prenom ? `${top.prenom} ${top.nom}` : null,
+            top_dirigeant_age: top.age,
+            top_dirigeant_n_mandats: top.n_mandats_actifs,
+          },
+        }));
+      } catch {
+        /* noop */
+      }
+    });
+  }, [selected, enrichments]);
+
   const targets = useMemo(
-    () => selected.map((s) => pool.find((t) => t.siren === s)).filter(Boolean) as Target[],
-    [selected, pool]
+    () =>
+      (selected.map((s) => pool.find((t) => t.siren === s)).filter(Boolean) as Target[]).map((t) => {
+        const e = enrichments[t.siren];
+        if (!e) return t;
+        return {
+          ...t,
+          naf: (e.naf as string) || t.naf,
+          ville: (e.ville as string) || t.ville,
+          dept: (e.dept as string) || t.dept,
+          forme: (e.forme_juridique as string) || t.forme,
+          effectif: (e.effectif_exact as number) ?? t.effectif,
+          creation: e.annee_creation ? String(e.annee_creation) : t.creation,
+          top_dirigeant: {
+            ...t.top_dirigeant,
+            nom: (e.top_dirigeant_full_name as string) || t.top_dirigeant.nom,
+            age: (e.top_dirigeant_age as number) ?? t.top_dirigeant.age,
+            mandats: (e.top_dirigeant_n_mandats as number) ?? t.top_dirigeant.mandats,
+          },
+        } as Target;
+      }),
+    [selected, pool, enrichments]
   );
   const anchor = targets.find((t) => t.siren === anchorSiren) ?? targets[0] ?? null;
   const available = pool.filter((t) => !selected.includes(t.siren));
