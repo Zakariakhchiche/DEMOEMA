@@ -464,6 +464,29 @@ async def fiche_entreprise(req: Request, siren: str):
               WHERE (nom, prenom) IN (SELECT nom, prenom FROM dirig)
               GROUP BY nom, prenom, date_naissance
            ),
+           -- Valeur réelle du patrimoine SCI : agrégation des derniers comptes
+           -- INPI (total_actif = bilan, immo_corporelles = biens immo, capitaux_propres
+           -- = situation nette). C'est cette VALEUR qui est intéressante pour
+           -- estimer la richesse réelle du dirigeant, pas le capital social statutaire.
+           sci_patrimoine_value AS (
+              SELECT sa.nom, sa.prenom, sa.date_naissance,
+                     SUM(c.total_actif) AS sci_total_actif,
+                     SUM(c.immo_corporelles) AS sci_immo_corporelles,
+                     SUM(c.capitaux_propres) AS sci_capitaux_propres,
+                     SUM(c.ca_net) AS sci_ca_net,
+                     COUNT(DISTINCT c.siren) AS sci_n_with_comptes
+              FROM sci_agg sa
+              CROSS JOIN LATERAL unnest(sa.sci_sirens) AS s(siren)
+              -- Dernier exercice par siren SCI uniquement (DISTINCT ON)
+              JOIN LATERAL (
+                  SELECT total_actif, immo_corporelles, capitaux_propres, ca_net, siren
+                  FROM silver.inpi_comptes ic
+                  WHERE ic.siren = s.siren
+                  ORDER BY ic.date_cloture DESC NULLS LAST
+                  LIMIT 1
+              ) c ON true
+              GROUP BY sa.nom, sa.prenom, sa.date_naissance
+           ),
            -- Sanctions matching strict : nom + prenom dans le caption opensanctions
            sanc_agg AS (
               SELECT d.nom, d.prenom,
@@ -489,6 +512,12 @@ async def fiche_entreprise(req: Request, siren: str):
                   sci.sci_sirens,
                   sci.sci_code_postaux,
                   sci.first_sci_date,
+                  -- Valeur réelle du patrimoine SCI (bilan agrégé dernier exercice)
+                  spv.sci_total_actif,
+                  spv.sci_immo_corporelles,
+                  spv.sci_capitaux_propres,
+                  spv.sci_ca_net,
+                  spv.sci_n_with_comptes,
                   -- OSINT : présence sociale + entreprise principale (JOIN sur prenoms[])
                   os.person_uid,
                   os.has_linkedin, os.has_github, os.has_any_social,
@@ -518,6 +547,10 @@ async def fiche_entreprise(req: Request, siren: str):
                   ON UPPER(unaccent(sci.nom)) = UPPER(unaccent(d.nom))
                  AND UPPER(unaccent(sci.prenom)) = UPPER(unaccent(d.prenom))
                  AND COALESCE(sci.date_naissance, '') = COALESCE(d.date_naissance, '')
+           LEFT JOIN sci_patrimoine_value spv
+                  ON UPPER(unaccent(spv.nom)) = UPPER(unaccent(d.nom))
+                 AND UPPER(unaccent(spv.prenom)) = UPPER(unaccent(d.prenom))
+                 AND COALESCE(spv.date_naissance, '') = COALESCE(d.date_naissance, '')
            LEFT JOIN sanc_agg sa
                   ON UPPER(unaccent(sa.nom)) = UPPER(unaccent(d.nom))
                  AND UPPER(unaccent(sa.prenom)) = UPPER(unaccent(d.prenom))
@@ -860,6 +893,39 @@ async def _dirigeant_full(
         nom_u, prenom_u, date_n,
     ))
 
+    # 2 bis. Valeur réelle du patrimoine SCI : agrégation des derniers comptes
+    # déposés à l'INPI pour chaque siren SCI du dirigeant.
+    sci_values: list = []
+    sci_value_total: dict | None = None
+    if sci and sci.get("sci_sirens"):
+        sirens = [s for s in sci.get("sci_sirens") or [] if s]
+        if sirens:
+            sci_values = await _safe(pool.fetch(
+                """SELECT DISTINCT ON (siren)
+                       siren, denomination, date_cloture,
+                       total_actif, immo_corporelles,
+                       capitaux_propres, ca_net, resultat_net,
+                       capital_social, emprunts_dettes
+                   FROM silver.inpi_comptes
+                   WHERE siren = ANY($1::char(9)[])
+                   ORDER BY siren, date_cloture DESC NULLS LAST""",
+                sirens,
+            ), default=[])
+            # Agrégation totale
+            sum_actif = sum((float(r["total_actif"]) for r in sci_values if r["total_actif"] is not None), 0.0)
+            sum_immo = sum((float(r["immo_corporelles"]) for r in sci_values if r["immo_corporelles"] is not None), 0.0)
+            sum_cp = sum((float(r["capitaux_propres"]) for r in sci_values if r["capitaux_propres"] is not None), 0.0)
+            sum_ca = sum((float(r["ca_net"]) for r in sci_values if r["ca_net"] is not None), 0.0)
+            sum_dettes = sum((float(r["emprunts_dettes"]) for r in sci_values if r["emprunts_dettes"] is not None), 0.0)
+            sci_value_total = {
+                "total_actif": sum_actif if sum_actif else None,
+                "immo_corporelles": sum_immo if sum_immo else None,
+                "capitaux_propres": sum_cp if sum_cp else None,
+                "ca_net_total": sum_ca if sum_ca else None,
+                "emprunts_dettes": sum_dettes if sum_dettes else None,
+                "n_sci_with_comptes": len(sci_values),
+            }
+
     # 3. OSINT (LinkedIn, GitHub, Twitter, sites perso, entreprise principale)
     # JOIN robuste : prenom dans prenoms[] insensible casse/accents
     osint = await _safe(pool.fetchrow(
@@ -918,6 +984,8 @@ async def _dirigeant_full(
     return {
         "identity": _serialize(inpi),
         "sci_patrimoine": _serialize(sci) if sci else None,
+        "sci_value_total": sci_value_total,
+        "sci_values_per_company": [_serialize(v) for v in sci_values],
         "osint": _serialize(osint) if osint else None,
         "sanctions": [_serialize(s) for s in sanctions],
         "dvf_zones": dvf_summary,

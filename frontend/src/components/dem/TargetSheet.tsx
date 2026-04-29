@@ -721,11 +721,25 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
                             <div style={{ display: "flex", gap: 14, flexWrap: "wrap", color: "var(--text-secondary)" }}>
                               <span style={{ fontWeight: 600, color: "var(--accent-emerald)" }}>🏠 Patrimoine SCI</span>
                               <span>{String(d.n_sci ?? 0)} SCI</span>
+                              {d.sci_total_actif != null && Number(d.sci_total_actif) > 0 && (
+                                <span><span style={{ color: "var(--text-muted)" }}>Valeur (actif)</span> <span className="dem-mono tab-num" style={{ fontWeight: 700, color: "var(--accent-emerald)", fontSize: 13 }}>{fmtEur(d.sci_total_actif)}</span></span>
+                              )}
+                              {d.sci_immo_corporelles != null && Number(d.sci_immo_corporelles) > 0 && (
+                                <span><span style={{ color: "var(--text-muted)" }}>Biens immo</span> <span className="dem-mono tab-num" style={{ fontWeight: 600, color: "var(--accent-emerald)" }}>{fmtEur(d.sci_immo_corporelles)}</span></span>
+                              )}
+                              {d.sci_capitaux_propres != null && Number(d.sci_capitaux_propres) > 0 && (
+                                <span><span style={{ color: "var(--text-muted)" }}>Situation nette</span> <span className="dem-mono tab-num">{fmtEur(d.sci_capitaux_propres)}</span></span>
+                              )}
                               {d.total_capital_sci != null && (
-                                <span><span style={{ color: "var(--text-muted)" }}>Capital cumulé</span> <span className="dem-mono tab-num" style={{ fontWeight: 600, color: "var(--accent-emerald)" }}>{fmtEur(d.total_capital_sci)}</span></span>
+                                <span><span style={{ color: "var(--text-muted)" }}>Capital cumulé</span> <span className="dem-mono tab-num" style={{ color: "var(--text-tertiary)" }}>{fmtEur(d.total_capital_sci)}</span></span>
                               )}
                               {d.first_sci_date ? <span><span style={{ color: "var(--text-muted)" }}>1ère SCI</span> <span className="dem-mono">{String(d.first_sci_date).slice(0, 10)}</span></span> : null}
                             </div>
+                            {d.sci_n_with_comptes != null && Number(d.sci_n_with_comptes) > 0 && Number(d.sci_n_with_comptes) < Number(d.n_sci ?? 0) && (
+                              <div style={{ marginTop: 4, fontSize: 10.5, color: "var(--text-muted)", fontStyle: "italic" }}>
+                                Bilan agrégé sur {String(d.sci_n_with_comptes)}/{String(d.n_sci)} SCI ayant déposé leurs comptes INPI
+                              </div>
+                            )}
                             {sciDenoms.length > 0 && (
                               <div style={{ marginTop: 4, fontSize: 11, color: "var(--text-tertiary)" }}>
                                 {sciDenoms.slice(0, 5).map((sd, j) => (
