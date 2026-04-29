@@ -214,15 +214,37 @@ async def fiche_entreprise(req: Request, siren: str):
                 print(f"[fiche] sub-query failed: {type(e).__name__}: {str(e)[:80]}")
                 return default
 
-        # 1. INPI comptes (rapide, PK siren)
+        # 1. INPI comptes — agrégats sur tous les exercices pour ne pas perdre
+        # les valeurs présentes dans des exercices antérieurs (effectif/capital
+        # parfois null sur le dernier mais présents sur N-1 ou N-2).
         compte = await pool.fetchrow(
-            """SELECT DISTINCT ON (siren) siren, denomination,
-                      ca_net, resultat_net, capitaux_propres,
-                      effectif_moyen::int AS effectif_exact,
-                      date_cloture
-               FROM silver.inpi_comptes
-               WHERE siren = $1
-               ORDER BY siren, date_cloture DESC""",
+            """WITH all_comptes AS (
+                  SELECT denomination, ca_net, resultat_net,
+                         capital_social, capitaux_propres,
+                         effectif_moyen::int AS effectif_exact,
+                         date_cloture, total_actif, emprunts_dettes
+                  FROM silver.inpi_comptes
+                  WHERE siren = $1
+                  ORDER BY date_cloture DESC
+               ),
+               latest AS (SELECT * FROM all_comptes LIMIT 1),
+               latest_non_null AS (
+                  SELECT
+                    (SELECT capital_social FROM all_comptes WHERE capital_social IS NOT NULL LIMIT 1) AS capital_social,
+                    (SELECT capitaux_propres FROM all_comptes WHERE capitaux_propres IS NOT NULL LIMIT 1) AS capitaux_propres,
+                    (SELECT effectif_exact FROM all_comptes WHERE effectif_exact IS NOT NULL LIMIT 1) AS effectif_exact,
+                    (SELECT total_actif FROM all_comptes WHERE total_actif IS NOT NULL LIMIT 1) AS total_actif,
+                    (SELECT emprunts_dettes FROM all_comptes WHERE emprunts_dettes IS NOT NULL LIMIT 1) AS emprunts_dettes
+               )
+               SELECT $1 AS siren,
+                      latest.denomination, latest.ca_net, latest.resultat_net,
+                      COALESCE(latest.capital_social, latest_non_null.capital_social) AS capital_social,
+                      COALESCE(latest.capitaux_propres, latest_non_null.capitaux_propres) AS capitaux_propres,
+                      COALESCE(latest.effectif_exact, latest_non_null.effectif_exact) AS effectif_exact,
+                      COALESCE(latest.total_actif, latest_non_null.total_actif) AS total_actif,
+                      COALESCE(latest.emprunts_dettes, latest_non_null.emprunts_dettes) AS emprunts_dettes,
+                      latest.date_cloture
+               FROM latest, latest_non_null""",
             siren,
         )
         if not compte:
@@ -349,7 +371,10 @@ async def fiche_entreprise(req: Request, siren: str):
             "naf": (osint["naf"] if osint else None) or (insee["code_ape"] if insee else None) or (gouv["naf"] if gouv else None),
             "naf_libelle": (gouv["naf_libelle"] if gouv else None),
             "forme_juridique": (osint["forme_juridique"] if osint else None) or (insee["categorie_juridique"] if insee else None) or (gouv["forme_juridique"] if gouv else None),
-            "capital_social": osint["capital_social"] if osint else None,
+            # Capital social : INPI comptes (toutes années) > osint
+            "capital_social": compte["capital_social"] or (osint["capital_social"] if osint else None),
+            "total_actif": compte["total_actif"],
+            "emprunts_dettes": compte["emprunts_dettes"],
             "adresse_code_postal": (osint["adresse_code_postal"] if osint else None) or (gouv["code_postal"] if gouv else None),
             "annee_creation": (osint["annee_creation"] if osint and osint["annee_creation"] else None) or (
                 int(str(insee["date_creation"])[:4]) if insee and insee["date_creation"] else (
