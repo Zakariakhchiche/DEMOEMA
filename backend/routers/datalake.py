@@ -399,9 +399,9 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
             where.append(f"c.denomination ILIKE ${len(params)}")
 
     order_sql = {
-        "score_ma": "c.ca_net DESC NULLS LAST",
-        "ca_dernier": "c.ca_net DESC NULLS LAST",
-        "date_creation": "c.date_cloture DESC NULLS LAST",
+        "score_ma": "ca_net DESC NULLS LAST",
+        "ca_dernier": "ca_net DESC NULLS LAST",
+        "date_creation": "date_cloture DESC NULLS LAST",
     }[sort]
 
     sql = f"""
