@@ -51,10 +51,15 @@ async def create_pool() -> asyncpg.Pool | None:
         dsn,
         min_size=2,
         max_size=10,
-        command_timeout=60,
+        command_timeout=30,
+        # statement_cache_size=0 désactive le cache de prepared statements
+        # qui timeout aléatoirement sur "prepare" hangs (silver.press_mentions
+        # vide mais prepare reste bloqué). Trade-off : un peu plus lent mais
+        # stable. Voir https://github.com/MagicStack/asyncpg/issues/325
+        statement_cache_size=0,
         server_settings={
             "application_name": "edrcf-backend",
-            "statement_timeout": "60000",
+            "statement_timeout": "30000",
         },
     )
 
