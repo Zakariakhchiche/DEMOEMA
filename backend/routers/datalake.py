@@ -785,9 +785,9 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
     _ = naf  # noqa
 
     order_sql = {
-        "score_ma": "lc.ca_net DESC NULLS LAST",
-        "ca_dernier": "lc.ca_net DESC NULLS LAST",
-        "date_creation": "lc.date_cloture DESC NULLS LAST",
+        "score_ma": "ca_net DESC NULLS LAST",
+        "ca_dernier": "ca_net DESC NULLS LAST",
+        "date_creation": "date_cloture DESC NULLS LAST",
     }[sort]
 
     extra_where = (" AND " + " AND ".join(post_where)) if post_where else ""
