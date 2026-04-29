@@ -7,6 +7,7 @@ goal: >
 
 source_tables:
   - bronze.inpi_formalites_entreprises
+  - bronze.ademe_bilans_ges_raw
   - silver.inpi_dirigeants
   - silver.inpi_comptes
   - silver.bodacc_annonces
@@ -15,6 +16,12 @@ source_tables:
   - silver.opensanctions
   - silver.osint_companies_enriched
   - silver.press_mentions_matched
+  - silver.icij_offshore_match
+  - silver.hatvp_lobbying
+  - silver.marches_publics_unifies
+  - silver.gleif_lei
+  - silver.insee_etablissements
+  - silver.transparence_sante_dirigeants
 
 grain: "1 row par SIREN cible M&A"
 
@@ -85,6 +92,37 @@ business_logic: |
   - has_brevets = EXISTS bronze.inpi_brevets_raw WHERE siren = siren
   - has_marques = EXISTS bronze.inpi_marques_raw WHERE siren = siren
 
+  [ESG / Bilan GES - Dim 10]
+  - has_published_ges_recent = EXISTS bronze.ademe_bilans_ges_raw
+      WHERE siren = e.siren AND annee_reporting >= year(now)-2
+  - emissions_total_tco2e = SUM(scope1+scope2+scope3) latest
+
+  [International / Cross-border - Dim 11]
+  - ca_export_ratio = ca_export / NULLIF(ca_net, 0) (depuis silver.inpi_comptes)
+  - has_filiale_etranger = EXISTS silver.insee_etablissements WHERE siren = e.siren AND
+      code_dept ILIKE '9%' OR code_pays IS NOT NULL
+  - has_lei_code = EXISTS silver.gleif_lei WHERE siren_fr = e.siren
+
+  [Marchés publics - Dim 12]
+  - n_marches_publics = COUNT silver.marches_publics_unifies WHERE siren_titulaire = siren
+  - total_montant_marches = SUM(montant_eur) silver.marches_publics_unifies par siren
+  - is_dependant_commande_publique = total_montant_marches / NULLIF(ca_net, 0) > 0.40
+
+  [Compliance avancée - Dim 13]
+  - has_offshore_link = EXISTS silver.icij_offshore_match
+      via dirigeants → person_uid match
+  - is_lobbying_registered = EXISTS silver.hatvp_lobbying WHERE siren = e.siren
+      AND has_active_lobbying = true
+  - chiffre_affaires_lobbying = MAX silver.hatvp_lobbying.chiffre_affaires_lobbying
+
+  [Patrimoine fin financier - Dim 13]
+  - immo_corporelles_ratio = immo_corporelles / NULLIF(total_actif, 0)
+  - has_treasury_excess = (capitaux_propres / NULLIF(total_passif, 0) > 0.7)
+  - has_late_filing = (date_depot > date_cloture + interval '7 months')
+
+  [Health proxy / KOL pharma - utilité dirigeants_360]
+  - has_kol_pharma = EXISTS silver.transparence_sante_dirigeants WHERE siren = e.siren
+
   materialized_at = now()
 
 transformations: |
@@ -105,6 +143,11 @@ indexes:
   - "n_press_mentions_90d DESC"
   - "has_cession_detected WHERE has_cession_detected = true"
   - "has_sanction WHERE has_sanction = true"
+  - "has_offshore_link WHERE has_offshore_link = true"
+  - "is_lobbying_registered WHERE is_lobbying_registered = true"
+  - "has_published_ges_recent WHERE has_published_ges_recent = true"
+  - "has_late_filing WHERE has_late_filing = true"
+  - "is_dependant_commande_publique WHERE is_dependant_commande_publique = true"
   - "code_ape"
   - departement
 

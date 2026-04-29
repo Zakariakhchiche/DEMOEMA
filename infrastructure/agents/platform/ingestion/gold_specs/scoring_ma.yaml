@@ -21,6 +21,11 @@ source_tables:
   - silver.insee_unites_legales
   - silver.insee_etablissements
   - silver.gleif_lei
+  - silver.entreprises_signals     # feature store enrichi (Dim 10/11/12/13)
+  - silver.icij_offshore_match     # Dim 13 sig_offshore_link
+  - silver.hatvp_lobbying          # Dim 13 sig_active_lobbying / sig_high_lobbying_budget
+  - silver.marches_publics_unifies # Dim 12
+  - silver.transparence_sante_dirigeants  # KOL pharma
 
 grain: "1 row par siren"
 
@@ -142,21 +147,51 @@ transformations: |
       bool_or(b.familleavis_lib ILIKE '%cession%') FILTER (
         WHERE b.date_parution > CURRENT_DATE - INTERVAL '24 months'
       ) AS sig_bodacc_cession,
-      false AS sig_apport_cession_structure,                -- Phase 2 (Infogreffe parsing)
-      false AS sig_share_sale_by_director,                  -- Phase 2
-      false AS sig_beneficiaire_effectif_change,            -- Phase 2 (INPI BE)
+      bool_or(
+        b.familleavis_lib ILIKE '%apport%cession%'
+        OR b.payload::text ILIKE '%150-0 B ter%'
+        OR b.payload::text ILIKE '%150-0B ter%'
+      ) FILTER (WHERE b.date_parution > CURRENT_DATE - INTERVAL '24 months') AS sig_apport_cession_structure,
+      bool_or(
+        b.familleavis_lib ILIKE '%cession%parts%'
+        OR b.familleavis_lib ILIKE '%cession%titres%'
+        OR b.payload::text ILIKE '%cession%dirigeant%'
+      ) FILTER (WHERE b.date_parution > CURRENT_DATE - INTERVAL '24 months') AS sig_share_sale_by_director,
+      bool_or(
+        b.familleavis_lib ILIKE '%beneficiaire%effectif%'
+        OR b.familleavis_lib ILIKE '%benef%effectif%'
+        OR b.familleavis_lib ILIKE '%RBE%'
+      ) FILTER (WHERE b.date_parution > CURRENT_DATE - INTERVAL '24 months') AS sig_beneficiaire_effectif_change,
       bool_or(b.familleavis_lib ILIKE '%capital%' OR b.typeavis_lib ILIKE '%capital%')
         FILTER (WHERE b.date_parution > CURRENT_DATE - INTERVAL '24 months') AS sig_bodacc_capital_change,
-      false AS sig_legal_form_change,                       -- Phase 2 (BODACC parsing fin)
+      bool_or(
+        b.familleavis_lib ILIKE '%transformation%'
+        OR b.familleavis_lib ILIKE '%modification%forme%'
+        OR (b.familleavis_lib ILIKE '%SARL%' AND b.familleavis_lib ILIKE '%SAS%')
+      ) FILTER (WHERE b.date_parution > CURRENT_DATE - INTERVAL '24 months') AS sig_legal_form_change,
       false AS sig_big4_audit,                              -- Phase 2 (presse)
       false AS sig_infogreffe_capital_change,               -- doublon bodacc_capital_change
       false AS sig_sci_creation_linked,                     -- complete plus bas via dirigeants
       bool_or(b.familleavis_lib ILIKE '%dissolution%' OR b.familleavis_lib ILIKE '%liquidation%')
         FILTER (WHERE b.date_parution > CURRENT_DATE - INTERVAL '24 months') AS sig_bodacc_dissolution,
-      false AS sig_donation_partage,                        -- Phase 2 (notaires)
-      false AS sig_pacte_dutreil,                           -- Phase 2 (presse + notaires)
-      false AS sig_auditor_change,                          -- Phase 2 (INPI parsing fin)
-      false AS sig_hq_relocation                            -- Phase 2 (BODACC fin)
+      bool_or(
+        b.payload::text ILIKE '%donation%partage%'
+        OR b.payload::text ILIKE '%donation-partage%'
+      ) FILTER (WHERE b.date_parution > CURRENT_DATE - INTERVAL '24 months') AS sig_donation_partage,
+      bool_or(
+        b.payload::text ILIKE '%dutreil%'
+        OR b.payload::text ILIKE '%pacte%fiscal%'
+      ) FILTER (WHERE b.date_parution > CURRENT_DATE - INTERVAL '24 months') AS sig_pacte_dutreil,
+      bool_or(
+        b.familleavis_lib ILIKE '%commissaire%comptes%'
+        OR b.familleavis_lib ILIKE '%CAC%'
+        OR b.payload::text ILIKE '%nomination%commissaire%'
+      ) FILTER (WHERE b.date_parution > CURRENT_DATE - INTERVAL '24 months') AS sig_auditor_change,
+      bool_or(
+        b.familleavis_lib ILIKE '%transfert%si%ge%'
+        OR b.familleavis_lib ILIKE '%demenag%'
+        OR b.familleavis_lib ILIKE '%modification%adresse%'
+      ) FILTER (WHERE b.date_parution > CURRENT_DATE - INTERVAL '24 months') AS sig_hq_relocation
     FROM silver.bodacc_annonces b
     GROUP BY b.siren
   ),
@@ -325,7 +360,20 @@ transformations: |
         WHERE lc.siren::char(9) = ANY(d.sirens_mandats)
           AND COALESCE(sci.total_capital_sci, 0) > 5000000
       ) AS sig_dirigeant_high_net_worth,
-      false AS sig_dvf_dirigeant_cash_out,                  -- Phase 2 (cross BODACC date-window)
+      -- dvf_dirigeant_cash_out : achat immo > 1M dans CP siege < 6m apres cession parts
+      EXISTS(
+        SELECT 1 FROM silver.bodacc_annonces b
+        JOIN silver.dvf_transactions dvf
+          ON dvf.code_postal = (
+            SELECT et.code_postal FROM silver.insee_etablissements et
+            WHERE et.siren = b.siren AND et.etablissement_siege = true
+            LIMIT 1
+          )
+         AND dvf.date_mutation BETWEEN b.date_parution AND b.date_parution + INTERVAL '6 months'
+         AND dvf.valeur_fonciere > 1000000
+        WHERE b.siren = lc.siren
+          AND b.familleavis_lib ILIKE '%cession%parts%'
+      ) AS sig_dvf_dirigeant_cash_out,
       EXISTS(
         SELECT nom, COUNT(*) AS cnt
         FROM silver.inpi_dirigeants d2
@@ -348,7 +396,18 @@ transformations: |
         AND lc.capitaux_propres::numeric / lc.total_passif > 0.7) AS sig_treasury_excess,
       (lc.ca_export IS NOT NULL AND lc.ca_net IS NOT NULL AND lc.ca_net > 0
         AND lc.ca_export::numeric / lc.ca_net > 0.3) AS sig_ca_export_high,
-      false AS sig_capex_underinvest,                       -- besoin LAG immo_corp 3 ans
+      -- capex_underinvest : immo_corp N < N-2 (sous-investissement)
+      EXISTS(
+        SELECT 1 FROM (
+          SELECT immo_corporelles AS immo_n,
+                 LAG(immo_corporelles, 2) OVER (ORDER BY date_cloture) AS immo_n_minus_2
+          FROM silver.inpi_comptes
+          WHERE siren = lc.siren
+        ) lag_data
+        WHERE lag_data.immo_n IS NOT NULL
+          AND lag_data.immo_n_minus_2 IS NOT NULL
+          AND lag_data.immo_n < lag_data.immo_n_minus_2
+      ) AS sig_capex_underinvest,
       -- Présence digitale paradoxale
       EXISTS(
         SELECT 1 FROM silver.osint_companies_enriched oce
@@ -369,8 +428,17 @@ transformations: |
         WHERE l.siren_fr = lc.siren::text
           AND l.status = 'ACTIVE'
       ) AS sig_has_lei_code,
-      false AS sig_active_lobbying_recent,                  -- Phase 2 (silver.hatvp_lobbying)
-      false AS sig_high_lobbying_budget,                    -- Phase 2 (silver.hatvp_lobbying)
+      EXISTS(
+        SELECT 1 FROM silver.hatvp_lobbying h
+        WHERE h.siren = lc.siren::char(9)
+          AND h.has_active_lobbying = true
+          AND h.date_inscription > CURRENT_DATE - INTERVAL '24 months'
+      ) AS sig_active_lobbying_recent,
+      EXISTS(
+        SELECT 1 FROM silver.hatvp_lobbying h
+        WHERE h.siren = lc.siren::char(9)
+          AND COALESCE(h.chiffre_affaires_lobbying, 0) > 200000
+      ) AS sig_high_lobbying_budget,
       -- Compliance avancée
       EXISTS(
         SELECT 1 FROM silver.opensanctions s
@@ -383,7 +451,12 @@ transformations: |
               AND LOWER(s.name) ILIKE '%' || LOWER(d4.nom) || '%'
           )
       ) AS sig_dirigeant_pep,
-      false AS sig_offshore_link,                           -- Phase 2 (silver.icij_offshore_match)
+      EXISTS(
+        SELECT 1 FROM silver.icij_offshore_match icij
+        JOIN silver.inpi_dirigeants d4 ON UPPER(unaccent(d4.nom)) = UPPER(unaccent(icij.icij_entity_name))
+        WHERE lc.siren::char(9) = ANY(d4.sirens_mandats)
+          AND icij.match_confidence IN ('HIGH', 'MEDIUM')
+      ) AS sig_offshore_link,
       -- Patterns judiciaires
       (
         SELECT COUNT(*) FROM silver.judilibre_decisions j
@@ -403,7 +476,24 @@ transformations: |
           AND b.date_parution > CURRENT_DATE - INTERVAL '24 months'
       ) AS sig_avis_de_tiers,
       -- Composites
-      false AS sig_phantom_holding,                         -- Phase 2 (cross BODACC + comptes 24m)
+      -- phantom_holding : creation holding 24m + CA decroit
+      (
+        EXISTS(
+          SELECT 1 FROM silver.bodacc_annonces b
+          WHERE b.siren = lc.siren
+            AND b.familleavis_lib ILIKE '%creation%holding%'
+            AND b.date_parution > CURRENT_DATE - INTERVAL '24 months'
+        )
+        AND EXISTS(
+          SELECT 1 FROM (
+            SELECT ca_net AS ca_n,
+                   LAG(ca_net) OVER (ORDER BY date_cloture) AS ca_n_minus_1
+            FROM silver.inpi_comptes
+            WHERE siren = lc.siren
+          ) ca_lag
+          WHERE ca_lag.ca_n < ca_lag.ca_n_minus_1
+        )
+      ) AS sig_phantom_holding,
       (
         SELECT COUNT(DISTINCT code_dept)
         FROM silver.insee_etablissements
@@ -420,45 +510,67 @@ transformations: |
   ),
 
   -- ============================================================
-  -- DIMS 7-12 : presse, innovation, immo, ESG, intl, marchés publics — Phase 2
-  -- (signaux nécessitent ingestion supplémentaire — colonnes posees a FALSE)
+  -- DIMS 7-12 : signaux alimentes via silver.entreprises_signals enrichie
+  -- (qui agrege ESG/intl/marches_publics/offshore depuis multiples silvers)
   -- ============================================================
   dims_phase2 AS (
-    SELECT DISTINCT siren,
-      -- Dim 7 — Presse
-      false AS sig_presse_cession,
-      false AS sig_press_advisor_mandate,
-      false AS sig_press_strategic_review,
-      false AS sig_press_succession_mention,
-      false AS sig_press_award_ranking,
-      false AS sig_press_regional,
-      -- Dim 8 — Innovation & PI
-      false AS sig_key_patent_expiry,
-      false AS sig_patent_portfolio_growth,
-      false AS sig_cir_cii_beneficiary,
-      false AS sig_patent_licensing_activity,
-      false AS sig_tech_obsolescence_risk,
-      -- Dim 9 — Immobilier (sale_leaseback / real_estate_sale via DVF)
-      false AS sig_sale_leaseback,
-      false AS sig_real_estate_sale,
-      false AS sig_site_closure,
-      false AS sig_lease_expiry_approaching,
-      -- Dim 10 — ESG
-      false AS sig_bilan_ges_publie,
-      false AS sig_carbon_regulation_exposure,
-      false AS sig_bcorp_certification,
-      false AS sig_social_audit_failure,
-      -- Dim 11 — International
-      false AS sig_foreign_shareholder_entry,
-      false AS sig_ie_foreign_investment_screening,
-      false AS sig_foreign_subsidiary_creation,
-      false AS sig_export_dependency_high,
-      -- Dim 12 — Marchés publics
-      false AS sig_major_contract_loss,
-      false AS sig_public_contract_concentration,
-      false AS sig_major_contract_win,
-      false AS sig_client_concentration_risk
-    FROM silver.bodacc_annonces
+    SELECT
+      es.siren,
+      -- Dim 7 — Presse (utilise silver.press_mentions_matched + silver.cession_events)
+      EXISTS(
+        SELECT 1 FROM silver.cession_events ce
+        WHERE ce.siren = es.siren
+          AND ce.detected_at > CURRENT_DATE - INTERVAL '12 months'
+      ) AS sig_presse_cession,
+      false AS sig_press_advisor_mandate,                   -- Phase 3 (CFNews)
+      false AS sig_press_strategic_review,                  -- Phase 3
+      false AS sig_press_succession_mention,                -- Phase 3
+      false AS sig_press_award_ranking,                     -- Phase 3
+      (es.n_press_mentions_90d > 0) AS sig_press_regional,
+      -- Dim 8 — Innovation & PI (utilise has_brevets + has_marques de silver.entreprises_signals)
+      false AS sig_key_patent_expiry,                       -- Phase 3 (INPI brevets dates)
+      es.has_brevets AS sig_patent_portfolio_growth,
+      false AS sig_cir_cii_beneficiary,                     -- Phase 3 (MESR)
+      false AS sig_patent_licensing_activity,               -- Phase 3
+      false AS sig_tech_obsolescence_risk,                  -- Phase 3
+      -- Dim 9 — Immobilier (sale_leaseback / real_estate_sale via DVF cross siege)
+      EXISTS(
+        SELECT 1 FROM silver.dvf_transactions dvf
+        WHERE dvf.code_postal = es.code_postal
+          AND dvf.nature_mutation = 'Vente'
+          AND dvf.valeur_fonciere > 1000000
+          AND dvf.date_mutation > CURRENT_DATE - INTERVAL '24 months'
+      ) AS sig_sale_leaseback,                              -- proxy : grosse vente immo dans CP du siege
+      EXISTS(
+        SELECT 1 FROM silver.dvf_transactions dvf
+        WHERE dvf.code_postal = es.code_postal
+          AND dvf.date_mutation > CURRENT_DATE - INTERVAL '12 months'
+          AND dvf.valeur_fonciere > 500000
+      ) AS sig_real_estate_sale,
+      EXISTS(
+        SELECT 1 FROM silver.bodacc_annonces b
+        WHERE b.siren = es.siren
+          AND b.familleavis_lib ILIKE '%fermeture%etablissement%'
+          AND b.date_parution > CURRENT_DATE - INTERVAL '12 months'
+      ) AS sig_site_closure,
+      false AS sig_lease_expiry_approaching,                -- Phase 3 (cadastre baux)
+      -- Dim 10 — ESG (depuis silver.entreprises_signals.has_published_ges_recent)
+      es.has_published_ges_recent AS sig_bilan_ges_publie,
+      false AS sig_carbon_regulation_exposure,              -- Phase 3 (Taxonomie UE)
+      false AS sig_bcorp_certification,                     -- Phase 3 (registre B-Corp)
+      false AS sig_social_audit_failure,                    -- Phase 3 (presse)
+      -- Dim 11 — International (depuis silver.entreprises_signals)
+      false AS sig_foreign_shareholder_entry,               -- Phase 3 (BODACC parsing fin)
+      false AS sig_ie_foreign_investment_screening,         -- Phase 3 (DG Tresor)
+      es.has_filiale_etranger AS sig_foreign_subsidiary_creation,
+      (es.ca_export_ratio > 0.30) AS sig_export_dependency_high,
+      -- Dim 12 — Marchés publics (depuis silver.entreprises_signals)
+      false AS sig_major_contract_loss,                     -- Phase 3 (presse + BOAMP delta)
+      es.is_dependant_commande_publique AS sig_public_contract_concentration,
+      (es.n_marches_publics > 5
+        AND es.total_montant_marches > 1000000) AS sig_major_contract_win,
+      false AS sig_client_concentration_risk                -- Phase 3 (INPI bilans parsing fin clients)
+    FROM silver.entreprises_signals es
   ),
 
   -- ============================================================
@@ -564,34 +676,34 @@ transformations: |
       COALESCE(d13.sig_avis_de_tiers, false) AS sig_avis_de_tiers,
       COALESCE(d13.sig_phantom_holding, false) AS sig_phantom_holding,
       COALESCE(d13.sig_geographic_expansion, false) AS sig_geographic_expansion,
-      -- Phase 2 columns (Dim 7-12, FALSE par defaut)
-      false AS sig_presse_cession,
-      false AS sig_press_advisor_mandate,
-      false AS sig_press_strategic_review,
-      false AS sig_press_succession_mention,
-      false AS sig_press_award_ranking,
-      false AS sig_press_regional,
-      false AS sig_key_patent_expiry,
-      false AS sig_patent_portfolio_growth,
-      false AS sig_cir_cii_beneficiary,
-      false AS sig_patent_licensing_activity,
-      false AS sig_tech_obsolescence_risk,
-      false AS sig_sale_leaseback,
-      false AS sig_real_estate_sale,
-      false AS sig_site_closure,
-      false AS sig_lease_expiry_approaching,
-      false AS sig_bilan_ges_publie,
-      false AS sig_carbon_regulation_exposure,
-      false AS sig_bcorp_certification,
-      false AS sig_social_audit_failure,
-      false AS sig_foreign_shareholder_entry,
-      false AS sig_ie_foreign_investment_screening,
-      false AS sig_foreign_subsidiary_creation,
-      false AS sig_export_dependency_high,
-      false AS sig_major_contract_loss,
-      false AS sig_public_contract_concentration,
-      false AS sig_major_contract_win,
-      false AS sig_client_concentration_risk
+      -- Dim 7-12 colonnes activées via dims_phase2 CTE (lit silver.entreprises_signals)
+      COALESCE(p2.sig_presse_cession, false) AS sig_presse_cession,
+      COALESCE(p2.sig_press_advisor_mandate, false) AS sig_press_advisor_mandate,
+      COALESCE(p2.sig_press_strategic_review, false) AS sig_press_strategic_review,
+      COALESCE(p2.sig_press_succession_mention, false) AS sig_press_succession_mention,
+      COALESCE(p2.sig_press_award_ranking, false) AS sig_press_award_ranking,
+      COALESCE(p2.sig_press_regional, false) AS sig_press_regional,
+      COALESCE(p2.sig_key_patent_expiry, false) AS sig_key_patent_expiry,
+      COALESCE(p2.sig_patent_portfolio_growth, false) AS sig_patent_portfolio_growth,
+      COALESCE(p2.sig_cir_cii_beneficiary, false) AS sig_cir_cii_beneficiary,
+      COALESCE(p2.sig_patent_licensing_activity, false) AS sig_patent_licensing_activity,
+      COALESCE(p2.sig_tech_obsolescence_risk, false) AS sig_tech_obsolescence_risk,
+      COALESCE(p2.sig_sale_leaseback, false) AS sig_sale_leaseback,
+      COALESCE(p2.sig_real_estate_sale, false) AS sig_real_estate_sale,
+      COALESCE(p2.sig_site_closure, false) AS sig_site_closure,
+      COALESCE(p2.sig_lease_expiry_approaching, false) AS sig_lease_expiry_approaching,
+      COALESCE(p2.sig_bilan_ges_publie, false) AS sig_bilan_ges_publie,
+      COALESCE(p2.sig_carbon_regulation_exposure, false) AS sig_carbon_regulation_exposure,
+      COALESCE(p2.sig_bcorp_certification, false) AS sig_bcorp_certification,
+      COALESCE(p2.sig_social_audit_failure, false) AS sig_social_audit_failure,
+      COALESCE(p2.sig_foreign_shareholder_entry, false) AS sig_foreign_shareholder_entry,
+      COALESCE(p2.sig_ie_foreign_investment_screening, false) AS sig_ie_foreign_investment_screening,
+      COALESCE(p2.sig_foreign_subsidiary_creation, false) AS sig_foreign_subsidiary_creation,
+      COALESCE(p2.sig_export_dependency_high, false) AS sig_export_dependency_high,
+      COALESCE(p2.sig_major_contract_loss, false) AS sig_major_contract_loss,
+      COALESCE(p2.sig_public_contract_concentration, false) AS sig_public_contract_concentration,
+      COALESCE(p2.sig_major_contract_win, false) AS sig_major_contract_win,
+      COALESCE(p2.sig_client_concentration_risk, false) AS sig_client_concentration_risk
     FROM dim1_signals d1
     FULL OUTER JOIN dim2_signals d2 USING (siren)
     FULL OUTER JOIN dim2_sci sci USING (siren)
@@ -698,9 +810,52 @@ transformations: |
         (CASE WHEN sig_rgpd_sanction THEN 1 ELSE 0 END) +
         (CASE WHEN sig_environmental_sanction THEN 1 ELSE 0 END)
       )::int AS score_dim6,
-      -- Dim 7-12 (Phase 2, score 0)
-      0::int AS score_dim7, 0::int AS score_dim8, 0::int AS score_dim9,
-      0::int AS score_dim10, 0::int AS score_dim11, 0::int AS score_dim12,
+      -- Dim 7 — Presse (cap 8) — alimentée via silver.cession_events + press
+      LEAST(8,
+        (CASE WHEN sig_presse_cession THEN 5 ELSE 0 END) +
+        (CASE WHEN sig_press_advisor_mandate THEN 5 ELSE 0 END) +
+        (CASE WHEN sig_press_strategic_review THEN 4 ELSE 0 END) +
+        (CASE WHEN sig_press_succession_mention THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_press_award_ranking THEN 1 ELSE 0 END) +
+        (CASE WHEN sig_press_regional THEN 1 ELSE 0 END)
+      )::int AS score_dim7,
+      -- Dim 8 — Innovation & PI (cap 6)
+      LEAST(6,
+        (CASE WHEN sig_key_patent_expiry THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_patent_portfolio_growth THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_cir_cii_beneficiary THEN 1 ELSE 0 END) +
+        (CASE WHEN sig_patent_licensing_activity THEN 1 ELSE 0 END) +
+        (CASE WHEN sig_tech_obsolescence_risk THEN 1 ELSE 0 END)
+      )::int AS score_dim8,
+      -- Dim 9 — Immobilier & Actifs (cap 5) — DVF cross-siege
+      LEAST(5,
+        (CASE WHEN sig_sale_leaseback THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_real_estate_sale THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_sci_creation_linked THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_site_closure THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_lease_expiry_approaching THEN 1 ELSE 0 END)
+      )::int AS score_dim9,
+      -- Dim 10 — ESG & Conformité (cap 5) — ADEME via silver.entreprises_signals
+      LEAST(5,
+        (CASE WHEN sig_bilan_ges_publie THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_carbon_regulation_exposure THEN 1 ELSE 0 END) +
+        (CASE WHEN sig_bcorp_certification THEN 1 ELSE 0 END) +
+        (CASE WHEN sig_social_audit_failure THEN 1 ELSE 0 END)
+      )::int AS score_dim10,
+      -- Dim 11 — International (cap 5) — ca_export + filiales etrangeres
+      LEAST(5,
+        (CASE WHEN sig_foreign_shareholder_entry THEN 3 ELSE 0 END) +
+        (CASE WHEN sig_ie_foreign_investment_screening THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_foreign_subsidiary_creation THEN 1 ELSE 0 END) +
+        (CASE WHEN sig_export_dependency_high THEN 1 ELSE 0 END)
+      )::int AS score_dim11,
+      -- Dim 12 — Marches publics (cap 4) — silver.marches_publics_unifies
+      LEAST(4,
+        (CASE WHEN sig_major_contract_loss THEN 2 ELSE 0 END) +
+        (CASE WHEN sig_public_contract_concentration THEN 1 ELSE 0 END) +
+        (CASE WHEN sig_major_contract_win THEN 1 ELSE 0 END) +
+        (CASE WHEN sig_client_concentration_risk THEN 1 ELSE 0 END)
+      )::int AS score_dim12,
       -- Dim 13 — Signaux propriétaires (cap 15)
       LEAST(15,
         (CASE WHEN sig_dirigeant_high_net_worth THEN 3 ELSE 0 END) +
