@@ -9,8 +9,11 @@ auth: none
 pattern: rest_json_public
 refresh_trigger: "interval_hours=720"
 sla_minutes: 43200
-page_size: 50
-max_pages_per_run: 20
+# MAJ 29/04 : déboucher cap (était 1K rows max). 50/page × 5000 pages = 250K theoretical.
+# OpenAlex no-auth = 10 req/s, donc 5000 pages = ~10 min. Largement OK.
+page_size: 200    # max OpenAlex API
+max_pages_per_run: 5000  # 200 * 5000 = 1M théorique (en pratique limité par filter FR)
+backfill_first_run_unlimited: true
 incremental_field: publication_date
 rate_limit:
   requests_per_second: 10

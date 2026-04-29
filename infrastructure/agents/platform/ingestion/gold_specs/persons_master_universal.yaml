@@ -1,0 +1,98 @@
+silver_name: gold.persons_master_universal
+target_schema: gold
+physical: true
+goal: >
+  🥇 PERSON MASTER UNIVERSEL — étend gold.dirigeants_master avec les
+  identifiants cross-source résolus (silver.persons_resolved). Source unique
+  de vérité pour TOUS les profils dirigeants enrichis OSINT.
+
+source_tables:
+  - gold.dirigeants_master
+  - silver.persons_resolved
+
+grain: "1 row par person_uid (UNIQUE)"
+
+key_columns:
+  - person_uid
+  - resolution_confidence
+  - n_external_ids
+
+check_constraints:
+  - "resolution_confidence IN ('HIGH','MEDIUM','LOW','UNRESOLVED')"
+  - "n_external_ids >= 0"
+  - "n_external_ids <= 50"
+
+composite_indexes:
+  - cols: "(resolution_confidence, pro_ma_score DESC)"
+    where: "resolution_confidence IN ('HIGH','MEDIUM')"
+    purpose: "Top dirigeants enrichis (DD priorité)"
+  - cols: "(has_offshore_match, has_political_connection, pro_ma_score DESC)"
+    where: "has_offshore_match = true OR has_political_connection = true"
+    purpose: "Cibles DD red-flag"
+
+lineage_field: sources_de_verite
+
+business_logic: |
+  Pass-through gold.dirigeants_master + JOIN silver.persons_resolved pour
+  enrichir avec identifiers JSONB :
+
+  Champs fusionnés :
+  - person_uid (du gold.dirigeants_master)
+  - Tous les champs gold.dirigeants_master (mandats, finances, scoring, etc.)
+  - identifiers JSONB (depuis silver.persons_resolved)
+  - resolution_confidence
+  - n_external_ids
+  - has_wikidata, has_orcid, has_github, has_icij, has_hatvp, has_pharma
+  - links_publics JSONB (URLs LinkedIn/Twitter/sites perso quand scraping fait)
+
+  Use cases avancés :
+  - "Dirigeants chercheurs cotés" :
+    WHERE has_orcid AND has_wikidata AND lei IS NOT NULL
+  - "Cibles M&A bien profilées" :
+    WHERE resolution_confidence = 'HIGH' AND pro_ma_score >= 70
+  - "Red flags cross-source" :
+    WHERE has_offshore_match AND has_hatvp  -- politique + offshore = ALERT MAX
+
+transformations: |
+  WITH base AS (
+    SELECT * FROM gold.dirigeants_master
+  ),
+  enriched AS (
+    SELECT b.*,
+           coalesce(pr.identifiers, '{}'::jsonb) AS identifiers,
+           coalesce(pr.resolution_confidence, 'UNRESOLVED') AS resolution_confidence,
+           coalesce(pr.n_external_ids, 0) AS n_external_ids,
+           coalesce(pr.has_wikidata, false) AS has_wikidata,
+           coalesce(pr.has_orcid, false) AS has_orcid,
+           coalesce(pr.has_github, false) AS has_github,
+           coalesce(pr.has_icij, false) AS has_icij,
+           coalesce(pr.has_hatvp, false) AS has_hatvp,
+           coalesce(pr.has_pharma, false) AS has_pharma
+    FROM base b
+    LEFT JOIN silver.persons_resolved pr USING (person_uid)
+  )
+  INSERT INTO gold.persons_master_universal
+  SELECT * FROM enriched
+  ON CONFLICT (person_uid) DO UPDATE SET
+    identifiers = EXCLUDED.identifiers,
+    resolution_confidence = EXCLUDED.resolution_confidence,
+    n_external_ids = EXCLUDED.n_external_ids,
+    has_wikidata = EXCLUDED.has_wikidata,
+    has_orcid = EXCLUDED.has_orcid,
+    has_github = EXCLUDED.has_github,
+    has_icij = EXCLUDED.has_icij,
+    has_hatvp = EXCLUDED.has_hatvp,
+    has_pharma = EXCLUDED.has_pharma,
+    derniere_maj = now();
+
+indexes:
+  - "person_uid UNIQUE"
+  - "resolution_confidence"
+  - "n_external_ids DESC"
+  - "(resolution_confidence, pro_ma_score DESC)"
+  - "identifiers USING gin"
+  - "has_wikidata WHERE has_wikidata = true"
+  - "has_orcid WHERE has_orcid = true"
+
+refresh_trigger: "cron=0 4 * * *"  # 04:00 UTC, après dirigeants_master (03:30) et persons_resolved
+sla_minutes: 1440

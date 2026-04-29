@@ -2,28 +2,47 @@ source_id: orcid
 source_num: 62
 layer: 9
 couche: PI/R&D
-name: ORCID — chercheurs identifiés
-description: 'Source #62 ARCHITECTURE_DATA_V2. Bronze ingestion raw — traité ensuite
-  par silver/gold/mart.'
-endpoint: https://pub.orcid.org/v3.0/search
+name: ORCID — Identifiants chercheurs FR
+description: |
+  ORCID = identifiant universel chercheurs. Permet cross-référencement
+  Wikidata + HAL + OpenAlex + CrossRef sur même chercheur.
+  Volume FR ~150K chercheurs avec affiliation française.
+
+  Use case M&A : score innovation par dirigeant via crossref_hal_innovation.
+  Si dirigeant a un orcid_id → on a CV scientifique complet.
+
+endpoint: https://pub.orcid.org/v3.0/expanded-search
 auth: none
-pattern: rest_json_public
+format: rest_json
+pattern: rest_json_paginated
 refresh_trigger: interval_hours=720
 sla_minutes: 43260
-license: Public / Etalab 2.0 par défaut
+license: ORCID Public Data — CC0
+
 bronze_table: bronze.orcid_researchers_raw
+key_field: orcid_id
+
+http_headers:
+  Accept: application/json
+  User-Agent: DEMOEMA-OSINT/1.0
+
+# Query: chercheurs avec affiliation France
+search_query: 'affiliation-org-name:"France" OR affiliation-org-name:"french" OR current-institution-affiliation-name:"France"'
+page_size: 200
+max_pages_per_run: 1000
+
 bronze_fields:
-- name: orcid_id
-  type: VARCHAR(32)
-  primary_key: true
-- name: given_names
-  type: VARCHAR(255)
-  primary_key: false
-- name: family_name
-  type: VARCHAR(255)
-  primary_key: false
-- name: affiliations
-  type: TEXT[]
-  primary_key: false
-conflict_strategy: ON CONFLICT (orcid_id) DO UPDATE SET payload = EXCLUDED.payload,
-  ingested_at = now()
+- {name: orcid_id, type: VARCHAR(32), primary_key: true}
+- {name: given_names, type: VARCHAR(256)}
+- {name: family_names, type: VARCHAR(256)}
+- {name: credit_name, type: VARCHAR(256)}
+- {name: institution_names, type: TEXT[]}
+- {name: institution_country, type: VARCHAR(8)}
+- {name: keywords, type: TEXT[]}
+- {name: external_ids, type: JSONB}
+- {name: payload, type: JSONB}
+
+conflict_strategy: ON CONFLICT (orcid_id) DO UPDATE SET payload = EXCLUDED.payload, ingested_at = now()
+
+expected_rows_first_run: 100000
+expected_rows_incremental: 5000

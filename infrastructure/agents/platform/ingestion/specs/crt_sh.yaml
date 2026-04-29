@@ -2,26 +2,50 @@ source_id: crt_sh
 source_num: 106
 layer: 16
 couche: "Web, digital & cyber"
-name: "Certificate Transparency (crt.sh) — logs TLS publics"
-description: "Sous-domaines/projets cachés d'entreprises via certificats TLS. Signal web M&A (nouveau projet, produit stealth)."
-endpoint: "https://crt.sh/"
+name: "Certificate Transparency (crt.sh) — domains FR via SSL certs"
+description: |
+  crt.sh expose les Certificate Transparency logs Sectigo. Permet de retrouver
+  TOUS les domaines avec cert SSL pour un nom donne.
+
+  Use case M&A : pour chaque entreprise (5M sirens), chercher les domaines
+  associes via cert SSL + matcher dirigeant via WHOIS registrant_name.
+  Donne 500K-1M correspondances domaine -> dirigeant.
+
+endpoint: https://crt.sh/?output=json
 auth: none
-pattern: rest_html_query
-refresh_trigger: "on_demand"
-sla_minutes: 60
-mode: lookup_by_domain
+format: rest_json
+pattern: rest_json_query
+refresh_trigger: interval_hours=720
+sla_minutes: 43200
+license: Public CT data
+
+bronze_table: bronze.crt_sh_certificates_raw
+key_field: cert_id
+
+http_headers:
+  Accept: application/json
+  User-Agent: DEMOEMA-OSINT/1.0
+
+# Strategy : iterate top 1000 entreprises par CA (gold.entreprises_master)
+# Pour chaque denomination -> query crt.sh ?q={denom_slug}&output=json
+# crt.sh peut bannir si trop agressif -> rate_limit conservateur 1 req/s.
+
+bronze_fields:
+- {name: cert_id, type: BIGINT, primary_key: true}
+- {name: common_name, type: VARCHAR(512)}
+- {name: name_value, type: TEXT}
+- {name: issuer_name, type: VARCHAR(512)}
+- {name: not_before, type: TIMESTAMPTZ}
+- {name: not_after, type: TIMESTAMPTZ}
+- {name: matched_query_denomination, type: VARCHAR(256)}
+- {name: matched_siren, type: CHAR(9)}
+- {name: payload, type: JSONB}
+
+conflict_strategy: ON CONFLICT (cert_id) DO NOTHING
+
 rate_limit:
   requests_per_second: 1
-  daily_limit: 100
-  notes: "crt.sh bannit fréquemment, usage parcimonieux : <100 req/h"
-license: "Public data, no explicit license"
-bronze_table: "bronze.crt_sh_certificates_raw"
-bronze_fields:
-  - {name: cert_id, type: "BIGINT", source_path: "id", primary_key: true}
-  - {name: common_name, type: "VARCHAR(512)", source_path: "common_name"}
-  - {name: name_value, type: "TEXT", source_path: "name_value"}
-  - {name: issuer_name, type: "VARCHAR(512)", source_path: "issuer_name"}
-  - {name: not_before, type: "TIMESTAMPTZ", source_path: "not_before"}
-  - {name: not_after, type: "TIMESTAMPTZ", source_path: "not_after"}
-conflict_strategy: "ON CONFLICT (cert_id) DO NOTHING"
-query_mode: "crt.sh?q={domain}&output=json — GET paramétré"
+  notes: "crt.sh bans aggressive scraping -> 1 req/s + max 1000 queries/run."
+
+expected_rows_first_run: 200000
+expected_rows_incremental: 10000

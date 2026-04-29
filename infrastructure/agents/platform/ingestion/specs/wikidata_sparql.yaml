@@ -2,31 +2,77 @@ source_id: wikidata_sparql
 source_num: 11
 layer: 2
 couche: IDs internationaux
-name: Wikidata Query Service — SPARQL SIREN↔QID
-description: 'Source #11 ARCHITECTURE_DATA_V2. Bronze ingestion raw — traité ensuite
-  par silver/gold/mart.'
+name: Wikidata Query Service — SPARQL FR humans + entreprises
+description: |
+  Source #11 ARCHITECTURE_DATA_V2. Wikidata expose ~50K-150K humans français
+  + ~50K entreprises FR avec leurs identifiants (siren, ISIN, OpenCorporates,
+  ORCID, etc.). Source GRATUITE sans auth, requête SPARQL HTTP.
+
+  Permet le cross-référencement INPI dirigeants ↔ Wikidata QID pour
+  enrichir gold.dirigeants_master avec biographies, photos publiques,
+  Légion d'honneur, expériences passées (CV public).
+
 endpoint: https://query.wikidata.org/sparql
 auth: none
-pattern: rest_json_public
+format: rest_json
+pattern: rest_json_sparql
 refresh_trigger: interval_hours=168
 sla_minutes: 10140
-license: Public / Etalab 2.0 par défaut
+license: CC0 (public domain)
+
 bronze_table: bronze.wikidata_entreprises_raw
+key_field: qid
+
+# Requêtes SPARQL exactes à utiliser (le LLM doit les exécuter, pas inventer)
+sparql_queries:
+  humans_fr: |
+    SELECT ?qid ?label ?birth ?occupation ?wikipedia ?orcid ?employerLabel WHERE {
+      ?qid wdt:P31 wd:Q5 .                  # instance of human
+      ?qid wdt:P27 wd:Q142 .                # nationalité française
+      OPTIONAL { ?qid rdfs:label ?label FILTER(LANG(?label) = "fr") }
+      OPTIONAL { ?qid wdt:P569 ?birth }     # date naissance
+      OPTIONAL { ?qid wdt:P106 ?occupation }# occupation
+      OPTIONAL { ?qid wdt:P496 ?orcid }     # ORCID
+      OPTIONAL { ?qid wdt:P108 ?employer .  # employer (entreprise)
+                 ?employer rdfs:label ?employerLabel FILTER(LANG(?employerLabel)="fr") }
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "fr,en". }
+    }
+    LIMIT 50000
+
+  companies_fr: |
+    SELECT ?qid ?label ?siren ?isin ?lei ?inception ?ceoLabel WHERE {
+      ?qid wdt:P17 wd:Q142 .                # pays France
+      ?qid wdt:P31/wdt:P279* wd:Q4830453 .  # type business / société
+      OPTIONAL { ?qid rdfs:label ?label FILTER(LANG(?label)="fr") }
+      OPTIONAL { ?qid wdt:P1616 ?siren }    # SIREN
+      OPTIONAL { ?qid wdt:P946 ?isin }      # ISIN
+      OPTIONAL { ?qid wdt:P1278 ?lei }      # LEI GLEIF
+      OPTIONAL { ?qid wdt:P571 ?inception } # date création
+      OPTIONAL { ?qid wdt:P169 ?ceo .       # CEO
+                 ?ceo rdfs:label ?ceoLabel FILTER(LANG(?ceoLabel)="fr") }
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "fr,en". }
+    }
+    LIMIT 50000
+
+# Pour le LLM : utiliser POST avec Accept: application/sparql-results+json
+http_method: POST
+http_headers:
+  Accept: application/sparql-results+json
+  User-Agent: DEMOEMA-OSINT/1.0 (zkhchiche@hotmail.com)
+
 bronze_fields:
-- name: qid
-  type: VARCHAR(32)
-  primary_key: true
-- name: label
-  type: VARCHAR(512)
-  primary_key: false
-- name: siren
-  type: CHAR(9)
-  primary_key: false
-- name: isin
-  type: VARCHAR(12)
-  primary_key: false
-- name: founders
-  type: TEXT[]
-  primary_key: false
-conflict_strategy: ON CONFLICT (qid) DO UPDATE SET payload = EXCLUDED.payload, ingested_at
-  = now()
+- {name: qid, type: VARCHAR(32), primary_key: true}
+- {name: label, type: VARCHAR(512)}
+- {name: siren, type: CHAR(9)}
+- {name: isin, type: VARCHAR(12)}
+- {name: lei, type: VARCHAR(20)}
+- {name: orcid, type: VARCHAR(32)}
+- {name: birth_year, type: INT}
+- {name: occupation, type: VARCHAR(256)}
+- {name: payload, type: JSONB}
+
+conflict_strategy: ON CONFLICT (qid) DO UPDATE SET payload = EXCLUDED.payload, ingested_at = now()
+
+# Volume cible
+expected_rows_first_run: 100000  # humans + companies FR
+expected_rows_incremental: 1000  # nouveaux QIDs / semaine

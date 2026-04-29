@@ -1,0 +1,172 @@
+silver_name: silver.persons_resolved
+goal: >
+  🔑 PERSON RESOLUTION CROSS-SOURCE — unifie les person_uid INPI avec
+  TOUS les identifiants externes connus (Wikidata QID, ORCID, GitHub login,
+  LinkedIn URL, Twitter handle, ICIJ node_id, OpenAlex author_id).
+  Permet le scoring 360° dirigeant en évitant les doublons cross-source.
+
+source_tables:
+  - silver.inpi_dirigeants
+  - bronze.wikidata_entreprises_raw
+  - bronze.orcid_researchers_raw
+  - bronze.github_repos_raw
+  - bronze.osint_persons
+  - bronze.openalex_works_raw
+  - bronze.crossref_works_raw
+  - bronze.hal_publications_raw
+  - silver.icij_offshore_match
+  - silver.transparence_sante_dirigeants
+  - silver.hatvp_conflits_interets
+
+grain: "1 row par person_uid INPI (extension du silver.inpi_dirigeants)"
+
+key_columns:
+  - person_uid
+  - prenom
+  - nom
+  - date_naissance
+
+business_logic: |
+  Pour chaque person_uid INPI, chercher des matches dans chaque source
+  externe via différents algorithmes selon le confidence souhaité :
+
+  [Matching strict — HIGH confidence]
+  - Wikidata : exact label match prenom+nom + birth_year overlap
+  - ORCID : exact prenom+nom + affiliation overlap (institution dans
+    silver.crossref_hal_innovation)
+  - GitHub : exact name match dans bio + company match denomination
+  - HATVP : déjà résolu dans silver.hatvp_conflits_interets
+  - ICIJ : déjà résolu dans silver.icij_offshore_match
+  - Pharma : déjà résolu dans silver.transparence_sante_dirigeants
+
+  [Matching flou — MEDIUM]
+  - Wikidata : fuzzy match nom + entreprise overlap (sirens_mandats)
+  - GitHub : nom match seul + location:France
+  - ORCID : nom match seul + affiliation FR
+
+  [Matching très flou — LOW]
+  - Maigret usernames (osint_persons.payload) — si username ≈ prenom.nom
+
+  Confidence scoring final :
+  - HIGH : 3+ identifiants HIGH-confidence cross-source
+  - MEDIUM : 1 identifiant HIGH OU 2+ MEDIUM
+  - LOW : 1 MEDIUM ou plusieurs LOW
+  - UNRESOLVED : aucun match externe
+
+  Output schema :
+  - person_uid (FK silver.inpi_dirigeants)
+  - identifiers JSONB :
+    {
+      "wikidata_qid": {"value": "Q123456", "confidence": "HIGH"},
+      "orcid_id": {"value": "0000-0001-...", "confidence": "HIGH"},
+      "github_login": {"value": "...", "confidence": "MEDIUM"},
+      "icij_entity_ids": [{"value": "...", "confidence": "HIGH"}],
+      "linkedin_urls": [...],  -- si scraping ultérieur
+      "maigret_usernames": [{"site": "twitter", "value": "..."}],
+      ...
+    }
+  - n_external_ids (count)
+  - resolution_confidence (HIGH/MEDIUM/LOW/UNRESOLVED)
+  - has_wikidata, has_orcid, has_github, has_icij, has_hatvp,
+    has_pharma, has_publications (booleans pour filtres rapides)
+  - last_resolved_at TIMESTAMPTZ
+
+  Use cases :
+  - SELECT * WHERE has_wikidata AND has_orcid → dirigeants chercheurs reconnus
+  - SELECT person_uid WHERE resolution_confidence = 'HIGH' → 360° complet
+  - JOIN gold.dirigeants_master ON person_uid pour enrichir profils
+
+transformations: |
+  WITH inpi_base AS (
+    SELECT person_uid, prenom, nom, date_naissance, sirens_mandats,
+           denominations_mandats
+    FROM silver.inpi_dirigeants
+  ),
+  wikidata_matches AS (
+    SELECT
+      i.person_uid,
+      jsonb_build_object('value', w.qid,
+        'confidence', CASE
+          WHEN lower(w.label) = lower(i.prenom || ' ' || i.nom)
+            AND EXTRACT(YEAR FROM i.date_naissance) = w.birth_year
+          THEN 'HIGH'
+          WHEN lower(w.label) = lower(i.prenom || ' ' || i.nom)
+          THEN 'MEDIUM'
+          ELSE 'LOW'
+        END
+      ) AS wikidata_match
+    FROM inpi_base i
+    JOIN bronze.wikidata_entreprises_raw w
+      ON lower(w.label) ILIKE '%' || lower(i.nom) || '%'
+      AND lower(w.label) ILIKE '%' || lower(i.prenom) || '%'
+      AND length(i.nom) >= 4  -- évite homonymes courts
+  ),
+  orcid_matches AS (
+    SELECT i.person_uid, jsonb_build_object('value', o.orcid_id, ...) AS orcid_match
+    FROM inpi_base i
+    JOIN bronze.orcid_researchers_raw o
+      ON lower(o.given_names) = lower(i.prenom)
+      AND lower(o.family_names) = lower(i.nom)
+  ),
+  github_matches AS (
+    SELECT i.person_uid, jsonb_build_object('value', g.github_login, ...) AS github_match
+    FROM inpi_base i
+    JOIN bronze.github_repos_raw g
+      ON lower(g.name) = lower(i.prenom || ' ' || i.nom)
+        OR (g.company IS NOT NULL AND
+            i.denominations_mandats && string_to_array(lower(g.company), ' '))
+  ),
+  -- ... (autres sources via similar joins)
+  aggregated AS (
+    SELECT
+      i.person_uid,
+      jsonb_strip_nulls(jsonb_build_object(
+        'wikidata_qid', wm.wikidata_match,
+        'orcid_id', om.orcid_match,
+        'github_login', gm.github_match,
+        'icij_entities', ic.matches_array,
+        'has_hatvp', hv.is_active,
+        'has_pharma_link', ph.is_kol_pharma,
+        'maigret_usernames', mg.usernames_array
+      )) AS identifiers
+    FROM inpi_base i
+    LEFT JOIN wikidata_matches wm USING (person_uid)
+    LEFT JOIN orcid_matches om USING (person_uid)
+    LEFT JOIN github_matches gm USING (person_uid)
+    LEFT JOIN icij_matches ic USING (person_uid)
+    LEFT JOIN hatvp_matches hv USING (person_uid)
+    LEFT JOIN pharma_matches ph USING (person_uid)
+    LEFT JOIN maigret_matches mg USING (person_uid)
+  )
+  SELECT
+    person_uid, prenom, nom, date_naissance,
+    identifiers,
+    jsonb_array_length(jsonb_object_keys(identifiers)::jsonb) AS n_external_ids,
+    -- Resolution confidence calc :
+    CASE
+      WHEN identifiers ? 'wikidata_qid' AND identifiers ? 'orcid_id' THEN 'HIGH'
+      WHEN identifiers ? 'wikidata_qid' OR identifiers ? 'orcid_id' THEN 'MEDIUM'
+      WHEN identifiers != '{}'::jsonb THEN 'LOW'
+      ELSE 'UNRESOLVED'
+    END AS resolution_confidence,
+    (identifiers ? 'wikidata_qid') AS has_wikidata,
+    (identifiers ? 'orcid_id') AS has_orcid,
+    (identifiers ? 'github_login') AS has_github,
+    (identifiers ? 'icij_entities') AS has_icij,
+    (identifiers ? 'has_hatvp')::bool AS has_hatvp,
+    (identifiers ? 'has_pharma_link')::bool AS has_pharma,
+    now() AS last_resolved_at
+  FROM aggregated;
+
+indexes:
+  - "person_uid UNIQUE"
+  - "resolution_confidence"
+  - "has_wikidata WHERE has_wikidata = true"
+  - "has_orcid WHERE has_orcid = true"
+  - "has_github WHERE has_github = true"
+  - "has_icij WHERE has_icij = true"
+  - "n_external_ids DESC"
+  - "identifiers USING gin"
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 1440

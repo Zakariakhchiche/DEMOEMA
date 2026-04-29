@@ -2,37 +2,62 @@ source_id: github_api
 source_num: 111
 layer: 16
 couche: Web/digital
-name: GitHub API — repos, employés tech
-description: 'Source #111 ARCHITECTURE_DATA_V2. Bronze ingestion raw — traité ensuite
-  par silver/gold/mart.'
-endpoint: https://api.github.com/search/repositories
-auth: api_key_bearer
-pattern: rest_api_key_bearer
-refresh_trigger: interval_hours=24
-sla_minutes: 1500
-license: Public / Etalab 2.0 par défaut
+name: GitHub API — users FR (founders/CTO/devs)
+description: |
+  GitHub Search Users API. Recherche users avec location:France ou
+  bio:France. Identifie founders/CTO de startups deeptech FR.
+
+  Use case M&A : croisement avec gold.dirigeants_master via :
+  - bio.company → matching denomination INPI
+  - blog → URL site (whois → registrant_name)
+  - email_public → match Hunter.io patterns
+
+endpoint: https://api.github.com/search/users
+auth: bearer_optional
+format: rest_json
+pattern: rest_json_paginated
+refresh_trigger: interval_hours=720
+sla_minutes: 43200
+license: GitHub ToS — public profile only
+
 bronze_table: bronze.github_repos_raw
+key_field: github_login
+
+http_headers:
+  User-Agent: DEMOEMA-OSINT/1.0
+  Accept: application/vnd.github+json
+  X-GitHub-Api-Version: "2022-11-28"
+
+# Search queries à itérer (4 axes de recherche)
+search_queries:
+  founders_fr: 'location:France type:user followers:>50'
+  cto_fr: 'CTO France in:bio'
+  startup_paris: 'location:Paris type:user'
+  deeptech_fr: '"deep tech" location:France'
+  ai_fr: '"artificial intelligence" location:France'
+
+# Pour chaque user trouvé via search, fetcher aussi /users/{login} pour récupérer
+# bio + blog + company + email_public + twitter_username
+
 bronze_fields:
-- name: repo_id
-  type: BIGINT
-  primary_key: true
-- name: full_name
-  type: VARCHAR(255)
-  primary_key: false
-- name: language
-  type: VARCHAR(64)
-  primary_key: false
-- name: stargazers_count
-  type: INT
-  primary_key: false
-- name: forks_count
-  type: INT
-  primary_key: false
-- name: created_at
-  type: TIMESTAMPTZ
-  primary_key: false
-- name: homepage
-  type: VARCHAR(512)
-  primary_key: false
-conflict_strategy: ON CONFLICT (repo_id) DO UPDATE SET payload = EXCLUDED.payload,
-  ingested_at = now()
+- {name: github_login, type: VARCHAR(64), primary_key: true}
+- {name: name, type: VARCHAR(256)}
+- {name: bio, type: TEXT}
+- {name: company, type: VARCHAR(256)}
+- {name: blog, type: VARCHAR(512)}
+- {name: location, type: VARCHAR(128)}
+- {name: email_public, type: VARCHAR(256)}
+- {name: twitter_username, type: VARCHAR(64)}
+- {name: followers_count, type: INT}
+- {name: public_repos, type: INT}
+- {name: created_at, type: TIMESTAMPTZ}
+- {name: payload, type: JSONB}
+
+conflict_strategy: ON CONFLICT (github_login) DO UPDATE SET payload = EXCLUDED.payload, ingested_at = now()
+
+rate_limit:
+  requests_per_minute: 30  # avec GITHUB_TOKEN : 5000/h. Sans : 60/h.
+  notes: "Avec GITHUB_TOKEN configure -> 30 req/min stable. Sans -> 1 req/min."
+
+expected_rows_first_run: 30000
+expected_rows_incremental: 500
