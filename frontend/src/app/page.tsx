@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { TopHeader } from "@/components/dem/TopHeader";
 import { ChatPanel } from "@/components/dem/ChatPanel";
 import { DashboardView } from "@/components/dem/DashboardView";
@@ -15,7 +15,17 @@ import { CmdPalette } from "@/components/dem/CmdPalette";
 import { PitchModal } from "@/components/dem/PitchModal";
 import type { Mode, Target, Density } from "@/lib/dem/types";
 
+const VALID_MODES: Mode[] = ["dashboard", "chat", "pipeline", "watchlist", "explorer", "graph", "compare", "audit"];
+
+function readHashMode(): Mode {
+  if (typeof window === "undefined") return "dashboard";
+  const fromHash = window.location.hash.replace("#", "") as Mode;
+  return VALID_MODES.includes(fromHash) ? fromHash : "dashboard";
+}
+
 export default function Home() {
+  // Lazy init évite d'écraser le hash au premier render. État source-of-truth
+  // synchronisé avec window.location.hash dès le mount.
   const [mode, setMode] = useState<Mode>("dashboard");
   const [density] = useState<Density>("comfortable");
   const [showSidebar, setShowSidebar] = useState(true);
@@ -23,19 +33,25 @@ export default function Home() {
   const [pitchTarget, setPitchTarget] = useState<Target | null>(null);
   const [showCmdK, setShowCmdK] = useState(false);
 
-  // Persist mode in URL hash for shareable links
+  const hashSyncedRef = useRef(false);
+
+  // Sync hash → state au mount (et sur back/forward)
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const fromHash = window.location.hash.replace("#", "") as Mode;
-    if (fromHash && ["dashboard", "chat", "pipeline", "watchlist", "explorer", "graph", "compare", "audit"].includes(fromHash)) {
-      setMode(fromHash);
-    }
+    setMode(readHashMode());
+    hashSyncedRef.current = true;
+    const onHash = () => setMode(readHashMode());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
+  // Sync state → hash UNIQUEMENT après que le hash initial ait été lu —
+  // sinon on overwrite le hash avant que setMode du read prenne effet.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (window.location.hash !== `#${mode}`) {
-      window.history.replaceState(null, "", `#${mode}`);
+    if (!hashSyncedRef.current) return;
+    const target = `#${mode}`;
+    if (window.location.hash !== target) {
+      window.history.replaceState(null, "", target);
     }
   }, [mode]);
 
