@@ -1,622 +1,465 @@
-# 🎨 Prompt design DEMOEMA Front — Futuriste + Pro
+# 🎨 Prompt design DEMOEMA Front — AI-first Chat Interface
 
-> Prompt à donner à **claude.ai/design** (ou tout autre LLM design tool comme v0.dev,
-> Bolt.new, lovable.dev). Objectif : générer le frontend Next.js 15 de DEMOEMA
-> avec une esthétique **futuriste + professionnelle** mid-cap M&A intelligence.
+> Prompt à donner à **claude.ai/design** (ou v0.dev / lovable.dev / Bolt.new).
+> Vision **TOTALEMENT REPENSÉE 29/04/2026** : passage d'un dashboard SaaS classique
+> à une **interface chat-first AI-native** où l'utilisateur pose des questions et
+> reçoit des fiches entreprises en réponse.
 
 ---
 
-## 🎯 Vision design — "Bloomberg Terminal × Apple Vision Pro × Linear × Tesla UI"
+# 🎯 LE PRODUIT EN UNE PHRASE
 
-**Le sentiment qu'on doit ressentir** :
+> **DEMOEMA est un ChatGPT pour le M&A français** : tu poses une question naturelle
+> (ou tu cherches un SIREN), l'IA te répond avec des **fiches entreprises** dénormalisées
+> directement dans la conversation. Outil **simple et efficace** qui remplace
+> Mergermarket / Dealogic via une UX 2030.
 
-> *"On est en 2030. Cette plateforme ressemble à ce qu'aurait fait Tesla si Tesla
-> faisait du M&A. Hyper data-dense comme un Bloomberg Terminal, mais avec
-> l'esthétique spatiale d'un Vision Pro. Précision suisse de Linear, vitesse
-> brutale de Vercel. Quand un dirigeant CAC40 ouvre l'app, il doit penser
-> 'ces gens sont 5 ans en avance sur tous mes concurrents'."*
-
-### Inspirations visuelles concrètes
+## Comparables
 
 | Référence | À piquer |
 |---|---|
-| **Linear** (linear.app) | Densité info, keyboard-first, transitions imperceptibles |
-| **Vercel Dashboard** | Minimalisme premium, cards parfaitement alignées |
-| **Bloomberg Terminal** | Information density, tableaux verticaux compacts |
-| **Apple Vision Pro / visionOS** | Glassmorphism, spatial depth (3D layered), aurora backgrounds |
-| **Tesla Cybertruck UI** | Geometric brutalism, mono fonts, rectangles affirmés |
-| **Cyberpunk 2077 NetRunner** | Neon glows, scan lines subtiles, data streams |
-| **Anthropic Console** | Sobre, premium, AI-native (sources/citations visibles) |
-| **Replit / Raycast** | Command palette, fluidité spatiale |
-| **Bloomberg LP** | Profondeur navigation par tabs latéraux |
+| **Perplexity AI** | Search + sources cliquables, streaming réponse |
+| **ChatGPT (canvas)** | Conversation persistante, cards inline |
+| **Glean** (workplace AI) | Search d'entreprise via langage naturel |
+| **Cursor / Phind** | Sidebar conversations + contexte multi-turn |
+| **Linear Command Palette** | Vitesse + densité + keyboard-first |
+| **Anthropic Console** | Sobriété AI-native, refs visibles |
+| **Notion AI** | Inline AI dans interface productive |
 
 ---
 
-# DEMOEMA — Plateforme d'Origination M&A Intelligence
+# 🖼️ Layout principal — UNE SEULE VRAIE INTERFACE
 
-## 🎯 Contexte produit
-
-DEMOEMA = **EdRCF 6.0** : SaaS B2B d'origination M&A propriétaire pour boutiques
-M&A FR (10-50 employés). Ciblage : **mid-cap français** (10M-1B€ EV).
-
-**Problème résolu** : trouver les cibles M&A pertinentes parmi 5M entreprises FR
-+ croiser 144 sources data + scorer 0-100 + alerter sur événements capitalistiques
-+ DD compliance instantanée + cartographier réseau dirigeants.
-
-**Concurrents évincés** : Mergermarket (€50K/an), Dealogic (€80K/an),
-PitchBook (€30K/an). DEMOEMA prix cible 199-500€/mois (Pro).
-
-## 👤 Persona utilisateur
-
-**Anne Dupont, 38 ans, Senior Associate boutique M&A Paris 8e** :
-- Vient du M&A advisory de **Lazard / Rothschild / Bryan Garnier**
-- Habituée à Mergermarket (qu'elle déteste : interface 2008)
-- Workflow : 5-15 cibles sourcées/semaine, 2 fiches DD complètes/jour
-- Cherche : **vitesse**, **densité info**, **propriétaire** (zéro leak client),
-  **export PDF présentable au CEO**
-- N'utilise PAS la souris (raccourcis clavier obligatoires : Cmd+K, /, ?, Esc)
-
-## 🧱 Stack technique imposée
-
-```yaml
-framework: Next.js 15 (App Router, Server Components)
-language: TypeScript 5.x strict mode
-styling: Tailwind v4 (config inline @theme block)
-animations: Framer Motion 11
-ui_kit: shadcn/ui (Button, Card, Sheet, Dialog, CommandPalette, Tooltip)
-data_fetching: TanStack Query 5 + React Suspense
-tables: TanStack Table 8 (virtualized)
-graphs: ForceGraph2D + react-force-graph-2d
-charts: Recharts (responsive)
-3d: Three.js / react-three-fiber (subtle accents only)
-icons: Lucide-react + Tabler icons
-fonts:
-  primary: Inter Variable (sans-serif)
-  mono: JetBrains Mono Variable (data, SIREN)
-  display: Geist Mono Variable (headlines)
-auth: Supabase JWT + RLS
-api: REST FastAPI + SSE streaming
-deployment: Cloudflare Workers (frontend) + Hetzner VPS (backend)
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ DEMOEMA  ⌘K Search  Workspace ▾    🔔  Avatar                    │  56px
+├────────────┬─────────────────────────────────────────────────────┤
+│            │  Aurora gradient subtle background                  │
+│ + New      │                                                      │
+│            │     ┌──────────────────────────────────────────┐    │
+│ Today      │     │  USER MESSAGE                            │    │
+│ ▸ Lazard   │     │  "Cibles M&A chimie spé IDF >20M€ avec   │    │
+│   bench    │     │   procédure collective récente"          │    │
+│ ▸ Acme DD  │     └──────────────────────────────────────────┘    │
+│ ▸ Carbon C │                                                      │
+│            │     ┌──────────────────────────────────────────┐    │
+│ Last 7d    │     │ ✨ AI    Voici 47 cibles matchant tes     │    │
+│ ▸ ...      │     │          critères :                       │    │
+│            │     └──────────────────────────────────────────┘    │
+│ Last 30d   │                                                      │
+│ ▸ ...      │     ┌─────────TARGET CARD ────────────────────┐     │
+│            │     │ Acme SAS  ·  Score 82 ●                  │     │
+│            │     │ siren 838291045  ·  CA 47M€              │     │
+│ Saved      │     │ NAF 24.10Z  ·  IDF 75  ·  150 emp        │     │
+│ ▸ Top IDF  │     │ Top: Marc Dubois (pro_ma 78)             │     │
+│ ▸ Pharma   │     │ ⚠️ Procédure collective ouverte 12/03/26 │     │
+│            │     │ [📊 Fiche]  [💾 Sauver]  [+ Compare]    │     │
+│ [Settings] │     └──────────────────────────────────────────┘     │
+│            │                                                      │
+│            │     ┌─────────TARGET CARD ────────────────────┐     │
+│            │     │ Beta Pharma Holding · Score 91 ●         │     │
+│            │     │ ...                                       │     │
+│            │     └──────────────────────────────────────────┘     │
+│            │                                                      │
+│            │     [▸ 45 autres résultats]                          │
+│            │     [▸ Affiner: Score>=70 / Sans red flags / etc.]   │
+│            │                                                      │
+│            │     ┌──────────────────────────────────────────┐    │
+│            │     │ USER MESSAGE                              │    │
+│            │     │  "Compare Acme et Beta sur 5 critères"    │    │
+│            │     └──────────────────────────────────────────┘    │
+│            │                                                      │
+│            │     [Streaming AI response with comparison table]   │
+│            │                                                      │
+├────────────┴─────────────────────────────────────────────────────┤
+│ ┌──────────────────────────────────────────────────────────┐    │
+│ │ 💬  Pose ta question ou recherche un SIREN...            │    │
+│ │                                                           │    │
+│ │  📎 [Joindre liste sirens.csv]  🔍 Filters  ⚡ Send →   │    │
+│ └──────────────────────────────────────────────────────────┘    │
+│  Suggestions: "Top cibles tech IDF" · "DD compliance Acme" · ... │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-## 🎨 Design System
+## Layout = TROIS zones, c'est tout
 
-### Palette principale (Dark default)
+1. **Sidebar gauche (260px)** : conversations + saved searches + paramètres
+2. **Main center (fluide, max 920px)** : conversation + cards entreprises inline
+3. **Footer fixe (input chat)** : input avec attach + filters chip + send
+
+**C'est tout.** Pas de header complexe, pas de sidebar droite, pas de tabs. Tout passe par la conversation.
+
+---
+
+# 🧩 LES 4 ÉCRANS (au lieu de 7)
+
+### 1. **Chat principal** ⭐ 90% des interactions
+
+L'écran décrit ci-dessus. C'est où l'utilisateur passe son temps.
+
+L'IA peut :
+- Retourner des **cibles** sous forme de TargetCards inline
+- Retourner des **dirigeants** sous forme de PersonCards inline
+- Retourner des **comparaisons** en tables Recharts inline
+- Retourner des **graphiques** (sparklines, bar charts) inline
+- Retourner des **alertes compliance** en banners rouges
+- Retourner du **texte synthétique** (analyse, résumé)
+- **Streamer** la réponse word-by-word (SSE)
+- Citer ses **sources** (siren cliquable, BODACC link, AMF link)
+
+### 2. **Fiche détaillée** (modal Sheet ou route /target/:siren)
+
+Quand l'utilisateur clique "Fiche" sur une card, ouverture en **Sheet droite plein écran** (overlay sur le chat) avec :
+- Header : denomination XL + score halo + actions
+- Contenu : tabs verticales (Overview, Dirigeants, Signaux, Compliance, Contentieux, Réseau)
+- Le chat reste visible derrière (semi-blur), peut continuer la conversation pendant qu'on consulte
+- ESC ferme la Sheet, retour au chat
+
+### 3. **Graphe Réseau** (route /graph)
+
+Plein écran ForceGraph2D — pour les sessions exploratoires "qui connaît qui".
+Lien depuis chat ("@show graph") ou depuis fiche.
+
+### 4. **Settings / Workspace** (modal)
+
+Préférences user (theme, density, notifications, API keys EdRCF, etc.).
+
+**C'est tout.** 4 écrans, point.
+
+---
+
+# 🎨 Design System (inchangé)
+
+> Garde tout le design system de la version précédente (glassmorphism profond,
+> aurora bg, score halos, animations Framer Motion, palette neon subtile sur dark,
+> typo Inter + JetBrains Mono + Geist Mono).
+
+### Palette (rappel)
 
 ```css
-/* Backgrounds — profondeur spatiale */
---bg-base: #050507;           /* zinc-950 plus profond, presque noir absolu */
---bg-layer-1: #0a0a0d;        /* surface card layer 1 */
---bg-layer-2: #111114;        /* layer 2 (modal, sidebar) */
---bg-layer-3: #1a1a1f;        /* layer 3 (popover) */
-
-/* Aurora gradient backgrounds (pour pages vides ou hero) */
---aurora-1: linear-gradient(135deg,
-            rgba(59, 130, 246, 0.08) 0%,
-            rgba(168, 85, 247, 0.05) 50%,
-            rgba(236, 72, 153, 0.08) 100%);
-
-/* Borders — ultra-subtils */
---border-subtle: rgba(255, 255, 255, 0.06);
---border-default: rgba(255, 255, 255, 0.1);
---border-active: rgba(59, 130, 246, 0.4);
-
-/* Brand — neon accents */
---accent-blue: #60a5fa;       /* primary actions */
---accent-purple: #a78bfa;     /* AI / Copilot */
---accent-emerald: #34d399;    /* score >= 70, success */
---accent-amber: #fbbf24;      /* score 50-69, warning */
---accent-rose: #fb7185;       /* score < 30, danger */
---accent-cyan: #67e8f9;       /* live data, real-time */
-
-/* Text */
---text-primary: #f4f4f5;       /* zinc-100 */
---text-secondary: #a1a1aa;     /* zinc-400 */
---text-tertiary: #71717a;      /* zinc-500 */
---text-disabled: #52525b;      /* zinc-600 */
-
-/* Glow halos (signature DEMOEMA) */
---glow-score-high: 0 0 24px rgba(52, 211, 153, 0.4),
-                   0 0 48px rgba(52, 211, 153, 0.1);
---glow-score-medium: 0 0 16px rgba(251, 191, 36, 0.3);
---glow-score-low: 0 0 12px rgba(251, 113, 133, 0.3);
---glow-ai: 0 0 32px rgba(167, 139, 250, 0.3);
+--bg-base: #050507;              /* presque noir absolu */
+--bg-layer-1: #0a0a0d;
+--bg-layer-2: #111114;
+--accent-blue: #60a5fa;          /* primary */
+--accent-purple: #a78bfa;        /* AI / Copilot */
+--accent-emerald: #34d399;       /* score >= 70 */
+--accent-amber: #fbbf24;         /* score 50-69 */
+--accent-rose: #fb7185;          /* score < 30, red flags */
+--accent-cyan: #67e8f9;          /* live data, real-time */
 ```
 
-### Typography
+### Effets signatures (rappel)
 
-```
-H1 (page title)        : Geist Mono 48px / 1.1 / -0.04em / 600
-H2 (section)           : Inter Display 32px / 1.2 / -0.03em / 600
-H3 (card title)        : Inter 18px / 1.3 / -0.01em / 500
-Body                   : Inter 14px / 1.6 / 0
-Small                  : Inter 12px / 1.5 / 0.01em
-Mono (SIREN, codes)    : JetBrains Mono 13px / 1.4 / 0
-Number display (KPI)   : Geist Mono 56px / 1 / -0.05em / 700 (+ tabular-nums)
-```
-
-### Spacing & Layout
-
-```
-Density mode = "compact" par défaut (Bloomberg style)
-Scale : 4 / 8 / 12 / 16 / 24 / 32 / 48 / 64 / 96 px
-Container max-width : 1920px (4K-friendly)
-Grid : 12 colonnes, gap 16px
-Card padding : 16px (compact) / 24px (comfortable mode)
-```
-
-### Effets signatures DEMOEMA
-
-#### 1. **Glassmorphism profond**
-```tsx
-className="bg-zinc-950/40 backdrop-blur-2xl border border-white/[0.06]
-           shadow-[0_8px_32px_rgba(0,0,0,0.4)]"
-```
-
-#### 2. **Aurora background subtil** (pages d'accueil, hero)
-```tsx
-<div className="absolute inset-0 -z-10
-                bg-[radial-gradient(circle_at_top_right,
-                rgba(59,130,246,0.08),transparent_50%),
-                radial-gradient(circle_at_bottom_left,
-                rgba(168,85,247,0.05),transparent_50%)]" />
-```
-
-#### 3. **Score halo ring** (signature visuelle)
-```tsx
-<div className={cn(
-  "rounded-full p-3 transition-all duration-300",
-  score >= 70 && "shadow-[0_0_24px_rgba(52,211,153,0.4)] ring-2 ring-emerald-500/30",
-  score >= 50 && score < 70 && "shadow-[0_0_16px_rgba(251,191,36,0.3)] ring-2 ring-amber-500/30",
-  score < 50 && "shadow-[0_0_12px_rgba(251,113,133,0.3)] ring-2 ring-rose-500/30"
-)}>
-  <span className="font-mono text-lg tabular-nums">{score}</span>
-</div>
-```
-
-#### 4. **Animated borders** (CTA premium, AI actions)
-```tsx
-<button className="relative overflow-hidden rounded-lg group">
-  <span className="absolute inset-0 bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-pink-500/20
-                   animate-shimmer bg-[length:200%_100%]" />
-  <span className="relative z-10 px-4 py-2">Activate Copilot</span>
-</button>
-```
-
-#### 5. **Number count-up** (Framer Motion sur stats)
-```tsx
-<motion.span
-  initial={{ opacity: 0, y: 8 }}
-  animate={{ opacity: 1, y: 0 }}
-  className="font-mono text-5xl tabular-nums"
->
-  <CountUp from={0} to={1247} duration={1.2} />
-</motion.span>
-```
-
-#### 6. **Scan line subtle** (sur tables temps réel — Feed Signaux)
-```tsx
-<div className="relative overflow-hidden">
-  <div className="absolute top-0 left-0 right-0 h-px
-                  bg-gradient-to-r from-transparent via-cyan-400/50 to-transparent
-                  animate-scan-line" />
-  {/* table content */}
-</div>
-```
-
-#### 7. **3D depth on cards** (visionOS style)
-```tsx
-<motion.div
-  whileHover={{ y: -2, rotateX: 2, rotateY: -1 }}
-  style={{ transformStyle: "preserve-3d", perspective: 1000 }}
-  className="bg-zinc-900/40 backdrop-blur-2xl border border-white/[0.06]
-             rounded-xl p-6 will-change-transform"
->
-```
-
-#### 8. **Particle accent** (sur events critiques uniquement, sparingly)
-```tsx
-{event.severity === "CRITICAL" && (
-  <div className="absolute -top-1 -right-1">
-    <span className="relative flex h-3 w-3">
-      <span className="animate-ping absolute inline-flex h-full w-full
-                       rounded-full bg-rose-400 opacity-75" />
-      <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500" />
-    </span>
-  </div>
-)}
-```
+1. **Glass deep** : `bg-zinc-950/40 backdrop-blur-2xl border border-white/[0.06]`
+2. **Aurora bg** : radial gradients 5-10% opacity blue/purple
+3. **Score halo** : ring + box-shadow gradient selon range
+4. **3D depth on cards** : `rotateX(2deg) rotateY(-1deg)` on hover
+5. **Number count-up** Framer Motion sur les KPIs
+6. **Scan line** subtle pour real-time
+7. **Animated shimmer** sur AI thinking state
 
 ---
 
-## 📄 Pages à designer (par priorité)
-
-### 1. **Intelligence Targets** ⭐ PRIORITÉ #1
-
-Layout :
-```
-┌─────────────────────────────────────────────────────────────┐
-│ [DEMOEMA logo]   Search ⌘K   |  Avatar  Notifs   ?   ⚙️   │ ← header 56px
-├──┬──────────────────────────────────────────────────────────┤
-│  │ ╔══════════════════════════════════════════════════════╗ │
-│ N│ ║ Intelligence Targets    [Export CSV] [Saved] [+ New]║ │
-│ a│ ║ 1,247 cibles HOT  ·  median score 73  ·  +23 today  ║ │
-│ v│ ╚══════════════════════════════════════════════════════╝ │
-│  │ ┌─Filters─┐  ┌──────────Table virtualisée────────────┐ │
-│  │ │ Score   │  │ Denom    SIREN  NAF  Score Ca  Top  …│ │
-│  │ │ ───●─── │  │ ████████████████████████████████████ │ │
-│  │ │ Sector  │  │ ████████████████████████████████████ │ │
-│  │ │ ☑ Tech  │  │ Acme SAS  838.. 24.10  82●  47M  …   │ │
-│  │ │ ☑ Pharma│  │ Beta Pha  432.. 21.20  91●  124M ⚠️  │ │
-│  │ │ Dept    │  │ ...                                   │ │
-│  │ │ Effectif│  │ [Hover row → preview Sheet droite]    │ │
-│  │ └─────────┘  └────────────────────────────────────────┘ │
-│  │              [Pagination keyset · Cursor next]          │
-└──┴──────────────────────────────────────────────────────────┘
-```
-
-**Sidebar gauche (Filters panel)** :
-- Glass card sticky `top: 80px`
-- Sections : Score / Secteur / Géo / Taille / Signaux / Compliance
-- Toggles avec animations spring (Framer Motion)
-- Icons Lucide colorisés par section
-- Reset all en bas + count "47 filtres actifs" si > 0
-
-**Main table** :
-- Header sticky avec sort icons
-- Rows alternées `bg-white/[0.01]` / transparent
-- Score badge halo (emerald/amber/rose) selon range
-- Hover row → overlay subtle `bg-blue-500/[0.04]` + show preview Sheet droite (300ms delay)
-- Click denomination → navigate to fiche
-- Right-click → context menu (Save / Compare / Add to list / Export PDF)
-- **Number formatting** : `47M €` (compact), `1.2 Md €` (compact bn), `1,247` (count tabular-nums)
-
-**Footer table** :
-- Total count + median score + cursor pagination
-- Bouton "Load more" avec spinner gradient
-- Skeleton 5 rows pendant fetch
-
-### 2. **Fiche Entreprise** (drill-down)
-
-Layout 3 colonnes :
-```
-┌─Tabs vertical─┬─────Main 800px─────┬─Activity sidebar──┐
-│ • Overview    │ ╔═══════════════╗  │ Suivi équipe       │
-│   Dirigeants  │ ║ ACME SAS      ║  │ ◯ Alice viewed it  │
-│   Signaux M&A │ ║ siren 838...  ║  │ ◯ Bob added note   │
-│   Finances    │ ║ Score 82 🟢   ║  │                    │
-│ ⚠ Compliance  │ ║ [● Suivre]    ║  │ Mes notes          │
-│   Contentieux │ ╚═══════════════╝  │ ┌────────────────┐ │
-│   Marchés pub │  KPI cards 4 cols  │ │ ...            │ │
-│   Réseau      │  Mini-map + tabs   │ └────────────────┘ │
-└───────────────┴─────────────────────┴────────────────────┘
-```
-
-**Header card** :
-- Big denomination (Geist Mono 36px)
-- Below : SIREN (mono) + statut pill + date_creation
-- Score badge XL avec halo (signature ring effect)
-- Action buttons : "Suivre" (toggle), "Compare", "Export PDF" (gradient bg)
-
-**Tab Overview** :
-- 4 KPI cards : CA dernier (count-up), Effectif, EBITDA, Capitaux propres
-  Avec sparkline tendance 5 ans (Recharts mini)
-- Card identité (siren, naf libellé, forme juridique, date_creation, siege_adresse)
-- Mini-map siège (MapLibre, dark style "MapTiler basic-dark")
-- **Score breakdown** : Recharts radar chart 9 dims (Mandats, SCI, Financier, etc.)
-
-**Tab Signaux M&A** :
-- Timeline verticale Framer Motion `staggerChildren: 0.05`
-- Cartes events glassmorphism :
-  - Icon gradient circulaire selon type (OPA → ⚡, fusion → 🔀, etc.)
-  - Title bold + description 200 chars + source link "Voir BALO →"
-  - Timestamp "il y a 2h" relative + absolu en hover tooltip
-- Filtres top : severity / type / date range
-
-**Tab Compliance** :
-- 🚨 Big banner rouge si red flags HIGH (avec gradient `from-rose-500/20 to-red-500/10`)
-- Liste sanctions OpenSanctions avec details JSONB expand
-- Liste AMF signals (HIGH severity highlighted)
-- Carte "ICIJ Offshore matches" si has_offshore_match (avec détails Panama/Pandora)
-- Procédures collectives historique + flèche vers BODACC source
-
-**Tab Réseau** :
-- Embed ForceGraph2D (compact 600px) avec siren=X focused
-- Click nœud → navigation
-
-### 3. **Feed Signaux M&A** (events temps réel)
-
-Layout :
-```
-┌─Filters horizontal───────────────────────────────────┐
-│ Severity: [All ▾]  Type: [All ▾]  Date: [7d ▾]  …   │
-└──────────────────────────────────────────────────────┘
-┌──────────────────────────────────────────────────────┐
-│ ⚡ CRITICAL  TotalEnergies — OPA sur SunPower         │
-│            "Annonce d'offre publique d'achat..."     │
-│            siren 542 051 180  ·  il y a 14 min       │
-│            [Source BALO ↗]  [Add to watchlist]       │
-├──────────────────────────────────────────────────────┤
-│ 💰 HIGH      Capgemini — Augmentation capital 250M€   │
-│            ...                                        │
-└──────────────────────────────────────────────────────┘
-```
-
-**Card event** :
-- Icon gradient circulaire animé (subtle pulse pour CRITICAL)
-- Title bold + description tronquée
-- Cible (denomination cliquable) + SIREN mono
-- Source link external
-- Severity badge top-right avec halo
-- Animation entry : `slideInFromRight 400ms`
-
-**Stream** : TanStack Query infinite scroll + skeleton glow pendant fetch.
-
-### 4. **Compliance / Due Diligence**
-
-Mode rapport :
-- Input large search SIREN (autocomplete trigram)
-- Generate button → loader gradient particules
-- Output rapport sectionnel avec ancres (sticky TOC à droite)
-- Bouton "Export PDF" → génère PDF design-matched (pas un PDF moche)
-
-### 5. **Graphe Réseau Dirigeants**
-
-Plein écran avec contrôles flottants :
-- ForceGraph2D dark theme avec rendering custom :
-  - Nœuds entreprise = cercles cyan glow
-  - Nœuds dirigeant = cercles amber avec halo si pro_ma_score>=70
-  - Edges = lignes orange pulsantes si mandats croisés (animation flow)
-- Top : search + filtre depth (1/2/3) + reset zoom
-- Right panel : focus node details + co-mandataires list
-- Bottom-left : legend
-- Toggle "Hide unmandated" / "Show offshore matches in red"
-
-### 6. **Copilot IA** (chat AI)
-
-Layout chat-like, mais signature DEMOEMA :
-- Bubble user droite + AI gauche avec icon gradient
-- Streaming SSE word-by-word (typing effect natif Anthropic)
-- Refs cliquables (siren / person_uid) → modale Sheet fiche
-- Suggestions de prompts en dessous (chips cliquables)
-- Avatar AI = orbe gradient animé subtil (visionOS particle)
-- Input avec Cmd+Enter submit + send button avec animated glow
-
-Suggestions starter :
-- "Top 50 cibles M&A chimie spécialisée IDF, CA > 20M"
-- "Compare X et Y sur 5 dimensions"
-- "Dirigeants en commun entre deux groupes"
-- "Cibles avec patrimoine immobilier > 5M€"
-
-### 7. **Dashboard** (page d'accueil)
-
-Hero plein écran :
-- Aurora background subtle
-- Big stat cards 4 cols (count-up animés) :
-  ```
-  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐
-  │ 1,247      │ │ 23         │ │ 3          │ │ 47K        │
-  │ Cibles HOT │ │ Signaux 24h│ │ Alertes DD │ │ OSINT enrch│
-  │ +12% / 7j  │ │ live ●     │ │ urgent ⚠   │ │ +200 / nuit│
-  └────────────┘ └────────────┘ └────────────┘ └────────────┘
-  ```
-- France map heatmap (densité cibles HOT par dept) — D3 + topojson
-- Top 10 secteurs activité M&A (bar chart Recharts)
-- Recent signals feed (mini, click → page Feed)
-- Quick search SIREN avec preview hover
-
----
-
-## 🧩 Composants génériques (10 à designer)
+# 🧱 Components UI (5 essentiels seulement)
 
 ```tsx
-// 1. Score badge avec halo signature
-<ScoreBadge value={82} size="md" tooltip />
+// 1. Message bubble (USER vs AI avec orbe gradient)
+<ChatMessage role="user|ai" content={...} streaming={false} />
 
-// 2. Card cible compacte
-<TargetCard target={target} onClick={...} />
-
-// 3. Card événement timeline
-<SignalEventCard event={event} severity="HIGH" />
-
-// 4. Avatar dirigeant
-<DirigeantAvatar person={p} showRedFlag />
-
-// 5. Pills red flags compact
-<RedFlagsBadge flags={['sanction', 'icij', 'procedure']} />
-
-// 6. Filter panel sidebar
-<FilterPanel sections={[{label, items, type}]} />
-
-// 7. Table TanStack avec keyset pagination
-<KeysetTable cursor={cursor} columns={cols} />
-
-// 8. Breadcrumb lineage
-<LineageBreadcrumb path={['Targets', 'Acme', 'Dupont']} />
-
-// 9. Empty state élégant
-<EmptyState icon={<Inbox />} title="..." description cta />
-
-// 10. Command palette Cmd+K
-<CommandPalette commands={[]} />
-```
-
-Tous avec :
-- Variants (default, hover, active, disabled, loading, error)
-- Props TypeScript stricts
-- Storybook stories
-- Tests Vitest minimal
-
----
-
-## ⚙️ Interactions & Keyboard
-
-```
-⌘K        → Command palette (search global)
-⌘E        → Export CSV vue actuelle
-⌘N        → New alert / saved search
-⌘P        → Print / Export PDF fiche
-⌘\        → Toggle sidebar
-/         → Focus search bar
-?         → Help / shortcuts cheatsheet
-Esc       → Close modal / blur input
-↑↓        → Navigate table rows (highlight focus)
-Enter     → Open focused row
-Cmd+Enter → Submit form
-Tab       → Navigate filters
-```
-
-Hover row table → preview Sheet droite après 800ms (cancel si mouseleave).
-
----
-
-## 📱 Responsive
-
-- **Desktop (≥1280px)** : 3-col layout (sidebar + main + side panel)
-- **Tablet (768-1279px)** : 2-col, sidebar drawer overlay
-- **Mobile (<768px)** : single col, bottom nav tabs (PWA)
-
-PWA installable avec splash screen Lottie radar.
-
----
-
-## ♿ Accessibility (WCAG AAA target)
-
-- Keyboard navigation complète
-- Focus rings visibles `ring-2 ring-blue-500/50 ring-offset-2 ring-offset-zinc-950`
-- Aria labels exhaustifs sur icon-only buttons
-- Contraste 7:1 (texte / bg) — déjà ok dark
-- Screen reader announce sur sort change, filter change, page change
-- Reduced motion : respect `prefers-reduced-motion`
-
----
-
-## 🎬 Animations Framer Motion
-
-```tsx
-// Page transition
-<motion.main
-  initial={{ opacity: 0, y: 8 }}
-  animate={{ opacity: 1, y: 0 }}
-  exit={{ opacity: 0, y: -8 }}
-  transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }} // Apple ease
+// 2. Target card inline (apparaît dans la conversation)
+<TargetCard
+  target={target}
+  variant="inline" // dans le chat
+  onView={() => openSheet(target)}
+  onSave={() => addToWorkspace(target)}
+  onCompare={() => addToCompareList(target)}
 />
 
-// List stagger
-<motion.div variants={containerVariants} initial="hidden" animate="show">
-  {items.map((item, i) => (
-    <motion.div key={item.id} variants={itemVariants} custom={i} />
-  ))}
-</motion.div>
+// 3. Person card inline (dirigeant)
+<PersonCard person={p} variant="inline" />
 
-// Hover lift
-<motion.div
-  whileHover={{ y: -4, scale: 1.01 }}
-  transition={{ type: "spring", stiffness: 400, damping: 25 }}
+// 4. Chat input avec attachments + filters chips + send
+<ChatInput
+  onSubmit={(prompt, attachments, filters) => ...}
+  suggestions={["Top cibles tech IDF", "DD Acme", ...]}
+/>
+
+// 5. Conversation sidebar
+<ConversationsSidebar
+  conversations={[...]}
+  groupBy="date" // Today, Last 7d, Last 30d
+  savedSearches={[...]}
+  onNew={() => ...}
 />
 ```
 
-Custom easing curves :
-- `--ease-spatial: cubic-bezier(0.16, 1, 0.3, 1)` (visionOS)
-- `--ease-precise: cubic-bezier(0.4, 0, 0.2, 1)` (Linear)
-- `--ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55)`
+Plus 1 component pour la fiche détaillée (Sheet overlay) et 1 pour le graphe.
+
+**Total : 5-7 composants UI**, pas 10+.
 
 ---
 
-## 🚀 Livrables attendus
+# 💬 Pattern de conversation (UX critique)
 
-1. **Repo Next.js 15** prêt à `pnpm install && pnpm dev`
-2. **`tailwind.config.ts`** avec design tokens DEMOEMA
-3. **`src/components/ui/`** : 10 composants génériques + Storybook
-4. **`src/app/`** : 7 pages avec layout par défaut
-5. **`src/lib/api.ts`** : client API typed (mock data)
-6. **`README.md`** : design system documentation + screenshots
-7. **Mock data** : top 50 cibles + 100 dirigeants + 200 events
+### Exemples de prompts → réponses
 
-## 🎨 Mock data réelle (utiliser pour les screenshots)
+#### Exemple 1 — Search cibles
+```
+USER: "Top cibles M&A chimie spécialisée IDF avec CA > 20M€"
+
+AI: J'ai trouvé 47 cibles correspondant à tes critères.
+    [Stream les 5 premières cards inline]
+
+    [TargetCard 1] Acme Industries SAS · Score 82 · CA 47M€
+    [TargetCard 2] Beta Chimie SA · Score 79 · CA 35M€
+    [TargetCard 3] ...
+
+    💡 Veux-tu affiner par :
+    [Score >= 70] [Sans red flags] [Avec dirigeant 60+] [Holding patrimoniale]
+
+    [Voir 42 autres résultats ↓]
+```
+
+#### Exemple 2 — Recherche directe SIREN
+```
+USER: "838291045"
+
+AI: Acme Industries SAS détectée.
+    [TargetCard avec preview]
+
+    💡 Demande :
+    [📊 Fiche complète]  [👥 Dirigeants]  [⚖️ DD Compliance]
+    [📈 Évolution finance]  [🌐 Réseau]
+```
+
+#### Exemple 3 — Comparaison
+```
+USER: "Compare Acme et Beta sur 5 critères"
+
+AI: Voici la comparaison Acme vs Beta :
+    [Comparison table inline]
+    │ Critère      │ Acme   │ Beta    │
+    │──────────────│────────│─────────│
+    │ pro_ma_score │ 82 🟢  │ 91 🟢   │
+    │ CA 2025      │ 47M€   │ 124M€   │
+    │ EBITDA       │ 8.2M€  │ 18.5M€  │
+    │ Effectif     │ 150    │ 280     │
+    │ Red flags    │ Aucun  │ ⚠️ ICIJ │
+    [Mini bar chart inline]
+
+    Recommandation : Acme moins risqué (no red flag), mais Beta a 2.6x le CA
+    → arbitrer selon mandat client.
+```
+
+#### Exemple 4 — Question complexe (multi-step)
+```
+USER: "Trouve-moi des dirigeants 60+ avec holding patrimoniale dans le Var
+       qui ont eu un événement BODACC récent"
+
+AI: J'analyse 8M dirigeants INPI...
+    [Streaming progress: "Filtrage age... patrimoine SCI... croisement BODACC..."]
+
+    Trouvé 23 dirigeants matchant.
+
+    [PersonCard 1] Jean Dupont (62a) · 4 mandats · 3 SCI · BODACC: cession 03/26
+    [PersonCard 2] ...
+
+    💡 Affiner par :
+    [Score >=70] [Avec contentieux] [Cotée]
+```
+
+### Streaming UX
+
+- **Réponse texte** : word-by-word (SSE Anthropic style)
+- **Cards** : apparaissent une par une avec stagger 100ms (Framer Motion)
+- **AI orbe** : pulse subtle pendant streaming (gradient)
+- **"Thinking..."** : barre de progression gradient si > 2s
+
+### Suggestions intelligentes
+
+Sous le chat input :
+- **Au démarrage** : "Top cibles tech IDF" / "DD Acme" / "Comparer X et Y"
+- **Après une réponse** : suggestions contextuelles ("Affiner par dept" / "Voir compliance")
+- **Sur sélection** : si user a sauvé 5 cibles → "Compare ces 5 cibles" / "Export CSV"
+
+---
+
+# ⚡ Interactions clés (KEYBOARD-FIRST)
+
+```
+⌘K        → Command palette (search global, switch conversation)
+⌘N        → Nouvelle conversation
+⌘Enter    → Submit prompt
+⌘L        → Focus chat input
+⌘B        → Toggle sidebar
+/         → Mode raccourcis : "/siren XXXX", "/score>70", "/compare A B"
+?         → Help
+Esc       → Ferme Sheet / blur input
+↑↓        → Navigate conversation history
+Enter     → Open focused card
+Cmd+Enter → Open card en Sheet
+```
+
+---
+
+# 📝 Mode "/" commands (puissant)
+
+Dans le chat input, taper `/` ouvre un menu de commands rapides :
+
+```
+/siren 838291045           → Recherche directe
+/compare 838291045 432198765 → Comparaison
+/save                      → Sauver dernière liste
+/export csv                → Export CSV résultats
+/dd 838291045              → Due diligence rapide
+/graph 838291045           → Ouvre graphe réseau
+/clear                     → Clear conversation
+/settings                  → Settings
+```
+
+Comme dans Linear / Notion.
+
+---
+
+# 🚀 Comportement intelligent
+
+### L'IA comprend les requêtes en langage naturel
+
+L'IA route automatiquement vers les bons gold tables :
+
+| User dit... | L'IA query... |
+|---|---|
+| "cibles M&A" | gold.cibles_ma_top |
+| "dirigeants" | gold.dirigeants_master |
+| "événements" | gold.signaux_ma_feed |
+| "sanctions" | gold.compliance_red_flags |
+| "réseau" | gold.network_mandats |
+| "patrimoine immo" | gold.parcelles_cibles |
+| "marchés publics" | gold.marches_publics_unifies |
+| "presse" | silver.press_mentions_matched |
+| "réformes" | gold.veille_reglementaire |
+
+### Sources visibles (trust)
+
+Chaque card / réponse cite ses sources :
+- `siren 838291045` → cliquable vers source INPI RNE
+- `BODACC 03/26` → link OpenData
+- `Score 82` → tooltip explique : "+10 pro_ma, +20 holding, +15 financier..."
+
+L'utilisateur peut **toujours auditer** d'où vient l'info. Pas de blackbox.
+
+---
+
+# 📱 Responsive
+
+- **Desktop ≥1024px** : layout 3 zones (sidebar + chat + footer)
+- **Tablet 768-1023px** : sidebar drawer overlay, chat full-width
+- **Mobile <768px** : single column, bottom nav (Chat / Fiches sauvées / Profile)
+
+PWA installable. Notifications push pour alertes compliance HIGH.
+
+---
+
+# 🚀 Stack & Livrables
+
+```yaml
+framework: Next.js 15 App Router + React 19 Server Components
+ui: Tailwind v4 + shadcn/ui + Framer Motion 11
+chat: Vercel AI SDK pour streaming + Anthropic Claude (côté backend)
+state: TanStack Query + Zustand (conversations local)
+fonts: Inter + JetBrains Mono + Geist Mono
+graphs: Recharts (inline charts) + ForceGraph2D (graphe page)
+```
+
+## Livrables claude.ai/design
+
+1. **Repo Next.js 15** complet `pnpm install && pnpm dev`
+2. **Design tokens** Tailwind v4 inline `@theme`
+3. **5-7 composants UI** + Storybook stories
+4. **4 écrans** : Chat principal / Fiche Sheet / Graphe / Settings modal
+5. **Mock conversations** réalistes avec stream factice (setTimeout)
+6. **README** : design system + screenshots
+7. **Mock data** : top 50 cibles + 100 dirigeants + 50 événements
+
+## Mock conversations à générer
 
 ```typescript
-const mockCibles: Cible[] = [
-  { siren: "838291045", denomination: "Acme Industries SAS",
-    naf: "24.10Z", naf_libelle: "Sidérurgie", siege_dept: "75",
-    ca_dernier: 47_000_000, effectif_tranche: "100-249",
-    pro_ma_score: 82, top_dirigeant: "Marc Dubois",
-    has_balo_recent: false, has_compliance_red_flag: false },
-
-  { siren: "432198765", denomination: "Beta Pharma Holding",
-    naf: "21.20Z", naf_libelle: "Fabrication produits pharma",
-    siege_dept: "78", ca_dernier: 124_000_000, effectif_tranche: "250-499",
-    pro_ma_score: 91, top_dirigeant: "Dr Sophie Marin",
-    has_balo_recent: true, has_compliance_red_flag: true,
-    red_flags: ["icij_offshore_panama", "amf_listes_noires"] },
-
-  { siren: "891234567", denomination: "Carbon Capture Tech",
-    naf: "71.12B", naf_libelle: "Ingénierie études techniques",
-    siege_dept: "38", ca_dernier: 8_400_000, effectif_tranche: "10-19",
-    pro_ma_score: 76, top_dirigeant: "Thomas Weber",
-    is_innovation_company: true, has_publications: true },
-
-  { siren: "567891234", denomination: "Delta Patrimoine SCI",
-    naf: "68.20A", naf_libelle: "Location logements", siege_dept: "92",
-    ca_dernier: null, effectif_tranche: "0-9", pro_ma_score: 88,
-    is_asset_rich: true, patrimoine_total_eur: 47_000_000 },
-
-  { siren: "489123456", denomination: "Edenred France",
-    naf: "64.20Z", naf_libelle: "Holdings", siege_dept: "92",
-    ca_dernier: 2_100_000_000, lei: "549300...", isin: "FR0010908533",
-    pro_ma_score: 79, is_listed: true, balo_operations_recent: 12 }
-];
-
-const mockSignaux: SignalEvent[] = [
-  { signal_uid: "balo_2026_04_29_001",
-    signal_type: "balo_operation", operation_type: "opa",
-    severity: "CRITICAL", date_event: "2026-04-29T08:14:00Z",
-    siren: "542051180", denomination: "TotalEnergies",
-    title: "Annonce d'OPA sur SunPower Corp",
-    description: "TotalEnergies dépose une offre publique d'achat...",
-    source_url: "https://www.journal-officiel.gouv.fr/balo/..." },
-  // ... 199 autres
+const mockConversations: Conversation[] = [
+  {
+    id: "conv_1",
+    title: "Cibles chimie IDF",
+    last_at: "2026-04-29T08:14:00Z",
+    messages: [
+      { role: "user", content: "Top cibles M&A chimie spécialisée IDF >20M€" },
+      { role: "ai", content: "47 cibles trouvées...",
+        cards: [acmeMock, betaMock, gammaMock] }
+    ]
+  },
+  {
+    id: "conv_2",
+    title: "DD Acme Industries",
+    last_at: "2026-04-29T07:30:00Z",
+    messages: [
+      { role: "user", content: "/dd 838291045" },
+      { role: "ai", content: "Due diligence Acme Industries SAS...",
+        cards: [acmeFullMock], compliance: { red_flags: [], ok: true } }
+    ]
+  },
+  // ... 8-10 autres
 ];
 ```
 
 ---
 
-## ✅ Checklist done
+# 🎯 Critères de succès
 
-- [ ] 7 pages designées avec hover/loading/empty/error states
-- [ ] 10 composants UI génériques avec props strict + Storybook
-- [ ] Design tokens Tailwind v4 inline `@theme`
-- [ ] Animations Framer Motion fluides (60fps)
-- [ ] Glow halos signatures (score, AI, real-time)
-- [ ] Aurora backgrounds subtils sur hero
-- [ ] Mode dark + light optionnels
-- [ ] Mobile responsive (PWA installable)
-- [ ] Accessibility AAA
-- [ ] Keyboard shortcuts implémentés
-- [ ] Mock data réaliste (top 50 cibles + signaux)
-- [ ] Code prêt à brancher sur API FastAPI DEMOEMA
-- [ ] README design system + screenshots Storybook
+L'utilisateur doit pouvoir :
 
-## 🎬 Tone à éviter
-
-❌ **Pas de** :
-- Skeuomorphism (icônes 3D bloated)
-- Glow excessifs partout (réservé aux signatures : score, AI, real-time)
-- Animations longues (> 400ms = lent)
-- Whitespace excessif (Bloomberg style = dense)
-- Couleurs vives type Figma corporate (palette DEMOEMA = neon subtil sur dark)
-- Stock illustrations Unsplash bateau
-- Headers énormes type startup landing 2020 (h1 80px+)
-- Curseurs custom type Webflow
-
-✅ **Vise** :
-- Densité info Bloomberg
-- Élégance spatiale visionOS
-- Précision Linear
-- Vitesse Vercel
-- Sobriété Anthropic Console
-- Discrètes touches futuriste (glow signature, sub scan-lines, count-up nums)
+✅ **Trouver une cible en < 30 secondes** via une question naturelle
+✅ **Comparer 2-5 cibles en 1 message** avec table + viz inline
+✅ **Faire une DD compliance en 1 prompt** + export PDF en 1 clic
+✅ **Sauver et retrouver ses recherches** via sidebar conversations
+✅ **Tout faire au clavier** (zéro souris si voulu)
+✅ **Mode mobile** : poser la même question depuis téléphone
+✅ **Auditer chaque info** : sources cliquables, scores explicables
 
 ---
 
-> Briefing v1 — 29/04/2026. À itérer après premier mockup pour affiner.
+# 🚫 Tone à éviter
+
+- ❌ Dashboard SaaS classique avec 12 widgets KPIs (boring 2020)
+- ❌ Sidebar nav avec 15 items (cognitive overload)
+- ❌ Tableaux Excel-like (Mergermarket 2008)
+- ❌ Header géant type startup landing
+- ❌ Onboarding modal de 8 étapes
+- ❌ Tooltips partout (clutter)
+- ❌ Couleurs primaires saturées Salesforce
+- ❌ Feature creep (Saved searches + watchlists + alerts + reports + ...)
+
+# ✅ Tone à viser
+
+- ✅ **ChatGPT premium pour le M&A français** = simplicité absolue
+- ✅ Une seule question = une seule réponse claire
+- ✅ Cards inline = preview rapide, click = deep-dive
+- ✅ Sidebar = juste l'historique conversations (pas plus)
+- ✅ Vitesse > complétude (Linear feel)
+- ✅ AI explique, source, audite
+- ✅ Keyboard-first toujours
+
+---
+
+# 📐 Mock screen final attendu (description)
+
+> Imagine **Perplexity AI**, mais :
+> - Au lieu de retourner des résultats web, l'IA retourne des **fiches entreprises FR** dénormalisées
+> - Au lieu de citer des URLs Wikipedia, l'IA cite des **siren INPI + BODACC + AMF + DILA**
+> - Au lieu d'être généraliste, c'est un **expert M&A boutique français**
+> - Le tout dans une UI **sombre, glassmorphique, futuriste** mais **dense comme Bloomberg**
+> - Avec une **vitesse de Linear** et la **sobriété d'Anthropic**
+
+C'est ça DEMOEMA Front v2.
+
+---
+
+> Brief v2 — 29/04/2026. Repensé pour AI-first chat-driven UX.
+> Iter à donner à claude.ai/design pour mockup initial.
