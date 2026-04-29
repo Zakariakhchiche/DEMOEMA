@@ -459,20 +459,50 @@ async def fiche_entreprise(req: Request, siren: str):
     if isinstance(fiche, dict) and not dirigeants_silver and dirigeants:
         fiche["n_dirigeants"] = len(dirigeants)
 
-    # Signaux M&A — BODACC (annonces commerciales)
-    signaux = await pool.fetch(
-        """SELECT date_parution AS event_date,
-                  typeavis_lib AS signal_type,
-                  familleavis_lib AS severity,
-                  tribunal AS source,
-                  ville, departement, code_dept,
-                  jugement_details, depot_details
-           FROM silver.bodacc_annonces
-           WHERE siren = $1
-           ORDER BY date_parution DESC
-           LIMIT 20""",
-        siren,
-    ) if await _table_exists(pool, "silver", "bodacc_annonces") else []
+    # Signaux M&A — BODACC (annonces commerciales). Silver d'abord, fallback
+    # API gov BODACC live si vide.
+    signaux: list = []
+    if await _table_exists(pool, "silver", "bodacc_annonces"):
+        signaux = await pool.fetch(
+            """SELECT date_parution AS event_date,
+                      typeavis_lib AS signal_type,
+                      familleavis_lib AS severity,
+                      tribunal AS source,
+                      ville, departement, code_dept,
+                      jugement_details, depot_details
+               FROM silver.bodacc_annonces
+               WHERE siren = $1
+               ORDER BY date_parution DESC
+               LIMIT 20""",
+            siren,
+        )
+
+    if not signaux:
+        # Fallback live BODACC datadila API
+        try:
+            import httpx as _httpx2
+            async with _httpx2.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(
+                    f"https://bodacc-datadila.opendatasoft.com/api/records/1.0/search/"
+                    f"?dataset=annonces-commerciales&q={siren}&rows=20&sort=-dateparution"
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    signaux = [
+                        {
+                            "event_date": r.get("fields", {}).get("dateparution"),
+                            "signal_type": r.get("fields", {}).get("typeavis_lib") or r.get("fields", {}).get("typeavis"),
+                            "severity": r.get("fields", {}).get("familleavis_lib") or r.get("fields", {}).get("familleavis"),
+                            "source": r.get("fields", {}).get("tribunal"),
+                            "ville": r.get("fields", {}).get("ville"),
+                            "departement": r.get("fields", {}).get("departement_nom_officiel"),
+                            "code_dept": r.get("fields", {}).get("departement_code"),
+                            "_live": True,
+                        }
+                        for r in (data.get("records") or [])
+                    ]
+        except Exception as e:
+            print(f"[fiche] BODACC live API failed: {type(e).__name__}: {str(e)[:80]}")
 
     # Compliance — OpenSanctions match par siren_fr
     red_flags = await pool.fetch(
@@ -483,36 +513,76 @@ async def fiche_entreprise(req: Request, siren: str):
         siren,
     ) if await _table_exists(pool, "silver", "opensanctions") else []
 
-    # Réseau — co-mandats : autres sirens des dirigeants principaux
-    network = await pool.fetch(
-        """WITH top_dirig AS (
-              SELECT nom, prenom, sirens_mandats, denominations
-              FROM silver.inpi_dirigeants
-              WHERE $1::char(9) = ANY(sirens_mandats)
-              ORDER BY n_mandats_actifs DESC NULLS LAST
-              LIMIT 3
-           ),
-           expanded AS (
-              SELECT d.nom, d.prenom,
-                     unnest(d.sirens_mandats) AS other_siren,
-                     unnest(d.denominations) AS other_deno
-              FROM top_dirig d
-           )
-           SELECT DISTINCT other_siren AS siren,
-                  other_deno AS denomination,
-                  string_agg(DISTINCT prenom || ' ' || nom, ', ') AS via_dirigeants
-           FROM expanded
-           WHERE other_siren != $1::bpchar AND other_siren IS NOT NULL
-           GROUP BY other_siren, other_deno
-           ORDER BY other_deno
-           LIMIT 20""",
-        siren,
-    ) if await _table_exists(pool, "silver", "inpi_dirigeants") else []
+    # Réseau — co-mandats : silver.inpi_dirigeants (top 3 dirigeants → autres
+    # sirens). Fallback : dirigeants gouv API qui ont un siren (personnes morales).
+    network: list = []
+    if await _table_exists(pool, "silver", "inpi_dirigeants"):
+        network = await pool.fetch(
+            """WITH top_dirig AS (
+                  SELECT nom, prenom, sirens_mandats, denominations
+                  FROM silver.inpi_dirigeants
+                  WHERE $1::char(9) = ANY(sirens_mandats)
+                  ORDER BY n_mandats_actifs DESC NULLS LAST
+                  LIMIT 3
+               ),
+               expanded AS (
+                  SELECT d.nom, d.prenom,
+                         unnest(d.sirens_mandats) AS other_siren,
+                         unnest(d.denominations) AS other_deno
+                  FROM top_dirig d
+               )
+               SELECT DISTINCT other_siren AS siren,
+                      other_deno AS denomination,
+                      string_agg(DISTINCT prenom || ' ' || nom, ', ') AS via_dirigeants
+               FROM expanded
+               WHERE other_siren != $1::char(9) AND other_siren IS NOT NULL
+               GROUP BY other_siren, other_deno
+               ORDER BY other_deno
+               LIMIT 20""",
+            siren,
+        )
 
-    # Presse matchée — skipped : silver.press_mentions_matched est actuellement
-    # vide (0 rows) ET son prepare() timeout aléatoirement (table state weird).
-    # Ré-activera quand le scraper press_mentions_matched aura ingéré.
+    if not network and gouv:
+        # Fallback : personnes morales dans dirigeants gouv API ARE co-mandats.
+        moral_dirigs = [d for d in gouv.get("dirigeants", []) if d.get("siren") and d.get("denomination")]
+        network = [
+            {
+                "siren": d["siren"],
+                "denomination": d.get("denomination"),
+                "via_dirigeants": d.get("qualite") or "Personne morale liée",
+            }
+            for d in moral_dirigs[:20]
+        ]
+
+    # Presse — skip silver.press_mentions_matched (vide), fallback Google News RSS
     presse: list = []
+    if isinstance(fiche, dict) and fiche.get("denomination"):
+        try:
+            import httpx as _httpx3
+            from defusedxml import ElementTree as _ET
+            import urllib.parse as _urlparse
+            q_press = _urlparse.quote(fiche["denomination"])
+            async with _httpx3.AsyncClient(timeout=4.0) as client:
+                resp = await client.get(
+                    f"https://news.google.com/rss/search?q={q_press}&hl=fr-FR&gl=FR&ceid=FR:fr"
+                )
+                if resp.status_code == 200:
+                    root = _ET.fromstring(resp.content)
+                    items = root.findall(".//item")
+                    for item in items[:10]:
+                        title_el = item.find("title")
+                        link_el = item.find("link")
+                        date_el = item.find("pubDate")
+                        source_el = item.find("source")
+                        presse.append({
+                            "title": (title_el.text or "")[:200] if title_el is not None else "",
+                            "url": link_el.text if link_el is not None else None,
+                            "published_at": date_el.text if date_el is not None else None,
+                            "source": source_el.text if source_el is not None else "Google News",
+                            "ma_signal_type": None,
+                        })
+        except Exception as e:
+            print(f"[fiche] Google News RSS failed: {type(e).__name__}: {str(e)[:80]}")
 
     return {
         "fiche": _serialize(fiche) if hasattr(fiche, "items") and not isinstance(fiche, dict) else fiche,
