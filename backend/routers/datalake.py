@@ -424,8 +424,16 @@ async def fiche_entreprise(req: Request, siren: str):
            SELECT d.*,
                   sci.n_sci, sci.total_capital_sci, sci.sci_denominations,
                   os.has_linkedin, os.has_github, os.n_total_social,
-                  EXISTS(SELECT 1 FROM silver.opensanctions s
-                         WHERE LOWER(s.name) LIKE '%' || LOWER(d.nom) || '%') AS is_sanctioned
+                  -- Match strict prenom + nom (et country FR si dispo) pour
+                  -- éliminer les faux positifs ('DURAND' ≠ tous les Durand
+                  -- du monde). On exige aussi que ce soit une Person.
+                  EXISTS(
+                    SELECT 1 FROM silver.opensanctions s
+                    WHERE s.schema = 'Person'
+                      AND LOWER(s.name) ILIKE '%' || LOWER(d.prenom) || '%'
+                      AND LOWER(s.name) ILIKE '%' || LOWER(d.nom) || '%'
+                      AND LENGTH(d.prenom) > 2 AND LENGTH(d.nom) > 2
+                  ) AS is_sanctioned
            FROM dirig d
            LEFT JOIN silver.dirigeant_sci_patrimoine sci
                   ON sci.nom = d.nom AND sci.prenom = d.prenom
@@ -536,14 +544,85 @@ async def fiche_entreprise(req: Request, siren: str):
         except Exception as e:
             print(f"[fiche] BODACC live API failed: {type(e).__name__}: {str(e)[:80]}")
 
-    # Compliance — OpenSanctions match par siren_fr
-    red_flags = await pool.fetch(
-        """SELECT entity_id, caption, schema, topics, countries,
-                  sanctions_programs, first_seen, last_seen
-           FROM silver.opensanctions
-           WHERE $1 = ANY(sirens_fr)""",
-        siren,
-    ) if await _table_exists(pool, "silver", "opensanctions") else []
+    # Compliance — match multi-source par siren ET denomination :
+    #   1. silver.opensanctions WHERE siren ∈ sirens_fr OR caption ILIKE deno
+    #      (couvre PEP, sanctions UE/US/UN/UK, ICIJ Pandora/Paradise/Panama)
+    #   2. bronze.dgccrf_sanctions_raw WHERE entreprise ILIKE deno
+    #      (sanctions Direction Générale Concurrence Consommation Répression Fraudes France)
+    #   3. bronze.cnil_sanctions_raw via payload->>'organisme' ILIKE deno
+    #      (sanctions RGPD CNIL France)
+    deno_for_match = (fiche.get("denomination") if isinstance(fiche, dict) else None) or ""
+
+    red_flags: list = []
+
+    # --- 1. OpenSanctions ---
+    if await _table_exists(pool, "silver", "opensanctions") and deno_for_match:
+        os_rows = await _safe(pool.fetch(
+            """SELECT entity_id, caption, schema, topics, countries,
+                      sanctions_programs, first_seen, last_seen,
+                      'opensanctions' AS _source,
+                      CASE
+                        WHEN $1 = ANY(sirens_fr) THEN 'siren_match'
+                        WHEN caption ILIKE $2 THEN 'name_match'
+                        ELSE 'alias_match'
+                      END AS _match_type
+               FROM silver.opensanctions
+               WHERE $1 = ANY(sirens_fr)
+                  OR caption ILIKE $2
+                  OR EXISTS(SELECT 1 FROM unnest(alias_names) a WHERE a ILIKE $2)
+               LIMIT 20""",
+            siren, deno_for_match,
+        ), default=[])
+        red_flags.extend([dict(r) for r in os_rows])
+
+    # --- 2. DGCCRF (sanctions France) ---
+    if deno_for_match:
+        dgccrf_exists = await pool.fetchval(
+            """SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+               WHERE n.nspname = 'bronze' AND c.relname = 'dgccrf_sanctions_raw'""",
+        )
+        if dgccrf_exists:
+            dg_rows = await _safe(pool.fetch(
+                """SELECT sanction_id AS entity_id,
+                          entreprise AS caption,
+                          'CommercePractice' AS schema,
+                          ARRAY['sanction','dgccrf']::text[] AS topics,
+                          ARRAY['fr']::text[] AS countries,
+                          ARRAY[motif]::text[] AS sanctions_programs,
+                          date_decision AS first_seen,
+                          date_decision AS last_seen,
+                          'dgccrf' AS _source,
+                          'name_match' AS _match_type,
+                          montant_amende
+                   FROM bronze.dgccrf_sanctions_raw
+                   WHERE entreprise ILIKE $1""",
+                deno_for_match,
+            ), default=[])
+            red_flags.extend([dict(r) for r in dg_rows])
+
+    # --- 3. CNIL (sanctions RGPD France) ---
+    if deno_for_match:
+        cnil_exists = await pool.fetchval(
+            """SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+               WHERE n.nspname = 'bronze' AND c.relname = 'cnil_sanctions_raw'""",
+        )
+        if cnil_exists:
+            cnil_rows = await _safe(pool.fetch(
+                """SELECT sanction_id AS entity_id,
+                          COALESCE(payload->>'organisme', payload->>'entreprise', payload->>'nom') AS caption,
+                          'RGPDViolation' AS schema,
+                          ARRAY['sanction','cnil','rgpd']::text[] AS topics,
+                          ARRAY['fr']::text[] AS countries,
+                          ARRAY[COALESCE(payload->>'motif', payload->>'manquement')]::text[] AS sanctions_programs,
+                          (payload->>'date')::date AS first_seen,
+                          ingested_at AS last_seen,
+                          'cnil' AS _source,
+                          'name_match' AS _match_type
+                   FROM bronze.cnil_sanctions_raw
+                   WHERE COALESCE(payload->>'organisme', payload->>'entreprise', '') ILIKE $1""",
+                deno_for_match,
+            ), default=[])
+            red_flags.extend([dict(r) for r in cnil_rows])
 
     # Réseau — co-mandats : silver.inpi_dirigeants (top 3 dirigeants → autres
     # sirens). Fallback : dirigeants gouv API qui ont un siren (personnes morales).
