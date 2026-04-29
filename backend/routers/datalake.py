@@ -521,13 +521,25 @@ async def fiche_entreprise(req: Request, siren: str):
            LEFT JOIN sanc_agg sa
                   ON UPPER(unaccent(sa.nom)) = UPPER(unaccent(d.nom))
                  AND UPPER(unaccent(sa.prenom)) = UPPER(unaccent(d.prenom))
-           LEFT JOIN silver.osint_persons_enriched os
-                  ON UPPER(unaccent(os.nom)) = UPPER(unaccent(d.nom))
-                 AND EXISTS (
-                       SELECT 1 FROM unnest(os.prenoms) p
-                       WHERE UPPER(unaccent(p)) = UPPER(unaccent(d.prenom))
-                 )
-                 AND COALESCE(os.date_naissance, '') = COALESCE(d.date_naissance, '')""",
+           LEFT JOIN LATERAL (
+                  -- LIMIT 1 pour ne pas multiplier les rows quand
+                  -- silver.osint_persons_enriched a plusieurs entries pour la
+                  -- même personne (ex : 1 par representant_id distinct).
+                  SELECT person_uid, has_linkedin, has_github, has_any_social,
+                         n_linkedin, n_github, n_twitter, n_other_sites,
+                         n_total_social, denomination_main_company,
+                         forme_juridique_main, capital_main, date_immat_main,
+                         n_mandats_inpi, last_scanned_at
+                  FROM silver.osint_persons_enriched os2
+                  WHERE UPPER(unaccent(os2.nom)) = UPPER(unaccent(d.nom))
+                    AND EXISTS (
+                          SELECT 1 FROM unnest(os2.prenoms) p
+                          WHERE UPPER(unaccent(p)) = UPPER(unaccent(d.prenom))
+                    )
+                    AND COALESCE(os2.date_naissance, '') = COALESCE(d.date_naissance, '')
+                  ORDER BY n_total_social DESC NULLS LAST
+                  LIMIT 1
+           ) os ON true""",
         siren,
     )
 
