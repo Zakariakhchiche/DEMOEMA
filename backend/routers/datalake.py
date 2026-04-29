@@ -1665,10 +1665,10 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
         ),
         enriched AS (
             SELECT lc.*,
-                   ul.code_ape AS naf,
-                   ul.categorie_juridique AS forme_juridique,
-                   ul.date_creation AS date_creation_unite,
-                   et.code_postal AS adresse_code_postal,
+                   COALESCE(ul.code_ape, oce.code_ape) AS naf,
+                   COALESCE(ul.categorie_juridique, oce.forme_juridique) AS forme_juridique,
+                   COALESCE(ul.date_creation, oce.date_immatriculation) AS date_creation_unite,
+                   COALESCE(et.code_postal, oce.adresse_code_postal) AS adresse_code_postal,
                    et.commune AS ville_etab,
                    et.code_dept AS dept_etab,
                    -- Fallback dept/ville depuis bodacc si insee siège manque
@@ -1691,6 +1691,7 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
                    END AS td_score
             FROM last_compte lc
             LEFT JOIN silver.insee_unites_legales ul ON ul.siren = lc.siren
+            LEFT JOIN silver.osint_companies_enriched oce ON oce.siren = lc.siren::char(9)
             LEFT JOIN LATERAL (
                 SELECT code_postal, commune, code_dept
                 FROM silver.insee_etablissements
@@ -1710,7 +1711,7 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
                naf,
                NULL::text AS naf_libelle,
                forme_juridique,
-               COALESCE(dept_etab, dept_bodacc) AS dept,
+               COALESCE(dept_etab, dept_bodacc, LEFT(NULLIF(adresse_code_postal, ''), 2)) AS dept,
                COALESCE(ville_etab, ville_bodacc) AS ville,
                COALESCE(adresse_code_postal, '') AS adresse_code_postal,
                COALESCE(date_creation_unite, date_cloture) AS date_creation,
