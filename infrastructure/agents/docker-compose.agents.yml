@@ -44,6 +44,20 @@ services:
       -c wal_compression=on
       -c jit=on
       -c log_min_duration_statement=10000
+      # Anti-zombie 1 : tue les sessions idle (transaction abandonnée par client mort)
+      # 15 min couvre les CREATE MATERIALIZED VIEW les plus lents tout en évitant
+      # qu'une session orpheline garde des locks indéfiniment.
+      -c idle_in_transaction_session_timeout=900000
+      # Anti-zombie 2 : statement_timeout global = 30 min (les big REFRESH MV
+      # peuvent prendre 20+ min sur silver.inpi_dirigeants 8M rows). Au-delà,
+      # la session est tuée — protège contre les requêtes infinies.
+      -c statement_timeout=1800000
+      # Anti-zombie 3 : TCP keepalive — détecte les clients morts en ~5 min
+      # au lieu des 2h default Linux. Si un client (agents-platform tué pendant
+      # CREATE MV) ne répond plus, Postgres ferme la connexion + libère les locks.
+      -c tcp_keepalives_idle=60
+      -c tcp_keepalives_interval=10
+      -c tcp_keepalives_count=20
     volumes:
       - datalake-data:/var/lib/postgresql/data
       - ./datalake-init:/docker-entrypoint-initdb.d:ro
