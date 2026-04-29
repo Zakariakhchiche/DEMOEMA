@@ -398,14 +398,17 @@ async def generate_silver_sql(
         return {"error": f"bronze tables missing: {missing}"}
 
     # ============================================================
-    # OPTIM : reuse du dernier SQL applied=true (evite re-LLM si on
-    # a deja un SQL qui marche). Skip si feedback (retry contextuel).
+    # OPTIM : reuse SQL depuis audit.silver_specs_versions
+    # 1) Priorite : applied=true (deja prouve OK en prod)
+    # 2) Fallback : validation_status='ok' avec auto-fix patterns connus
+    #    (double parens index '((col1, col2))' → '(col1, col2)')
     # ============================================================
     if not feedback and apply_immediately:
         try:
             with psycopg.connect(settings.database_url) as conn, conn.cursor() as cur:
+                # 1. Priorite : dernier SQL applied=true
                 cur.execute(
-                    """SELECT generated_sql, version_uid
+                    """SELECT generated_sql, version_uid, applied
                        FROM audit.silver_specs_versions
                        WHERE silver_name = %s
                          AND applied = true
@@ -415,11 +418,38 @@ async def generate_silver_sql(
                     (silver_name,),
                 )
                 row = cur.fetchone()
+                cache_source = "audit_applied"
+
+                # 2. Fallback : dernier SQL ok meme si jamais applique
+                if not row:
+                    cur.execute(
+                        """SELECT generated_sql, version_uid, applied
+                           FROM audit.silver_specs_versions
+                           WHERE silver_name = %s
+                             AND validation_status = 'ok'
+                           ORDER BY generated_at DESC NULLS LAST
+                           LIMIT 1""",
+                        (silver_name,),
+                    )
+                    row = cur.fetchone()
+                    cache_source = "audit_ok_autofix"
+
                 if row:
-                    cached_sql, cached_uid = row
+                    cached_sql, cached_uid, was_applied = row
+                    # Auto-fix patterns connus (LLM hallucinations recurrentes)
+                    if cache_source == "audit_ok_autofix":
+                        # Fix 1 : double parens index → simple parens
+                        # CREATE INDEX ON t ((col1, col2)) → CREATE INDEX ON t (col1, col2)
+                        # Pattern : "((nom1, nom2..."  →  "(nom1, nom2..."
+                        cached_sql = re.sub(
+                            r"CREATE INDEX (\w+\s+)?ON (\S+)\s+\(\((.+?)\)\)",
+                            r"CREATE INDEX \1ON \2 (\3)",
+                            cached_sql,
+                        )
                     log.info(
-                        "[silver_codegen] reuse last applied SQL for %s (version %s) — skip LLM",
-                        silver_name, cached_uid[:12] if cached_uid else "?",
+                        "[silver_codegen] reuse SQL from %s for %s (version %s, was_applied=%s) — skip LLM",
+                        cache_source, silver_name,
+                        cached_uid[:12] if cached_uid else "?", was_applied,
                     )
                     applied = _apply_sql(silver_name, cached_sql, cached_uid)
                     if applied["applied"]:
@@ -428,13 +458,12 @@ async def generate_silver_sql(
                             "sql": cached_sql,
                             "version_uid": cached_uid,
                             "valid": True,
-                            "validation_msg": "reused from audit.silver_specs_versions",
+                            "validation_msg": f"reused from {cache_source}",
                             "applied": True,
                             "retries": 0,
-                            "source": "audit_cache",
+                            "source": cache_source,
                         }
-                    # Si l'apply rate (schema bronze a peut-etre evolue),
-                    # on tombe sur le LLM normal.
+                    # Si l'apply rate, on tombe sur le LLM normal.
                     log.warning(
                         "[silver_codegen] cached SQL apply failed for %s (%s) — fallback LLM",
                         silver_name, applied.get("error", "")[:120],
