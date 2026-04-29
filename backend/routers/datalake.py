@@ -1953,20 +1953,19 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
             LIMIT {int(limit) * 4}
         ),
         enriched AS (
-            -- Sources bronze pour naf/forme/ville/dept :
-            -- - bronze.inpi_formalites_entreprises (siren PK) : forme_juridique, code_ape
-            -- - bronze.insee_sirene_siret_raw (siret) : commune + code_postal du siege
-            --   (DISTINCT ON siren pour ne garder qu'un siret par siren)
-            -- Bronze n'est jamais lockée pendant le silver_bootstrap.
-            -- Le frontend reste agnostique : il appelle toujours /api/datalake/cibles
-            -- (silver+ contract), c'est juste l'implémentation backend qui tape bronze.
+            -- bronze.inpi_formalites_entreprises (siren PK, indexé) contient tout :
+            -- forme_juridique, code_ape (NAF), adresse_code_postal, adresse_commune,
+            -- date_immatriculation. Un seul JOIN suffit. Bronze n'est jamais lockée
+            -- pendant le silver_bootstrap. Le frontend reste sur le contrat
+            -- silver+ via /api/datalake/cibles ; c'est juste l'implémentation
+            -- backend qui tape bronze pour ces champs.
             SELECT lc.*,
                    ife.code_ape AS naf,
                    ife.forme_juridique AS forme_juridique,
                    ife.date_immatriculation AS date_creation_unite,
-                   sir.code_postal AS adresse_code_postal,
-                   sir.commune AS ville_sirene,
-                   LEFT(sir.code_postal, 2) AS dept_sirene,
+                   ife.adresse_code_postal AS adresse_code_postal,
+                   ife.adresse_commune AS ville_sirene,
+                   LEFT(ife.adresse_code_postal, 2) AS dept_sirene,
                    (SELECT b.code_dept FROM silver.bodacc_annonces b
                     WHERE b.siren = lc.siren AND b.code_dept IS NOT NULL
                     ORDER BY b.date_parution DESC LIMIT 1) AS dept_bodacc,
@@ -1975,13 +1974,6 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
                     ORDER BY b.date_parution DESC LIMIT 1) AS ville_bodacc
             FROM last_compte lc
             LEFT JOIN bronze.inpi_formalites_entreprises ife ON ife.siren = lc.siren
-            LEFT JOIN LATERAL (
-                SELECT commune, code_postal
-                FROM bronze.insee_sirene_siret_raw
-                WHERE siren = lc.siren AND etat = 'A'
-                ORDER BY ingested_at DESC
-                LIMIT 1
-            ) sir ON true
         )
         SELECT siren,
                denomination,
