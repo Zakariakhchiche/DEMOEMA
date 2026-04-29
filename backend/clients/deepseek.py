@@ -362,6 +362,20 @@ COPILOT_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_groupe_filiation",
+            "description": "Identifie filiales et maison mère d'une société (structure groupe). Combine GLEIF (parent_lei international) + INPI personnes morales dirigeantes (mères + filiales détectées) + BODACC fusions/absorptions. Indique si la société est une holding ou une filiale.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "siren": {"type": "string", "description": "SIREN 9 chiffres"},
+                },
+                "required": ["siren"],
+            },
+        },
+    },
 ]
 
 
@@ -613,6 +627,16 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
                     ]}
                 return {"error": f"HTTP {r.status_code}"}
 
+        elif name == "get_groupe_filiation":
+            siren = args.get("siren", "")
+            if not siren.isdigit() or len(siren) != 9:
+                return {"error": "siren invalide"}
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.get(f"{datalake_base}/api/datalake/groupe-filiation/{siren}")
+                if r.status_code == 200:
+                    return r.json()
+                return {"error": f"HTTP {r.status_code}"}
+
         return {"error": f"Tool {name} inconnu"}
     except Exception as e:
         return {"error": f"{type(e).__name__}: {str(e)[:200]}"}
@@ -643,7 +667,9 @@ _SYSTEM_PROMPT_TOOLS = (
     "**Marché & cross-border** :\n"
     "- search_marches_publics : marchés publics gagnés (BOAMP/DECP)\n"
     "- get_lei_code : code LEI international (filiales étrangères)\n"
-    "- search_dvf_zones : transactions immobilières par CP/dept\n\n"
+    "- search_dvf_zones : transactions immobilières par CP/dept\n"
+    "**Structure groupe** :\n"
+    "- get_groupe_filiation : filiales + maison mère (GLEIF + INPI PM + BODACC fusions)\n\n"
     "**RÈGLE CRITIQUE** : tu DOIS appeler les tools pour répondre. Ne jamais halluciner de données.\n"
     "Si on te demande une entreprise (TotalEnergies, Renault, Carrefour...), appelle search_cibles ou get_fiche_entreprise.\n"
     "Combine plusieurs tools si pertinent (ex: get_fiche + check_offshore + check_lobbying pour DD).\n"

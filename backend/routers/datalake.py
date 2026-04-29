@@ -1207,6 +1207,95 @@ async def dirigeant_full_no_dn(req: Request, nom: str, prenom: str):
     return await _dirigeant_full(req, nom, prenom, None)
 
 
+@router.get("/groupe-filiation/{siren}")
+async def groupe_filiation(req: Request, siren: str):
+    """Identifie filiales + maison mere d'une societe via 3 sources :
+    - silver.gleif_lei : parent_lei + ultimate_parent_lei (LEI international)
+    - bronze.inpi_formalites_personnes : siren <-> entreprise_siren (PM dirigeantes)
+    - silver.bodacc_annonces : evenements fusion/absorption/prise participation
+
+    NB : utilise bronze.inpi_formalites_personnes uniquement cote backend
+    (le frontend voit le contrat silver+ via cet endpoint API).
+    """
+    if not siren.isdigit() or len(siren) != 9:
+        raise HTTPException(status_code=400, detail="SIREN invalide")
+    pool = _pool(req)
+
+    # 1. GLEIF parent / ultimate_parent (LEI codes — entreprises internationales)
+    gleif = await _safe(pool.fetchrow(
+        """SELECT lei, legal_name, parent_lei, ultimate_parent_lei
+           FROM silver.gleif_lei
+           WHERE siren_fr = $1 LIMIT 1""",
+        siren,
+    ))
+
+    # 2. Maison mere via INPI : si X est siren, qui dirige X comme PM ?
+    meres_rows = await _safe(pool.fetch(
+        """SELECT DISTINCT
+              entreprise_siren AS mere_siren,
+              entreprise_denomination AS mere_nom,
+              entreprise_role_entreprise AS role,
+              entreprise_indicateur_associe_unique AS associe_unique
+           FROM bronze.inpi_formalites_personnes
+           WHERE siren = $1
+             AND type_de_personne = 'entreprise'
+             AND actif = true
+             AND entreprise_siren IS NOT NULL
+             AND entreprise_siren != $1
+           LIMIT 10""",
+        siren,
+    ), default=[])
+
+    # 3. Filiales via INPI : qui a X comme entreprise dirigeante PM ?
+    filiales_rows = await _safe(pool.fetch(
+        """SELECT DISTINCT
+              p.siren AS filiale_siren,
+              e.denomination AS filiale_nom,
+              p.entreprise_role_entreprise AS role,
+              p.entreprise_indicateur_associe_unique AS associe_unique,
+              e.code_ape AS filiale_naf,
+              e.adresse_commune AS filiale_ville
+           FROM bronze.inpi_formalites_personnes p
+           LEFT JOIN bronze.inpi_formalites_entreprises e ON e.siren = p.siren
+           WHERE p.entreprise_siren = $1
+             AND p.type_de_personne = 'entreprise'
+             AND p.actif = true
+             AND p.siren != $1
+           LIMIT 50""",
+        siren,
+    ), default=[])
+
+    # 4. Evenements groupe (BODACC fusion / absorption / prise participation)
+    events_rows = await _safe(pool.fetch(
+        """SELECT date_parution, familleavis_lib, typeavis_lib
+           FROM silver.bodacc_annonces
+           WHERE siren = $1
+             AND (familleavis_lib ILIKE '%fusion%'
+                  OR familleavis_lib ILIKE '%absorption%'
+                  OR familleavis_lib ILIKE '%participation%'
+                  OR familleavis_lib ILIKE '%scission%')
+           ORDER BY date_parution DESC
+           LIMIT 10""",
+        siren,
+    ), default=[])
+
+    # Si filiales > 0 => societe est probablement une mere/holding
+    is_holding = len(filiales_rows) >= 3
+    is_filiale = len(meres_rows) > 0
+
+    return {
+        "siren": siren,
+        "is_holding": is_holding,
+        "is_filiale": is_filiale,
+        "n_filiales_detectees": len(filiales_rows),
+        "n_meres_detectees": len(meres_rows),
+        "gleif": _serialize(gleif) if gleif else None,
+        "meres": [_serialize(r) for r in meres_rows],
+        "filiales": [_serialize(r) for r in filiales_rows],
+        "evenements_groupe": [_serialize(r) for r in events_rows],
+    }
+
+
 @router.get("/pitch/{siren}")
 async def pitch_pdf(req: Request, siren: str):
     """Génère un pitch PDF imprimable (HTML auto-print). L'utilisateur clique
