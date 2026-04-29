@@ -1719,7 +1719,7 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
                  WHERE siren = ANY(os.sirens_fr)
                ) AS has_compliance_red_flag,
                false AS is_listed,
-               -- top_dirigeant_* exposés via /fiche/{siren} (drill-down rapide)
+               -- top_dirigeant_* exposes via /fiche/SIREN (drill-down rapide)
                NULL::text AS top_dirigeant_nom,
                NULL::text AS top_dirigeant_prenom,
                NULL::text AS top_dirigeant_full_name,
