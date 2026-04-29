@@ -1679,9 +1679,9 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
                     WHERE b.siren = lc.siren AND b.ville IS NOT NULL
                     ORDER BY b.date_parution DESC LIMIT 1) AS ville_bodacc
                    -- Top dirigeant pas joint ici : LATERAL sur silver.inpi_dirigeants
-                   -- (8M rows) timeout même avec GIN. /fiche/{siren} fait le drill-down
-                   -- précis quand l'utilisateur clique sur une cible. Pour le listing
-                   -- on garde des cibles rapides (<1s).
+                   -- (8M rows) timeout meme avec GIN. /fiche/SIREN fait le drill-down
+                   -- precis quand l utilisateur clique sur une cible. Pour le listing
+                   -- on garde des cibles rapides (sub-seconde).
             FROM last_compte lc
             LEFT JOIN silver.insee_unites_legales ul ON ul.siren = lc.siren
             LEFT JOIN silver.osint_companies_enriched oce ON oce.siren = lc.siren::char(9)
