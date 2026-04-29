@@ -2,6 +2,10 @@
 
 > **Catalogue exhaustif** des objets data de l'application : sources, tables, marts, API, front. Lineage end-to-end source → produit.
 >
+> 🎨 **Diagrammes de lineage Mermaid détaillés** : voir [`DATACATALOG_LINEAGE.md`](./DATACATALOG_LINEAGE.md) — 8 diagrammes par cas d'usage produit (Targets / Signaux / Compliance / Graphe / Contacts) + lineage global par couche fonctionnelle.
+>
+> 🏗️ **Diagrammes architecture** (medallion, codegen, OSINT, infra VPS) : voir [`ARCHITECTURE_DIAGRAMS.md`](./ARCHITECTURE_DIAGRAMS.md).
+>
 > Pour les chiffres financiers : `FINANCES_UNIFIE.md` · Pour l'architecture infra : `ARCHITECTURE_TECHNIQUE.md` · Pour la liste sources : `ARCHITECTURE_DATA_V2.md`.
 
 ---
