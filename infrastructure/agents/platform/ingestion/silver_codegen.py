@@ -135,6 +135,26 @@ async def _llm_chat(model: str, system: str, user: str,
             max_tokens=settings.deepseek_max_tokens,
         )
 
+    # Ollama Cloud limite à 3 models concurrents → avec parallelism>3 on hit
+    # 429 systématique. Si DeepSeek est dispo, on saute le pre-call Ollama
+    # inutile (retourne 429 instantané) et on tape direct DeepSeek (60 req/s).
+    # Restitution : si l'opérateur veut tenter Ollama (LLM local ex), il met
+    # PREFER_OLLAMA=1 dans l'env.
+    import os as _os
+    prefer_ollama = _os.environ.get("PREFER_OLLAMA", "").lower() in ("1", "true", "yes")
+    if settings.deepseek_api_key and not prefer_ollama:
+        ds = DeepSeekClient(model="deepseek-chat", timeout=settings.deepseek_timeout_s)
+        try:
+            return await ds.chat(
+                messages=messages, temperature=temperature,
+                max_tokens=settings.deepseek_max_tokens,
+            )
+        except Exception as e:
+            # Si DeepSeek fail (rate limit, network), fallback Ollama au cas où
+            log.warning("[llm_chat] DeepSeek failed (%s) — fallback Ollama %s",
+                        type(e).__name__, model)
+            # Continue vers le code Ollama ci-dessous
+
     client = OllamaClient()
     try:
         return await client.chat(
@@ -147,9 +167,7 @@ async def _llm_chat(model: str, system: str, user: str,
         httpx.ConnectError,
         httpx.HTTPStatusError,  # 5xx Ollama (vu en prod : 504 Gateway Timeout)
     ) as e:
-        # Fallback DeepSeek avec timeout DISTINCT (180s vs Ollama 1200s) :
-        # un DeepSeek qui ramerait au delà de 3 min = vraie panne, pas hang
-        # raisonnable — on échoue vite plutôt que d'enchaîner 2 timeouts longs.
+        # Fallback DeepSeek (si pas déjà tenté plus haut)
         if not settings.deepseek_api_key:
             log.warning("[llm_chat] Ollama failed (%s) — pas de fallback DeepSeek (clé absente)",
                         type(e).__name__)
