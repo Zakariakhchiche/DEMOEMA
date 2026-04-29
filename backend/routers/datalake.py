@@ -201,9 +201,8 @@ async def fiche_entreprise(req: Request, siren: str):
             "SELECT * FROM gold.entreprises_master WHERE siren = $1", siren
         )
     if not fiche:
-        # Skip osint_companies_enriched (bloqué actuellement). On dérive le
-        # dept/ville depuis silver.bodacc_annonces. Les colonnes NAF/forme/
-        # capital social restent NULL en attendant déblocage osint ou gold.
+        # JOIN inpi_comptes (CA/EBITDA) + osint_companies (NAF/dept/forme/
+        # capital/domain/linkedin) + bodacc (loc fallback) + counts agrégés.
         fiche = await pool.fetchrow(
             """WITH last_compte AS (
                   SELECT DISTINCT ON (siren) siren, denomination,
@@ -231,9 +230,21 @@ async def fiche_entreprise(req: Request, siren: str):
                   WHERE siren = $1 AND code_dept IS NOT NULL
                   ORDER BY date_parution DESC LIMIT 1
                ),
+               osint AS (
+                  SELECT siren, code_ape AS naf,
+                         forme_juridique,
+                         montant_capital AS capital_social,
+                         adresse_code_postal,
+                         date_immatriculation,
+                         primary_domain,
+                         has_linkedin_page, has_github_org,
+                         linkedin_employees, digital_presence_score
+                  FROM silver.osint_companies_enriched
+                  WHERE siren = $1
+               ),
                counts AS (
                   SELECT
-                    (SELECT COUNT(*)::int FROM silver.inpi_dirigeants WHERE $1::bpchar = ANY(sirens_mandats)) AS n_dirigeants,
+                    (SELECT COUNT(*)::int FROM silver.inpi_dirigeants WHERE $1::char(9) = ANY(sirens_mandats)) AS n_dirigeants,
                     (SELECT COUNT(*)::int FROM silver.bodacc_annonces WHERE siren = $1) AS n_bodacc,
                     (SELECT COUNT(*)::int FROM silver.opensanctions WHERE $1 = ANY(sirens_fr)) AS n_sanctions
                )
@@ -249,15 +260,21 @@ async def fiche_entreprise(req: Request, siren: str):
                         THEN ROUND((lc.resultat_net::numeric / lc.ca_net) * 100, 1)
                         ELSE NULL
                       END AS marge_pct,
-                      NULL::text AS naf,
-                      NULL::text AS forme_juridique,
-                      NULL::numeric AS capital_social,
-                      l.dept, l.ville, l.region,
+                      o.naf,
+                      o.forme_juridique,
+                      o.capital_social,
+                      o.adresse_code_postal,
+                      EXTRACT(YEAR FROM o.date_immatriculation)::int AS annee_creation,
+                      o.primary_domain, o.has_linkedin_page, o.has_github_org,
+                      o.linkedin_employees, o.digital_presence_score,
+                      COALESCE(LEFT(o.adresse_code_postal, 2), l.dept) AS dept,
+                      l.ville, l.region,
                       h.ca_history, h.exercices,
                       cnt.n_dirigeants, cnt.n_bodacc, cnt.n_sanctions,
                       'actif' AS statut
                FROM last_compte lc
                LEFT JOIN loc l ON true
+               LEFT JOIN osint o ON true
                CROSS JOIN history h
                CROSS JOIN counts cnt""",
             siren,
@@ -272,7 +289,7 @@ async def fiche_entreprise(req: Request, siren: str):
                      n_mandats_actifs, n_mandats_total, sirens_mandats,
                      denominations, roles, is_multi_mandat
               FROM silver.inpi_dirigeants
-              WHERE $1::bpchar = ANY(sirens_mandats)
+              WHERE $1::char(9) = ANY(sirens_mandats)
               ORDER BY n_mandats_actifs DESC NULLS LAST
               LIMIT 10
            )
@@ -318,7 +335,7 @@ async def fiche_entreprise(req: Request, siren: str):
         """WITH top_dirig AS (
               SELECT nom, prenom, sirens_mandats, denominations
               FROM silver.inpi_dirigeants
-              WHERE $1::bpchar = ANY(sirens_mandats)
+              WHERE $1::char(9) = ANY(sirens_mandats)
               ORDER BY n_mandats_actifs DESC NULLS LAST
               LIMIT 3
            ),
@@ -572,7 +589,7 @@ async def network_for_siren(req: Request, siren: str):
     dirigeants = await pool.fetch(
         """SELECT nom, prenom, n_mandats_actifs, sirens_mandats, denominations
            FROM silver.inpi_dirigeants
-           WHERE $1::bpchar = ANY(sirens_mandats)
+           WHERE $1::char(9) = ANY(sirens_mandats)
            ORDER BY n_mandats_actifs DESC NULLS LAST
            LIMIT 5""",
         siren,
