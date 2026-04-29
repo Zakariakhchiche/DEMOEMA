@@ -67,12 +67,34 @@ export function PitchModal({ target, onClose }: { target: Target; onClose: () =>
             })}
           </div>
           {done && (
-            <button className="dem-btn dem-btn-primary" style={{
-              width: "100%", marginTop: 18,
-              justifyContent: "center", padding: 12, fontSize: 13,
-            }}>
-              <Icon name="download" size={13} /> Télécharger PDF (1.2 MB · 5 pages)
-            </button>
+            <>
+              <button
+                className="dem-btn dem-btn-primary"
+                onClick={() => {
+                  // Ouvre le pitch HTML dans un nouvel onglet — la page
+                  // déclenche window.print() automatiquement, l'utilisateur
+                  // fait "Save as PDF" depuis le dialog d'impression.
+                  const url = `/api/datalake/pitch/${target.siren}`;
+                  const w = window.open(url, "_blank", "noopener,noreferrer");
+                  if (!w) {
+                    // Popup bloqué : on tombe sur navigation directe
+                    window.location.href = url;
+                  }
+                }}
+                style={{
+                  width: "100%", marginTop: 18,
+                  justifyContent: "center", padding: 12, fontSize: 13,
+                }}
+              >
+                <Icon name="download" size={13} /> Imprimer / Save as PDF
+              </button>
+              <div style={{
+                marginTop: 8, fontSize: 10.5, color: "var(--text-tertiary)",
+                textAlign: "center",
+              }}>
+                Le navigateur ouvre le dialog d&apos;impression — choisis « Save as PDF »
+              </div>
+            </>
           )}
         </div>
       </div>

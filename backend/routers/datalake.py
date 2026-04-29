@@ -11,7 +11,7 @@ import json
 from typing import Any
 
 import asyncpg
-from fastapi import APIRouter, HTTPException, Path, Query, Request
+from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
 
 from datalake import GOLD_TABLES_WHITELIST
 
@@ -592,6 +592,285 @@ async def fiche_entreprise(req: Request, siren: str):
         "network": [_serialize(n) for n in network],
         "presse": [_serialize(p) for p in presse],
     }
+
+
+@router.get("/pitch/{siren}")
+async def pitch_pdf(req: Request, siren: str):
+    """Génère un pitch PDF imprimable (HTML auto-print). L'utilisateur clique
+    sur le bouton et son navigateur ouvre le dialog print → save as PDF.
+
+    Données live : appelle /fiche en interne pour avoir les mêmes infos que
+    la TargetSheet (financier, dirigeants, signaux, presse, network)."""
+    if not siren.isdigit() or len(siren) != 9:
+        raise HTTPException(status_code=400, detail="SIREN invalide")
+
+    # Fetch la fiche enrichie
+    f = await fiche_entreprise(req, siren)
+    fiche = f["fiche"]
+    dirigeants = f.get("dirigeants", [])
+    signaux = f.get("signaux", [])
+    network = f.get("network", [])
+    presse = f.get("presse", [])
+    red_flags = f.get("red_flags", [])
+
+    def _h(s):
+        return str(s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+    def _fmt_eur(v):
+        if v is None: return "—"
+        try:
+            n = float(v)
+            if abs(n) >= 1e9: return f"{n/1e9:.1f} Md€"
+            if abs(n) >= 1e6: return f"{n/1e6:.1f} M€"
+            if abs(n) >= 1e3: return f"{n/1e3:.0f} k€"
+            return f"{n:.0f} €"
+        except (TypeError, ValueError):
+            return "—"
+
+    deno = _h(fiche.get("denomination") or siren)
+    sigle = _h(fiche.get("sigle") or "")
+    naf = _h(fiche.get("naf") or "—")
+    naf_lib = _h(fiche.get("naf_libelle") or "")
+    forme = _h(fiche.get("forme_juridique") or "—")
+    annee = fiche.get("annee_creation") or "—"
+    ville = _h(fiche.get("ville") or "—")
+    cp = _h(fiche.get("adresse_code_postal") or "")
+    dept = _h(fiche.get("dept") or "")
+    adresse = _h(fiche.get("adresse") or "")
+    ca = _fmt_eur(fiche.get("ca_dernier"))
+    ebitda = _fmt_eur(fiche.get("ebitda_dernier"))
+    capital = _fmt_eur(fiche.get("capital_social"))
+    marge = fiche.get("marge_pct")
+    marge_str = f"{marge}%" if marge is not None else "—"
+    effectif = fiche.get("effectif_exact") or "—"
+    n_etab = fiche.get("n_etablissements")
+    n_etab_str = f"{n_etab} étab. ({fiche.get('n_etablissements_ouverts', 0)} ouverts)" if n_etab else "—"
+    statut = fiche.get("statut", "actif")
+    is_cesse = statut == "cesse"
+    date_fermeture = fiche.get("date_fermeture")
+    n_dirigeants = fiche.get("n_dirigeants", 0)
+    n_bodacc = len(signaux) if signaux else fiche.get("n_bodacc", 0)
+    n_sanctions = fiche.get("n_sanctions", 0)
+    exercices = fiche.get("exercices", [])
+    ca_history = fiche.get("ca_history", [])
+
+    # Score breakdown (même heuristique que rowToTarget)
+    try:
+        ca_n = float(fiche.get("ca_dernier") or 0)
+    except (TypeError, ValueError):
+        ca_n = 0
+    score = min(95, 50 + int(ca_n / 200_000)) if ca_n else 50
+
+    dirigeants_html = "".join(
+        f"""<tr>
+            <td><strong>{_h(d.get('prenom', ''))} {_h(d.get('nom', ''))}</strong></td>
+            <td>{_h(d.get('qualite') or d.get('roles', [''])[0] if d.get('roles') else '')}</td>
+            <td>{_h(d.get('type_dirigeant', 'personne physique'))}</td>
+            <td>{d.get('age') or '—'}</td>
+            <td>{d.get('n_mandats_actifs') or 1} mandats</td>
+        </tr>"""
+        for d in dirigeants[:10]
+    ) or '<tr><td colspan="5" style="color:#888">Aucun dirigeant identifié</td></tr>'
+
+    signaux_html = "".join(
+        f"""<tr>
+            <td>{_h(str(s.get('event_date', ''))[:10])}</td>
+            <td><strong>{_h(s.get('signal_type', ''))}</strong></td>
+            <td>{_h(s.get('severity', ''))}</td>
+            <td>{_h(s.get('source', ''))}</td>
+            <td>{_h(s.get('ville', ''))}{f" ({_h(s.get('code_dept', ''))})" if s.get('code_dept') else ""}</td>
+        </tr>"""
+        for s in signaux[:15]
+    ) or '<tr><td colspan="5" style="color:#888">Aucune annonce BODACC</td></tr>'
+
+    network_html = "".join(
+        f"""<li><strong>{_h(n.get('denomination', ''))}</strong> · siren <code>{_h(n.get('siren', ''))}</code> · <em>{_h(n.get('via_dirigeants', ''))}</em></li>"""
+        for n in network[:15]
+    ) or '<li style="color:#888">Aucun lien réseau</li>'
+
+    presse_html = "".join(
+        f"""<li>
+            <span style="color:#666;font-size:10px">{_h(str(p.get('published_at', ''))[:16])}</span> ·
+            <strong>{_h(p.get('source', ''))}</strong> ·
+            {_h(p.get('title', ''))}
+        </li>"""
+        for p in presse[:10]
+    ) or '<li style="color:#888">Aucun article de presse</li>'
+
+    red_flags_html = "".join(
+        f"""<li style="color:#e11d48">
+            <strong>{_h(r.get('caption', r.get('entity_id', '')))}</strong> ·
+            schema {_h(r.get('schema', ''))} ·
+            {_h(', '.join(r.get('topics', []) if isinstance(r.get('topics'), list) else []))}
+        </li>"""
+        for r in red_flags[:10]
+    ) or '<li style="color:#10b981">✓ Aucun red flag identifié (silver.opensanctions UE/US/UK/UN, ICIJ, PEP)</li>'
+
+    cesse_badge = (
+        f'<span style="background:#fee2e2;color:#b91c1c;padding:3px 10px;border-radius:999px;font-size:10px;font-weight:700;margin-left:10px;letter-spacing:.05em">'
+        f'CESSÉE{f" · {date_fermeture}" if date_fermeture else ""}</span>'
+        if is_cesse else ""
+    )
+
+    # CA history bars
+    ca_bars_html = ""
+    if ca_history and len(ca_history) >= 2:
+        max_ca = max(ca_history)
+        ca_bars_html = f"""
+        <h2>Évolution chiffre d'affaires (5 derniers exercices)</h2>
+        <table class="ca-history">
+          <tr>{''.join(f'<th>{_h(str(e)[:4])}</th>' for e in exercices[-len(ca_history):])}</tr>
+          <tr>{''.join(f'<td><div class="bar" style="height:{int((c/max_ca) * 80)}px"></div><div class="ca-val">{_fmt_eur(c)}</div></td>' for c in ca_history)}</tr>
+        </table>
+        """
+
+    html = f"""<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Pitch Ready — {deno}</title>
+<style>
+  @page {{ size: A4; margin: 12mm 14mm; }}
+  * {{ box-sizing: border-box; }}
+  body {{
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    color: #18181b;
+    line-height: 1.5;
+    font-size: 12px;
+    margin: 0;
+  }}
+  h1 {{ font-size: 24px; margin: 0 0 4px; letter-spacing: -0.02em; font-weight: 700; }}
+  h2 {{ font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: #6366f1; margin: 18px 0 8px; padding-bottom: 4px; border-bottom: 1px solid #e4e4e7; }}
+  .header {{ border-bottom: 2px solid #18181b; padding-bottom: 12px; margin-bottom: 18px; display: flex; align-items: flex-start; gap: 16px; }}
+  .score-circle {{
+    width: 70px; height: 70px; border-radius: 50%;
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white; display: flex; align-items: center; justify-content: center;
+    font-size: 28px; font-weight: 700; flex-shrink: 0;
+  }}
+  .meta-row {{ display: flex; gap: 16px; flex-wrap: wrap; margin-top: 6px; font-size: 11px; color: #52525b; }}
+  .meta-row span {{ white-space: nowrap; }}
+  .kpi-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 14px 0; }}
+  .kpi {{ border: 1px solid #e4e4e7; border-radius: 8px; padding: 10px 12px; }}
+  .kpi-label {{ font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; color: #71717a; font-weight: 600; }}
+  .kpi-val {{ font-size: 18px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }}
+  .kpi-sub {{ font-size: 10px; color: #71717a; margin-top: 2px; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 11px; }}
+  th, td {{ padding: 6px 8px; border-bottom: 1px solid #f3f4f6; text-align: left; }}
+  th {{ background: #f9fafb; font-weight: 600; color: #6b7280; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }}
+  ul {{ margin: 6px 0; padding-left: 18px; }}
+  li {{ margin-bottom: 4px; font-size: 11px; }}
+  code {{ background: #f3f4f6; padding: 1px 4px; border-radius: 3px; font-size: 10px; }}
+  .verdict {{
+    margin-top: 14px; padding: 12px 16px;
+    background: linear-gradient(135deg, #eef2ff, #faf5ff);
+    border-left: 3px solid #6366f1; border-radius: 6px;
+  }}
+  .verdict h3 {{ margin: 0 0 4px; color: #6366f1; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }}
+  .footer {{ margin-top: 24px; padding-top: 12px; border-top: 1px solid #e4e4e7; font-size: 9px; color: #71717a; display: flex; justify-content: space-between; }}
+  .ca-history td {{ vertical-align: bottom; text-align: center; padding: 4px 2px; }}
+  .ca-history .bar {{ background: linear-gradient(180deg, #6366f1, #818cf8); border-radius: 2px 2px 0 0; min-height: 4px; margin: 0 auto; width: 36px; }}
+  .ca-history .ca-val {{ font-size: 9px; color: #52525b; margin-top: 2px; font-variant-numeric: tabular-nums; }}
+  .ca-history th {{ font-size: 9px; text-align: center; }}
+  .source-tag {{
+    display: inline-block; padding: 2px 6px; border-radius: 3px;
+    background: #e0f2fe; color: #0369a1; font-size: 9px; font-weight: 600;
+  }}
+  @media print {{
+    body {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
+    h2 {{ page-break-after: avoid; }}
+    table, ul {{ page-break-inside: avoid; }}
+  }}
+</style>
+</head>
+<body onload="setTimeout(() => window.print(), 350)">
+
+<div class="header">
+  <div class="score-circle">{score}</div>
+  <div style="flex:1">
+    <div style="font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; color: #6366f1; font-weight: 600;">
+      EdRCF Pitch Ready · Cible M&A · NAF {naf}{f" — {naf_lib}" if naf_lib and naf_lib != naf else ""}
+    </div>
+    <h1>{deno} {f'<span style="font-size:16px;color:#71717a;font-weight:500">({sigle})</span>' if sigle else ""} {cesse_badge}</h1>
+    <div class="meta-row">
+      <span><strong>siren</strong> <code>{siren}</code></span>
+      <span><strong>Forme</strong> {forme}</span>
+      <span><strong>Créée en</strong> {annee}</span>
+      <span><strong>Localisation</strong> {ville}{f' · {cp}' if cp else ''}{f' ({dept})' if dept else ''}</span>
+      <span><strong>{n_etab_str}</strong></span>
+    </div>
+    {f'<div style="font-size:10px;color:#71717a;margin-top:4px">📍 {adresse}</div>' if adresse else ''}
+  </div>
+</div>
+
+<div class="kpi-grid">
+  <div class="kpi">
+    <div class="kpi-label">CA dernier exercice</div>
+    <div class="kpi-val">{ca}</div>
+    <div class="kpi-sub">Exercice {str(exercices[-1])[:4] if exercices else '—'}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">EBITDA / Résultat</div>
+    <div class="kpi-val">{ebitda}</div>
+    <div class="kpi-sub">Marge {marge_str}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Effectif</div>
+    <div class="kpi-val">{effectif}</div>
+    <div class="kpi-sub">moyen exercice</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Capital social</div>
+    <div class="kpi-val">{capital}</div>
+    <div class="kpi-sub">{forme}</div>
+  </div>
+</div>
+
+<div class="verdict">
+  <h3>Verdict DEMOEMA</h3>
+  <p style="margin:0">
+    Cible <strong>{'HIGH' if score >= 80 else 'MID-HIGH' if score >= 70 else 'MID'} potentiel</strong> ·
+    Score <strong>{score}/100</strong> — {'tier-1, prioritaire' if score >= 80 else 'tier-1, à qualifier' if score >= 70 else 'tier-2, surveillance'}.
+    {('Attention : société CESSÉE le ' + (date_fermeture or '')) if is_cesse else ''}
+    {('Compliance : ' + str(n_sanctions) + ' red flag(s) OpenSanctions à expliquer en DD.') if n_sanctions else 'Compliance OK (OpenSanctions UE/US/UK/UN, ICIJ, PEP).'}
+  </p>
+</div>
+
+{ca_bars_html}
+
+<h2>Dirigeants ({n_dirigeants})</h2>
+<table>
+  <tr><th>Nom</th><th>Qualité</th><th>Type</th><th>Âge</th><th>Mandats</th></tr>
+  {dirigeants_html}
+</table>
+
+<h2>Réseau (co-mandats / personnes morales liées)</h2>
+<ul>{network_html}</ul>
+
+<h2>Compliance — OpenSanctions</h2>
+<ul>{red_flags_html}</ul>
+
+<h2>Signaux BODACC ({n_bodacc})</h2>
+<table>
+  <tr><th>Date</th><th>Type</th><th>Famille</th><th>Tribunal</th><th>Ville</th></tr>
+  {signaux_html}
+</table>
+
+<h2>Presse — Google News (10 derniers articles)</h2>
+<ul>{presse_html}</ul>
+
+<div class="footer">
+  <div>
+    <strong>EdRCF Pitch Ready</strong> · Document confidentiel · Anne Dupont · siren {siren}<br>
+    Sources : <span class="source-tag">silver.inpi_comptes</span> <span class="source-tag">recherche-entreprises.api.gouv.fr</span> <span class="source-tag">bodacc-datadila</span> <span class="source-tag">silver.opensanctions</span> <span class="source-tag">Google News</span>
+  </div>
+  <div style="text-align:right">Généré le {__import__('datetime').datetime.now().strftime('%d/%m/%Y %H:%M')}</div>
+</div>
+
+</body>
+</html>"""
+
+    return Response(content=html, media_type="text/html; charset=utf-8")
 
 
 @router.get("/dashboard")
