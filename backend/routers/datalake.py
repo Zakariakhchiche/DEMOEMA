@@ -1648,8 +1648,10 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
 
     extra_where = (" AND " + " AND ".join(post_where)) if post_where else ""
 
-    # Skip JOIN osint_companies_enriched (table actuellement bloquée). On
-    # garde inpi_comptes pur + bodacc pour le dept (indexé).
+    # JOIN enrichi : insee_unites_legales (NAF + categorie_juridique) + insee_etablissements
+    # (siège : code_postal + commune + dept) + inpi_dirigeants top1 (PDG/manager M&A).
+    # Cela remplit naf / naf_libelle / forme_juridique / dept / ville / top_dirigeant_*
+    # qui étaient null jusqu'ici (Compare et Chat affichent ces champs).
     sql = f"""
         WITH last_compte AS (
             SELECT DISTINCT ON (c.siren) c.siren, c.denomination,
@@ -1661,24 +1663,57 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
             ORDER BY c.siren, c.date_cloture DESC
             LIMIT {int(limit) * 4}
         ),
-        with_dept AS (
+        enriched AS (
             SELECT lc.*,
+                   ul.code_ape AS naf,
+                   ul.categorie_juridique AS forme_juridique,
+                   ul.date_creation AS date_creation_unite,
+                   et.code_postal AS adresse_code_postal,
+                   et.commune AS ville_etab,
+                   et.code_dept AS dept_etab,
+                   -- Fallback dept/ville depuis bodacc si insee siège manque
                    (SELECT b.code_dept FROM silver.bodacc_annonces b
                     WHERE b.siren = lc.siren AND b.code_dept IS NOT NULL
-                    ORDER BY b.date_parution DESC LIMIT 1) AS dept,
+                    ORDER BY b.date_parution DESC LIMIT 1) AS dept_bodacc,
                    (SELECT b.ville FROM silver.bodacc_annonces b
                     WHERE b.siren = lc.siren AND b.ville IS NOT NULL
-                    ORDER BY b.date_parution DESC LIMIT 1) AS ville
+                    ORDER BY b.date_parution DESC LIMIT 1) AS ville_bodacc,
+                   -- Top dirigeant M&A : plus grand nombre de mandats actifs
+                   td.nom AS td_nom, td.prenom AS td_prenom,
+                   td.age_2026 AS td_age,
+                   td.n_mandats_actifs AS td_mandats,
+                   -- Score M&A naïf : multi-mandat + age 50-65 = pro M&A
+                   CASE
+                     WHEN COALESCE(td.n_mandats_actifs, 0) >= 5 AND COALESCE(td.age_2026, 0) BETWEEN 50 AND 65 THEN 90
+                     WHEN COALESCE(td.n_mandats_actifs, 0) >= 3 AND COALESCE(td.age_2026, 0) >= 55 THEN 75
+                     WHEN COALESCE(td.n_mandats_actifs, 0) >= 1 THEN 60
+                     ELSE 50
+                   END AS td_score
             FROM last_compte lc
+            LEFT JOIN silver.insee_unites_legales ul ON ul.siren = lc.siren
+            LEFT JOIN LATERAL (
+                SELECT code_postal, commune, code_dept
+                FROM silver.insee_etablissements
+                WHERE siren = lc.siren AND etablissement_siege = true
+                LIMIT 1
+            ) et ON true
+            LEFT JOIN LATERAL (
+                SELECT nom, prenom, age_2026, n_mandats_actifs
+                FROM silver.inpi_dirigeants
+                WHERE lc.siren::char(9) = ANY(sirens_mandats)
+                ORDER BY n_mandats_actifs DESC NULLS LAST
+                LIMIT 1
+            ) td ON true
         )
         SELECT siren,
                denomination,
-               NULL::text AS naf,
+               naf,
                NULL::text AS naf_libelle,
-               NULL::text AS forme_juridique,
-               dept,
-               ville,
-               date_cloture AS date_creation,
+               forme_juridique,
+               COALESCE(dept_etab, dept_bodacc) AS dept,
+               COALESCE(ville_etab, ville_bodacc) AS ville,
+               COALESCE(adresse_code_postal, '') AS adresse_code_postal,
+               COALESCE(date_creation_unite, date_cloture) AS date_creation,
                'actif' AS statut,
                ca_net AS ca_dernier,
                resultat_net AS ebitda_dernier,
@@ -1696,8 +1731,15 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
                  SELECT 1 FROM silver.opensanctions os
                  WHERE siren = ANY(os.sirens_fr)
                ) AS has_compliance_red_flag,
-               false AS is_listed
-        FROM with_dept
+               false AS is_listed,
+               -- Top dirigeant exposé pour CompareView et Chat
+               td_nom AS top_dirigeant_nom,
+               td_prenom AS top_dirigeant_prenom,
+               TRIM(COALESCE(td_prenom, '') || ' ' || COALESCE(td_nom, '')) AS top_dirigeant_full_name,
+               td_age AS top_dirigeant_age,
+               td_mandats AS top_dirigeant_n_mandats,
+               td_score AS top_dirigeant_pro_ma_score
+        FROM enriched
         WHERE 1=1 {extra_where}
         ORDER BY {order_sql}
         LIMIT {int(limit)} OFFSET {int(offset)}
