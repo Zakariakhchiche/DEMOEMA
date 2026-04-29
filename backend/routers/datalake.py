@@ -373,24 +373,26 @@ async def dashboard(req: Request):
     datalake. Source 100% silver — zero mock."""
     pool = _pool(req)
 
+    # Cheap KPIs : reltuples (instant) + COUNTs sur petites tables.
+    # On évite COUNT(DISTINCT siren) sur silver.inpi_comptes (6.3M) qui prend
+    # 30+ s sans index dédié.
     kpis = await pool.fetchrow(
         """SELECT
-              (SELECT COUNT(DISTINCT siren) FROM silver.inpi_comptes
-               WHERE ca_net >= 14000000) AS n_cibles_pro_ma,
-              (SELECT COUNT(*) FROM silver.opensanctions
+              (SELECT c.reltuples::bigint FROM pg_class c
+               JOIN pg_namespace n ON n.oid = c.relnamespace
+               WHERE n.nspname = 'silver' AND c.relname = 'inpi_comptes') AS n_comptes_total,
+              (SELECT COUNT(*)::int FROM silver.opensanctions
                WHERE sirens_fr IS NOT NULL AND array_length(sirens_fr, 1) > 0) AS n_red_flags,
-              (SELECT COALESCE(SUM(ca_net), 0)::bigint
-               FROM (
-                 SELECT DISTINCT ON (siren) siren, ca_net
-                 FROM silver.inpi_comptes
-                 WHERE ca_net >= 14000000
-                 ORDER BY siren, date_cloture DESC
-                 LIMIT 50
-               ) top50) AS sigma_top50_ca,
-              (SELECT COUNT(*) FROM silver.bodacc_annonces
+              (SELECT COUNT(*)::int FROM silver.bodacc_annonces
                WHERE date_parution >= CURRENT_DATE - INTERVAL '7 days') AS n_signals_7d,
-              (SELECT COUNT(DISTINCT siren) FROM silver.inpi_comptes
-               WHERE date_cloture >= CURRENT_DATE - INTERVAL '30 days') AS n_qualified_30d"""
+              (SELECT COUNT(*)::int FROM silver.bodacc_annonces
+               WHERE date_parution >= CURRENT_DATE - INTERVAL '30 days') AS n_signals_30d,
+              (SELECT c.reltuples::bigint FROM pg_class c
+               JOIN pg_namespace n ON n.oid = c.relnamespace
+               WHERE n.nspname = 'silver' AND c.relname = 'inpi_dirigeants') AS n_dirigeants_total,
+              (SELECT c.reltuples::bigint FROM pg_class c
+               JOIN pg_namespace n ON n.oid = c.relnamespace
+               WHERE n.nspname = 'silver' AND c.relname = 'osint_companies_enriched') AS n_osint"""
     )
 
     heatmap = await pool.fetch(
@@ -443,9 +445,9 @@ async def dashboard(req: Request):
     top_targets = await _cibles_from_silver(pool, None, None, None, None, "score_ma", 5, 0)
 
     return {
-        "kpis": dict(kpis) if kpis else {},
+        "kpis": _serialize(kpis) if kpis else {},
         "heatmap": [
-            {**dict(r), "label": DEPT_LABELS.get(r["dept"], r["dept"])}
+            {**_serialize(r), "label": DEPT_LABELS.get(r["dept"], r["dept"])}
             for r in heatmap
         ],
         "alerts": [_serialize(a) for a in alerts],

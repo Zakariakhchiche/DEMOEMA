@@ -13,25 +13,29 @@ interface Props {
   onOpenTarget: (t: Target) => void;
 }
 
+type KpiNum = number | string | null | undefined;
+
 interface DashboardData {
   kpis: {
-    n_cibles_pro_ma?: number;
-    n_red_flags?: number;
-    sigma_top50_ca?: number;
-    n_signals_7d?: number;
-    n_qualified_30d?: number;
+    n_comptes_total?: KpiNum;
+    n_red_flags?: KpiNum;
+    n_signals_7d?: KpiNum;
+    n_signals_30d?: KpiNum;
+    n_dirigeants_total?: KpiNum;
+    n_osint?: KpiNum;
   };
   heatmap: { dept: string; count: number; label: string }[];
   alerts: Record<string, unknown>[];
   top_targets: Record<string, unknown>[];
 }
 
-function fmtBigEur(n: number | undefined): string {
-  if (n == null) return "—";
-  if (n >= 1e12) return `${(n / 1e12).toFixed(1)} Bn€`;
-  if (n >= 1e9) return `${(n / 1e9).toFixed(0)} Md€`;
-  if (n >= 1e6) return `${(n / 1e6).toFixed(0)} M€`;
-  return n.toLocaleString("fr-FR") + " €";
+function fmtNum(v: number | string | null | undefined): string {
+  if (v == null || v === "") return "—";
+  const n = Number(v);
+  if (isNaN(n)) return "—";
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(0)}k`;
+  return n.toLocaleString("fr-FR");
 }
 
 function severityFor(family: unknown): "high" | "med" | "low" {
@@ -67,7 +71,7 @@ export function DashboardView({ onMode, onOpenTarget }: Props) {
         </div>
         <div style={{ fontSize: 13, color: "var(--text-tertiary)" }}>
           {data?.kpis.n_signals_7d != null
-            ? `${data.kpis.n_signals_7d.toLocaleString("fr-FR")} nouveaux signaux BODACC sur 7 jours · datalake live`
+            ? `${fmtNum(data.kpis.n_signals_7d)} signaux BODACC sur 7 jours · datalake live`
             : error
             ? `Datalake indisponible : ${error}`
             : "Chargement live…"}
@@ -76,28 +80,28 @@ export function DashboardView({ onMode, onOpenTarget }: Props) {
         <div style={{ marginTop: 22, display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
           {[
             {
-              label: "Cibles Pro M&A (CA ≥ 14M€)",
-              value: data?.kpis.n_cibles_pro_ma?.toLocaleString("fr-FR") ?? "…",
-              delta: "INPI live",
+              label: "Comptes annuels INPI",
+              value: fmtNum(data?.kpis.n_comptes_total),
+              delta: "silver.inpi_comptes",
               color: "var(--accent-blue)",
             },
             {
+              label: "Dirigeants INPI",
+              value: fmtNum(data?.kpis.n_dirigeants_total),
+              delta: "silver.inpi_dirigeants",
+              color: "var(--accent-purple)",
+            },
+            {
               label: "Red flags compliance",
-              value: data?.kpis.n_red_flags?.toLocaleString("fr-FR") ?? "…",
-              delta: "OpenSanctions",
+              value: fmtNum(data?.kpis.n_red_flags),
+              delta: "silver.opensanctions",
               color: "var(--accent-rose)",
             },
             {
-              label: "Σ Top-50 CA",
-              value: fmtBigEur(data?.kpis.sigma_top50_ca),
-              delta: "INPI comptes",
+              label: "Annonces BODACC 30j",
+              value: fmtNum(data?.kpis.n_signals_30d),
+              delta: `dont ${fmtNum(data?.kpis.n_signals_7d)} sur 7j`,
               color: "var(--accent-emerald)",
-            },
-            {
-              label: "Cibles qualifiées (30j)",
-              value: data?.kpis.n_qualified_30d?.toLocaleString("fr-FR") ?? "…",
-              delta: "exercices déposés 30j",
-              color: "var(--accent-purple)",
             },
           ].map((k, i) => (
             <div
