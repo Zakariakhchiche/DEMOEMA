@@ -202,18 +202,27 @@ async def fiche_entreprise(req: Request, siren: str):
             "SELECT * FROM gold.entreprises_master WHERE siren = $1", siren
         )
     if not fiche:
-        # Fallback silver — JOIN unites_legales + dernier exercice INPI
         fiche = await pool.fetchrow(
-            """SELECT u.*,
-                      c.chiffre_affaires AS ca_dernier,
+            """SELECT u.siren,
+                      u.denomination_unite AS denomination,
+                      u.sigle,
+                      u.code_ape AS naf,
+                      u.categorie_juridique AS forme_juridique,
+                      u.categorie_entreprise,
+                      u.tranche_effectifs AS effectif_tranche,
+                      u.date_creation,
+                      u.date_derniere_maj,
+                      u.etat_administratif,
+                      c.ca_net AS ca_dernier,
                       c.resultat_net AS ebitda_dernier,
-                      c.exercice AS date_derniers_comptes,
-                      c.effectif_moyen AS effectif_exact
+                      c.capitaux_propres,
+                      c.effectif_moyen::int AS effectif_exact,
+                      c.date_cloture AS date_derniers_comptes
                FROM silver.insee_unites_legales u
                LEFT JOIN LATERAL (
-                 SELECT chiffre_affaires, resultat_net, effectif_moyen, exercice
+                 SELECT ca_net, resultat_net, capitaux_propres, effectif_moyen, date_cloture
                  FROM silver.inpi_comptes WHERE siren = u.siren
-                 ORDER BY exercice DESC LIMIT 1
+                 ORDER BY date_cloture DESC LIMIT 1
                ) c ON true
                WHERE u.siren = $1""",
             siren,
@@ -232,10 +241,13 @@ async def fiche_entreprise(req: Request, siren: str):
         )
     elif await _table_exists(pool, "silver", "inpi_dirigeants"):
         dirigeants = await pool.fetch(
-            """SELECT nom, prenom, qualite, date_naissance, nationalite
+            """SELECT nom, prenom, date_naissance,
+                      n_mandats_actifs AS n_mandats,
+                      age_2026 AS age,
+                      roles
                FROM silver.inpi_dirigeants
-               WHERE siren = $1
-               ORDER BY date_naissance NULLS LAST
+               WHERE $1::bpchar = ANY(sirens_mandats)
+               ORDER BY n_mandats_actifs DESC NULLS LAST
                LIMIT 10""",
             siren,
         )
@@ -245,11 +257,13 @@ async def fiche_entreprise(req: Request, siren: str):
     signaux = []
     if await _table_exists(pool, "silver", "bodacc_annonces"):
         signaux = await pool.fetch(
-            """SELECT dateparution AS event_date, type_annonce AS signal_type,
-                      tribunal AS source, denomination
+            """SELECT date_parution AS event_date,
+                      typeavis_lib AS signal_type,
+                      familleavis_lib AS severity,
+                      tribunal AS source
                FROM silver.bodacc_annonces
                WHERE siren = $1
-               ORDER BY dateparution DESC
+               ORDER BY date_parution DESC
                LIMIT 10""",
             siren,
         )
@@ -380,8 +394,15 @@ async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_r
 
 async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset):
     """Fallback : JOIN silver.insee_unites_legales (29M) + silver.inpi_comptes (6M)
-    pour synthétiser une vue cible M&A en attendant que gold.entreprises_master
-    soit produit. Score M&A approx = 50 + (CA / 200K€), capé à 95."""
+    pour synthétiser une vue cible M&A en attendant gold.entreprises_master.
+    Score M&A approx = 50 + (CA_NET / 200K€), capé à 95.
+
+    Colonnes réelles vérifiées via /api/datalake/_introspect :
+    - silver.insee_unites_legales : siren, denomination_unite, code_ape,
+      categorie_juridique, tranche_effectifs, etat_administratif, date_creation
+    - silver.inpi_comptes : siren, ca_net, resultat_net, capitaux_propres,
+      effectif_moyen, date_cloture
+    """
     where: list[str] = ["u.etat_administratif = 'A'"]
     params: list[Any] = []
     if q:
@@ -390,57 +411,48 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
             where.append(f"u.siren = ${len(params)}")
         else:
             params.append(f"%{q}%")
-            where.append(f"u.denomination ILIKE ${len(params)}")
-    if dept:
-        # dépt encodé sur les 2-3 premiers chars du code commune INSEE — on fait
-        # un best-effort via insee_etablissements (siège). Coûteux donc on
-        # squeeze sauf si dept fourni.
-        params.append(dept + "%")
-        where.append(
-            f"u.siren IN (SELECT DISTINCT siren FROM silver.insee_etablissements "
-            f"WHERE etablissement_siege = true AND code_commune ILIKE ${len(params)} LIMIT 5000)"
-        )
+            where.append(f"u.denomination_unite ILIKE ${len(params)}")
     if naf:
         params.append(f"{naf}%")
-        where.append(f"u.naf ILIKE ${len(params)}")
+        where.append(f"u.code_ape ILIKE ${len(params)}")
     if min_score is not None:
-        # On ne peut pas filtrer sur le score calculé sans subquery — on filtre
-        # sur le CA approximativement.
         approx_ca = max(0, (min_score - 50) * 200_000)
         params.append(approx_ca)
-        where.append(f"COALESCE(c.chiffre_affaires, 0) >= ${len(params)}")
+        where.append(f"COALESCE(c.ca_net, 0) >= ${len(params)}")
+    # dept filter: skipped en silver fallback (coûteux) — sera dispo en gold.
 
     order_sql = {
-        "score_ma": "COALESCE(c.chiffre_affaires, 0) DESC NULLS LAST",
-        "ca_dernier": "c.chiffre_affaires DESC NULLS LAST",
+        "score_ma": "COALESCE(c.ca_net, 0) DESC NULLS LAST",
+        "ca_dernier": "c.ca_net DESC NULLS LAST",
         "date_creation": "u.date_creation DESC NULLS LAST",
     }[sort]
 
     sql = f"""
         SELECT u.siren,
-               u.denomination,
-               u.naf,
-               u.naf,
-               '' AS naf_libelle,
-               u.tranche_effectif_unite_legale AS effectif_tranche,
+               u.denomination_unite AS denomination,
+               u.code_ape AS naf,
+               u.code_ape AS naf_libelle,
+               u.categorie_juridique AS forme_juridique,
+               u.tranche_effectifs AS effectif_tranche,
                u.date_creation,
                u.etat_administratif,
-               c.chiffre_affaires AS ca_dernier,
+               c.ca_net AS ca_dernier,
                c.resultat_net AS ebitda_dernier,
-               c.exercice AS date_derniers_comptes,
-               c.effectif_moyen AS effectif_exact,
-               LEAST(95, 50 + (COALESCE(c.chiffre_affaires, 0) / 200000)::int) AS score_ma,
-               (COALESCE(c.chiffre_affaires, 0) >= 14000000) AS is_pro_ma,
+               c.date_cloture AS date_derniers_comptes,
+               c.effectif_moyen::int AS effectif_exact,
+               c.capitaux_propres,
+               LEAST(95, 50 + (COALESCE(c.ca_net, 0) / 200000)::int) AS score_ma,
+               (COALESCE(c.ca_net, 0) >= 14000000) AS is_pro_ma,
                false AS is_asset_rich,
                false AS has_compliance_red_flag,
                false AS is_listed,
                'actif' AS statut
         FROM silver.insee_unites_legales u
         LEFT JOIN LATERAL (
-            SELECT chiffre_affaires, resultat_net, effectif_moyen, exercice
+            SELECT ca_net, resultat_net, capitaux_propres, effectif_moyen, date_cloture
             FROM silver.inpi_comptes
             WHERE siren = u.siren
-            ORDER BY exercice DESC
+            ORDER BY date_cloture DESC
             LIMIT 1
         ) c ON true
         WHERE {' AND '.join(where)}

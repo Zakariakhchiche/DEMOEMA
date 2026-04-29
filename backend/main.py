@@ -114,23 +114,37 @@ async def lifespan(app):
         # ne pas bloquer l'event loop (audit PERF-3)
         await asyncio.to_thread(_load_targets_sync)
 
-    # 3. Last resort: fetch companies from free gov APIs (200 target)
-    if not enriched_targets:
+    # 3. Last resort: fetch companies from free gov APIs (200 targets) — runs
+    # IN BACKGROUND post-yield pour ne pas bloquer le boot du serveur HTTP.
+    # Avant : 5+ min de Papperclip avant que /api/health réponde.
+    async def _papperclip_warmup():
+        global enriched_targets, raw_targets
+        if enriched_targets:
+            return
         try:
             fetched = await load_targets_from_papperclip(count=200)
             if fetched:
-                # save_cache est sync (json.dump) — wrap pour ne pas bloquer
                 await asyncio.to_thread(save_cache, fetched)
                 await save_to_supabase(fetched)
                 raw_targets = fetched
                 enriched_targets = [enrich_target(c) for c in fetched]
-                print(f"[EdRCF] Loaded {len(enriched_targets)} targets from Papperclip")
+                print(f"[EdRCF] Background warmup loaded {len(enriched_targets)} targets")
         except Exception as e:
-            print(f"[EdRCF] Papperclip fetch failed: {e}")
+            print(f"[EdRCF] Background Papperclip warmup failed: {e}")
+
+    warmup_task = None
+    if not enriched_targets:
+        warmup_task = asyncio.create_task(_papperclip_warmup())
 
     try:
         yield
     finally:
+        # Cleanup background warmup task
+        try:
+            if warmup_task and not warmup_task.done():
+                warmup_task.cancel()
+        except Exception:
+            pass
         # Cleanup pool httpx au shutdown
         try:
             await app.state.http.aclose()
