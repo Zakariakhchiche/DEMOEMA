@@ -202,68 +202,158 @@ async def fiche_entreprise(req: Request, siren: str):
             "SELECT * FROM gold.entreprises_master WHERE siren = $1", siren
         )
     if not fiche:
-        # Fallback inpi_comptes : seul à porter denomination + finance peuplées
+        # Fallback : JOIN inpi_comptes (CA/EBITDA) + osint_companies (NAF/dept/forme)
+        # + meta-stats agrégées (n_dirigeants/n_signaux/n_sanctions).
         fiche = await pool.fetchrow(
-            """SELECT DISTINCT ON (siren)
-                   siren, denomination,
-                   ca_net AS ca_dernier,
-                   resultat_net AS ebitda_dernier,
-                   capitaux_propres,
-                   effectif_moyen::int AS effectif_exact,
-                   date_cloture AS date_derniers_comptes,
-                   'actif' AS statut
-               FROM silver.inpi_comptes
-               WHERE siren = $1
-               ORDER BY siren, date_cloture DESC""",
+            """WITH last_compte AS (
+                  SELECT DISTINCT ON (siren) siren, denomination,
+                         ca_net, resultat_net, capitaux_propres,
+                         effectif_moyen::int AS effectif_exact,
+                         date_cloture
+                  FROM silver.inpi_comptes
+                  WHERE siren = $1
+                  ORDER BY siren, date_cloture DESC
+               ),
+               history AS (
+                  SELECT array_agg(ca_net::float8 ORDER BY date_cloture) FILTER (WHERE ca_net IS NOT NULL) AS ca_history,
+                         array_agg(date_cloture ORDER BY date_cloture) FILTER (WHERE ca_net IS NOT NULL) AS exercices
+                  FROM (
+                      SELECT DISTINCT ON (date_cloture) date_cloture, ca_net
+                      FROM silver.inpi_comptes
+                      WHERE siren = $1
+                      ORDER BY date_cloture DESC
+                      LIMIT 5
+                  ) h
+               ),
+               osint AS (
+                  SELECT siren, code_ape AS naf,
+                         forme_juridique, montant_capital AS capital_social,
+                         adresse_code_postal, date_immatriculation,
+                         denomination AS osint_denomination,
+                         primary_domain, has_linkedin_page, has_github_org,
+                         linkedin_employees, digital_presence_score
+                  FROM silver.osint_companies_enriched
+                  WHERE siren = $1
+               ),
+               counts AS (
+                  SELECT
+                    (SELECT COUNT(*)::int FROM silver.inpi_dirigeants WHERE $1::bpchar = ANY(sirens_mandats)) AS n_dirigeants,
+                    (SELECT COUNT(*)::int FROM silver.bodacc_annonces WHERE siren = $1) AS n_bodacc,
+                    (SELECT COUNT(*)::int FROM silver.opensanctions WHERE $1 = ANY(sirens_fr)) AS n_sanctions
+               )
+               SELECT lc.siren,
+                      COALESCE(lc.denomination, o.osint_denomination) AS denomination,
+                      lc.ca_net AS ca_dernier,
+                      lc.resultat_net AS ebitda_dernier,
+                      lc.capitaux_propres,
+                      lc.effectif_exact,
+                      lc.date_cloture AS date_derniers_comptes,
+                      CASE
+                        WHEN lc.ca_net IS NOT NULL AND lc.ca_net > 0 AND lc.resultat_net IS NOT NULL
+                        THEN ROUND((lc.resultat_net::numeric / lc.ca_net) * 100, 1)
+                        ELSE NULL
+                      END AS marge_pct,
+                      o.naf,
+                      o.forme_juridique,
+                      o.capital_social,
+                      o.adresse_code_postal,
+                      LEFT(o.adresse_code_postal, 2) AS dept,
+                      EXTRACT(YEAR FROM o.date_immatriculation)::int AS annee_creation,
+                      o.primary_domain, o.has_linkedin_page, o.has_github_org,
+                      o.linkedin_employees, o.digital_presence_score,
+                      h.ca_history, h.exercices,
+                      cnt.n_dirigeants, cnt.n_bodacc, cnt.n_sanctions,
+                      'actif' AS statut
+               FROM last_compte lc
+               LEFT JOIN osint o ON o.siren = lc.siren
+               CROSS JOIN history h
+               CROSS JOIN counts cnt""",
             siren,
         )
     if not fiche:
         raise HTTPException(status_code=404, detail=f"SIREN {siren} introuvable")
 
-    if await _table_exists(pool, "gold", "dirigeants_master"):
-        dirigeants = await pool.fetch(
-            """SELECT person_id, nom, prenom, qualite, age, n_mandats, score_decideur
-               FROM gold.dirigeants_master
-               WHERE siren_companies @> ARRAY[$1]::text[] OR siren = $1
-               ORDER BY score_decideur DESC NULLS LAST
-               LIMIT 5""",
-            siren,
-        )
-    elif await _table_exists(pool, "silver", "inpi_dirigeants"):
-        dirigeants = await pool.fetch(
-            """SELECT nom, prenom, date_naissance,
-                      n_mandats_actifs AS n_mandats,
-                      age_2026 AS age,
-                      roles
-               FROM silver.inpi_dirigeants
-               WHERE $1::bpchar = ANY(sirens_mandats)
-               ORDER BY n_mandats_actifs DESC NULLS LAST
-               LIMIT 10""",
-            siren,
-        )
-    else:
-        dirigeants = []
+    # Dirigeants détaillés — top 10 par mandats actifs, joint avec patrimoine SCI
+    dirigeants = await pool.fetch(
+        """WITH dirig AS (
+              SELECT nom, prenom, date_naissance, age_2026 AS age,
+                     n_mandats_actifs, n_mandats_total, sirens_mandats,
+                     denominations, roles, is_multi_mandat
+              FROM silver.inpi_dirigeants
+              WHERE $1::bpchar = ANY(sirens_mandats)
+              ORDER BY n_mandats_actifs DESC NULLS LAST
+              LIMIT 10
+           )
+           SELECT d.*,
+                  sci.n_sci, sci.total_capital_sci, sci.sci_denominations,
+                  os.has_linkedin, os.has_github, os.n_total_social,
+                  EXISTS(SELECT 1 FROM silver.opensanctions s
+                         WHERE LOWER(s.name) LIKE '%' || LOWER(d.nom) || '%') AS is_sanctioned
+           FROM dirig d
+           LEFT JOIN silver.dirigeant_sci_patrimoine sci
+                  ON sci.nom = d.nom AND sci.prenom = d.prenom
+           LEFT JOIN silver.osint_persons_enriched os
+                  ON os.nom = d.nom AND $1 = os.siren_main""",
+        siren,
+    )
 
-    signaux = []
-    if await _table_exists(pool, "silver", "bodacc_annonces"):
-        signaux = await pool.fetch(
-            """SELECT date_parution AS event_date,
-                      typeavis_lib AS signal_type,
-                      familleavis_lib AS severity,
-                      tribunal AS source
-               FROM silver.bodacc_annonces
-               WHERE siren = $1
-               ORDER BY date_parution DESC
-               LIMIT 10""",
-            siren,
-        )
+    # Signaux M&A — BODACC (annonces commerciales)
+    signaux = await pool.fetch(
+        """SELECT date_parution AS event_date,
+                  typeavis_lib AS signal_type,
+                  familleavis_lib AS severity,
+                  tribunal AS source,
+                  ville, departement, code_dept,
+                  jugement_details, depot_details
+           FROM silver.bodacc_annonces
+           WHERE siren = $1
+           ORDER BY date_parution DESC
+           LIMIT 20""",
+        siren,
+    ) if await _table_exists(pool, "silver", "bodacc_annonces") else []
 
+    # Compliance — OpenSanctions match par siren_fr
+    red_flags = await pool.fetch(
+        """SELECT entity_id, caption, schema, topics, countries,
+                  sanctions_programs, first_seen, last_seen
+           FROM silver.opensanctions
+           WHERE $1 = ANY(sirens_fr)""",
+        siren,
+    ) if await _table_exists(pool, "silver", "opensanctions") else []
+
+    # Réseau — co-mandats : autres sirens des dirigeants principaux
+    network = await pool.fetch(
+        """WITH top_dirig AS (
+              SELECT nom, prenom, sirens_mandats, denominations
+              FROM silver.inpi_dirigeants
+              WHERE $1::bpchar = ANY(sirens_mandats)
+              ORDER BY n_mandats_actifs DESC NULLS LAST
+              LIMIT 3
+           ),
+           expanded AS (
+              SELECT d.nom, d.prenom,
+                     unnest(d.sirens_mandats) AS other_siren,
+                     unnest(d.denominations) AS other_deno
+              FROM top_dirig d
+           )
+           SELECT DISTINCT other_siren AS siren,
+                  other_deno AS denomination,
+                  string_agg(DISTINCT prenom || ' ' || nom, ', ') AS via_dirigeants
+           FROM expanded
+           WHERE other_siren != $1::bpchar AND other_siren IS NOT NULL
+           GROUP BY other_siren, other_deno
+           ORDER BY other_deno
+           LIMIT 20""",
+        siren,
+    ) if await _table_exists(pool, "silver", "inpi_dirigeants") else []
+
+    # Presse matchée
     presse = await pool.fetch(
         """SELECT published_at, source, title, url, ma_signal_type
            FROM silver.press_mentions_matched
            WHERE siren = $1
            ORDER BY published_at DESC
-           LIMIT 5""",
+           LIMIT 10""",
         siren,
     ) if await _table_exists(pool, "silver", "press_mentions_matched") else []
 
@@ -271,6 +361,8 @@ async def fiche_entreprise(req: Request, siren: str):
         "fiche": _serialize(fiche),
         "dirigeants": [_serialize(d) for d in dirigeants],
         "signaux": [_serialize(s) for s in signaux],
+        "red_flags": [_serialize(r) for r in red_flags],
+        "network": [_serialize(n) for n in network],
         "presse": [_serialize(p) for p in presse],
     }
 
@@ -383,10 +475,16 @@ async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_r
 
 
 async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset):
-    """Fallback : silver.inpi_comptes (6M, denominations + CA peuplés). Note
-    technique : silver.insee_unites_legales a 29M rows mais les colonnes
-    descriptives sont quasi-vides — on skip ce join. INPI suffit pour cibles
-    M&A puisqu'il porte denomination + ca_net + résultat + capitaux."""
+    """Fallback : JOIN silver.inpi_comptes (CA, EBITDA, capitaux, effectif) +
+    silver.osint_companies_enriched (NAF code_ape + dept code_postal + forme).
+    Pré-filter ca_net pour speed (sinon scan 6M lignes).
+
+    Colonnes utilisées (vérifiées via _introspect) :
+    - inpi_comptes : siren, denomination, ca_net, resultat_net, capitaux_propres,
+      effectif_moyen, date_cloture
+    - osint_companies_enriched : siren, code_ape, adresse_code_postal,
+      forme_juridique, date_immatriculation, denomination
+    """
     ca_min = max(0, (min_score - 50) * 200_000) if min_score is not None else 0
     where: list[str] = [f"c.ca_net >= {int(ca_min)}"]
     params: list[Any] = []
@@ -398,11 +496,22 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
             params.append(f"%{q}%")
             where.append(f"c.denomination ILIKE ${len(params)}")
 
+    # Filtres NAF / dept appliqués sur le résultat enrichi (osint)
+    post_where: list[str] = []
+    if naf:
+        params.append(f"{naf}%")
+        post_where.append(f"e.code_ape ILIKE ${len(params)}")
+    if dept:
+        params.append(f"{dept}%")
+        post_where.append(f"e.adresse_code_postal ILIKE ${len(params)}")
+
     order_sql = {
-        "score_ma": "ca_net DESC NULLS LAST",
-        "ca_dernier": "ca_net DESC NULLS LAST",
-        "date_creation": "date_cloture DESC NULLS LAST",
+        "score_ma": "lc.ca_net DESC NULLS LAST",
+        "ca_dernier": "lc.ca_net DESC NULLS LAST",
+        "date_creation": "lc.date_cloture DESC NULLS LAST",
     }[sort]
+
+    extra_where = (" AND " + " AND ".join(post_where)) if post_where else ""
 
     sql = f"""
         WITH last_compte AS (
@@ -413,26 +522,38 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
             FROM silver.inpi_comptes c
             WHERE {' AND '.join(where)}
             ORDER BY c.siren, c.date_cloture DESC
+            LIMIT {int(limit) * 4}
         )
-        SELECT siren,
-               denomination,
-               NULL::text AS naf,
-               NULL::text AS naf_libelle,
-               NULL::text AS forme_juridique,
-               NULL::text AS effectif_tranche,
-               date_cloture AS date_creation,
+        SELECT lc.siren,
+               COALESCE(lc.denomination, e.denomination) AS denomination,
+               e.code_ape AS naf,
+               COALESCE(e.code_ape, '') AS naf_libelle,
+               e.forme_juridique,
+               LEFT(e.adresse_code_postal, 2) AS dept,
+               e.adresse_code_postal,
+               EXTRACT(YEAR FROM e.date_immatriculation)::text AS date_creation,
                'actif' AS statut,
-               ca_net AS ca_dernier,
-               resultat_net AS ebitda_dernier,
-               date_cloture AS date_derniers_comptes,
-               effectif_moyen::int AS effectif_exact,
-               capitaux_propres,
-               LEAST(95, 50 + (COALESCE(ca_net, 0) / 200000)::int) AS score_ma,
-               (COALESCE(ca_net, 0) >= 14000000) AS is_pro_ma,
+               lc.ca_net AS ca_dernier,
+               lc.resultat_net AS ebitda_dernier,
+               lc.date_cloture AS date_derniers_comptes,
+               lc.effectif_moyen::int AS effectif_exact,
+               lc.capitaux_propres,
+               CASE
+                 WHEN lc.ca_net IS NULL THEN 0
+                 WHEN lc.resultat_net IS NULL THEN 0
+                 ELSE ROUND((lc.resultat_net::numeric / NULLIF(lc.ca_net, 0)) * 100, 1)
+               END AS marge_pct,
+               LEAST(95, 50 + (COALESCE(lc.ca_net, 0) / 200000)::int) AS score_ma,
+               (COALESCE(lc.ca_net, 0) >= 14000000) AS is_pro_ma,
                false AS is_asset_rich,
-               false AS has_compliance_red_flag,
+               EXISTS(
+                 SELECT 1 FROM silver.opensanctions os
+                 WHERE lc.siren = ANY(os.sirens_fr)
+               ) AS has_compliance_red_flag,
                false AS is_listed
-        FROM last_compte
+        FROM last_compte lc
+        LEFT JOIN silver.osint_companies_enriched e ON e.siren = lc.siren
+        WHERE 1=1 {extra_where}
         ORDER BY {order_sql}
         LIMIT {int(limit)} OFFSET {int(offset)}
     """
