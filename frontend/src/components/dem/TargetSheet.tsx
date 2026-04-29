@@ -47,6 +47,137 @@ function fmtDate(v: unknown): string {
   return d.toLocaleDateString("fr-FR");
 }
 
+// Codes catégories juridiques INSEE — référentiel officiel (top 50 utilisés en France)
+const CATEGORIES_JURIDIQUES: Record<string, string> = {
+  "1000": "Entrepreneur individuel",
+  "1100": "Commerçant",
+  "1200": "Artisan-commerçant",
+  "1300": "Artisan",
+  "1400": "Officier public ou ministériel",
+  "1500": "Profession libérale",
+  "1600": "Exploitant agricole",
+  "1700": "Agent commercial",
+  "1800": "Associé gérant de société",
+  "1900": "(Autre) personne physique",
+  "5202": "SNC",
+  "5306": "SCS",
+  "5310": "SCA",
+  "5410": "SARL nationale",
+  "5415": "SARL d'économie mixte",
+  "5422": "SARL coopérative agricole",
+  "5426": "SARL coopérative artisanale",
+  "5430": "SARL coopérative",
+  "5460": "SARL d'attribution",
+  "5485": "SARL coopérative",
+  "5498": "SARL unipersonnelle (EURL)",
+  "5499": "SARL",
+  "5505": "SA à participation ouvrière à conseil d'administration",
+  "5510": "SA nationale à conseil d'administration",
+  "5515": "SA d'économie mixte à conseil d'administration",
+  "5520": "Fonds à forme sociale",
+  "5522": "SA coopérative de banque populaire",
+  "5525": "SA coopérative de crédit",
+  "5530": "SA d'HLM à conseil d'administration",
+  "5531": "SA coopérative de production d'HLM à conseil d'administration",
+  "5532": "SA coopérative d'intérêt collectif d'HLM à conseil d'administration",
+  "5542": "SA coopérative agricole à conseil d'administration",
+  "5546": "SA coopérative artisanale à conseil d'administration",
+  "5547": "SA coopérative (Banque populaire) à conseil d'administration",
+  "5548": "SA coopérative ouvrière de production",
+  "5551": "SA d'union de coopératives à conseil d'administration",
+  "5559": "SA coopérative de consommation",
+  "5560": "Autre SA à conseil d'administration",
+  "5585": "SA d'attribution à conseil d'administration",
+  "5599": "SA à conseil d'administration",
+  "5605": "SA à participation ouvrière à directoire",
+  "5610": "SA nationale à directoire",
+  "5615": "SA d'économie mixte à directoire",
+  "5625": "SA coopérative de banque populaire à directoire",
+  "5630": "SA d'HLM à directoire",
+  "5642": "SA coopérative agricole à directoire",
+  "5651": "SA d'union de coopératives à directoire",
+  "5660": "Autre SA à directoire",
+  "5685": "SA d'attribution à directoire",
+  "5699": "SA à directoire",
+  "5710": "SAS (Société par Actions Simplifiée)",
+  "5720": "SAS unipersonnelle (SASU)",
+  "5800": "SE (Société européenne)",
+  "6100": "Caisse d'épargne et de prévoyance",
+  "6210": "GEIE",
+  "6220": "GIE",
+  "6316": "Coopérative d'utilisation de matériel agricole",
+  "6317": "Société coopérative agricole",
+  "6318": "Union de sociétés coopératives agricoles",
+  "6411": "Société d'assurance à forme mutuelle",
+  "6511": "SICAV à conseil d'administration",
+  "6532": "SCPI",
+  "6533": "Société civile coopérative d'intérêt collectif agricole",
+  "6534": "GAEC partiel",
+  "6535": "GAEC total",
+  "6536": "GAEC",
+  "6537": "GAEC",
+  "6539": "Autre groupement agricole",
+  "6540": "SCM (société civile de moyens)",
+  "6541": "SCP (société civile professionnelle)",
+  "6542": "SCI (société civile immobilière)",
+  "6543": "SCI de construction-vente",
+  "6544": "Société civile d'attribution",
+  "6551": "Société civile coopérative de consommation",
+  "6554": "Société civile coopérative entre médecins",
+  "6558": "Société civile coopérative d'intérêt général",
+  "6560": "Autre société civile",
+  "6561": "SC d'exploitation agricole",
+  "6566": "Société d'épargne forestière",
+  "6567": "Société de placement à prépondérance immobilière à capital variable",
+  "6568": "Société interprofessionnelle de soins ambulatoires",
+  "6569": "Société pluri-professionnelle d'exercice",
+  "6585": "Société civile de portefeuille",
+  "6588": "Société civile laitière",
+  "6589": "Société civile fiduciaire",
+  "6591": "SCEA",
+  "6592": "SCM (société civile de moyens)",
+  "6593": "SCI (société civile immobilière)",
+  "6594": "Société civile d'attribution",
+  "6595": "Société civile coopérative",
+  "6596": "Société de financement",
+  "6597": "Société civile de Placement Collectif Immobilier",
+  "6598": "Société civile",
+  "6599": "Autre Société civile",
+  "9220": "Association déclarée",
+  "9230": "Association non déclarée",
+  "9240": "Association non déclarée d'utilité publique",
+  "9260": "Association déclarée 'entreprise d'insertion par l'économique'",
+  "9300": "Fondation",
+};
+
+// Tranches d'effectif INSEE
+const TRANCHES_EFFECTIFS: Record<string, string> = {
+  "NN": "Non employeur ou inconnu",
+  "00": "0 salarié",
+  "01": "1 ou 2 salariés",
+  "02": "3 à 5 salariés",
+  "03": "6 à 9 salariés",
+  "11": "10 à 19 salariés",
+  "12": "20 à 49 salariés",
+  "21": "50 à 99 salariés",
+  "22": "100 à 199 salariés",
+  "31": "200 à 249 salariés",
+  "32": "250 à 499 salariés",
+  "41": "500 à 999 salariés",
+  "42": "1 000 à 1 999 salariés",
+  "51": "2 000 à 4 999 salariés",
+  "52": "5 000 à 9 999 salariés",
+  "53": "10 000 salariés et plus",
+};
+
+function trancheLabel(code: string): string {
+  return TRANCHES_EFFECTIFS[code] || `Tranche ${code}`;
+}
+
+function formeJuridiqueLabel(code: string): string {
+  return CATEGORIES_JURIDIQUES[code] || `Code ${code}`;
+}
+
 function BarChart({ data, labels }: { data: number[]; labels: string[] }) {
   if (data.length === 0) return null;
   const max = Math.max(...data, 1);
@@ -97,7 +228,8 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
   const naf = String(fiche.naf || target.naf || "—");
   const nafLib = String(fiche.naf_libelle || target.naf_label || naf);
   const dept = String(fiche.dept || target.dept || "");
-  const forme = String(fiche.forme_juridique || target.forme || "");
+  const formeRaw = String(fiche.forme_juridique || target.forme || "");
+  const forme = formeRaw ? formeJuridiqueLabel(formeRaw) : "";
   const annee = fiche.annee_creation ? String(fiche.annee_creation) : target.creation;
   const ca = fiche.ca_dernier ?? target.ca;
   const ebitda = fiche.ebitda_dernier ?? target.ebitda;
@@ -159,10 +291,10 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
               color: "var(--text-secondary)", flexWrap: "wrap", alignItems: "center",
             }}>
               <span className="dem-mono">siren {target.siren}</span>
-              {forme && <span>Forme {forme}</span>}
+              {forme && <span title={`code ${formeRaw}`}>{forme}</span>}
               {annee && annee !== "—" && <span>Créée en {annee}</span>}
               {ville && <span>{ville}{cp ? ` · ${cp}` : ""}{dept ? ` (${dept})` : ""}</span>}
-              {tranche && tranche !== "NN" && <span>Tranche {tranche}</span>}
+              {tranche && tranche !== "NN" && <span title={`code INSEE ${tranche}`}>{trancheLabel(tranche)}</span>}
               {categorie && <span>{categorie}</span>}
               {nEtab != null && <span>{nEtab} étab.{nEtabOuv != null && nEtab !== nEtabOuv ? ` · ${nEtabOuv} ouverts` : ""}</span>}
               {Boolean(fiche.has_linkedin_page) && <span style={{ color: "var(--accent-cyan)" }}>LinkedIn</span>}
@@ -241,7 +373,16 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
                   {[
                     { l: "CA dernier", v: fmtEur(ca), sub: exercices.length ? `Exercice ${String(exercices[exercices.length - 1] || "").slice(0, 4)}` : "", color: "var(--accent-emerald)" },
                     { l: "EBITDA / résultat net", v: fmtEur(ebitda), sub: margePct != null ? `Marge ${margePct}%` : "", color: "var(--accent-blue)" },
-                    { l: "Effectif moyen", v: effectif != null ? Number(effectif).toLocaleString("fr-FR") : "—", sub: forme || "", color: "var(--text-secondary)" },
+                    {
+                      l: "Effectif",
+                      v: effectif != null && Number(effectif) > 0
+                        ? Number(effectif).toLocaleString("fr-FR")
+                        : (tranche && tranche !== "NN" ? trancheLabel(tranche) : "—"),
+                      sub: effectif != null && Number(effectif) > 0
+                        ? "moyen INPI"
+                        : (tranche && tranche !== "NN" ? `tranche ${tranche} INSEE` : ""),
+                      color: "var(--text-secondary)",
+                    },
                     { l: "Capital social", v: fmtEur(capital), sub: capital ? "" : "non publié", color: "var(--accent-purple)" },
                   ].map((k, i) => (
                     <div key={i} className="dem-glass" style={{ borderRadius: 12, padding: "14px 16px" }}>
