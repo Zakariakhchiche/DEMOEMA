@@ -139,7 +139,7 @@ export const datalakeApi = {
       red_flags: Record<string, unknown>[];
       network: Record<string, unknown>[];
       presse: Record<string, unknown>[];
-    }>(`/api/datalake/entreprise/${siren}`),
+    }>(`/api/datalake/fiche/${siren}`),
 
   pressRecent: (opts: { limit?: number; siren?: string; signal?: string } = {}) => {
     const p = new URLSearchParams();
@@ -188,7 +188,7 @@ export const datalakeApi = {
     jget<{
       nodes: { id: string; label: string; type: "target" | "person" | "company" | "sci"; x: number; y: number }[];
       links: { source: string; target: string; kind: string }[];
-    }>(`/api/datalake/network/${siren}`),
+    }>(`/api/datalake/co-mandats/${siren}`),
 
   auditLog: (limit = 50) =>
     jget<{

@@ -11,7 +11,7 @@ import json
 from typing import Any
 
 import asyncpg
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Path, Query, Request
 
 from datalake import GOLD_TABLES_WHITELIST
 
@@ -123,11 +123,11 @@ async def list_tables(req: Request):
     return {"tables": out}
 
 
-@router.get("/{schema}/{table}")
+@router.get("/{schema}/{table}", responses={404: {"description": "Table non whitelisted"}})
 async def query_table(
     req: Request,
-    schema: str,
-    table: str,
+    schema: str = Path(..., pattern="^(gold|silver|bronze)$"),
+    table: str = Path(..., min_length=1, max_length=64),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     q: str | None = Query(None, description="Recherche textuelle (cols whitelisted)"),
@@ -188,7 +188,7 @@ async def query_table(
     }
 
 
-@router.get("/entreprise/{siren}")
+@router.get("/fiche/{siren}")
 async def fiche_entreprise(req: Request, siren: str):
     """Fiche complète — gold.entreprises_master si dispo, fallback sur
     silver.insee_unites_legales + silver.inpi_comptes + silver.inpi_dirigeants."""
@@ -553,7 +553,7 @@ async def audit_freshness(req: Request):
     return {"sources": [_serialize(r) for r in rows]}
 
 
-@router.get("/network/{siren}")
+@router.get("/co-mandats/{siren}")
 async def network_for_siren(req: Request, siren: str):
     """Réseau autour d'un siren : nœuds (entreprise centrale, dirigeants top 5,
     autres entreprises co-mandatées, SCI patrimoine) + liens."""
