@@ -1953,15 +1953,20 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
             LIMIT {int(limit) * 4}
         ),
         enriched AS (
-            -- silver.osint_companies_enriched et silver.insee_* peuvent être
-            -- lockes pendant silver_bootstrap (rebuild). Le JOIN osint est tente
-            -- via _safe en dehors. Ici on garde uniquement ce qui est rapide :
-            -- inpi_comptes + bodacc (indexes sur siren).
+            -- Sources bronze pour naf/forme/ville/dept :
+            -- - bronze.inpi_formalites_entreprises (siren PK) : forme_juridique, code_ape
+            -- - bronze.insee_sirene_siret_raw (siret) : commune + code_postal du siege
+            --   (DISTINCT ON siren pour ne garder qu'un siret par siren)
+            -- Bronze n'est jamais lockée pendant le silver_bootstrap.
+            -- Le frontend reste agnostique : il appelle toujours /api/datalake/cibles
+            -- (silver+ contract), c'est juste l'implémentation backend qui tape bronze.
             SELECT lc.*,
-                   NULL::text AS naf,
-                   NULL::text AS forme_juridique,
-                   NULL::date AS date_creation_unite,
-                   NULL::text AS adresse_code_postal,
+                   ife.code_ape AS naf,
+                   ife.forme_juridique AS forme_juridique,
+                   ife.date_immatriculation AS date_creation_unite,
+                   sir.code_postal AS adresse_code_postal,
+                   sir.commune AS ville_sirene,
+                   LEFT(sir.code_postal, 2) AS dept_sirene,
                    (SELECT b.code_dept FROM silver.bodacc_annonces b
                     WHERE b.siren = lc.siren AND b.code_dept IS NOT NULL
                     ORDER BY b.date_parution DESC LIMIT 1) AS dept_bodacc,
@@ -1969,14 +1974,22 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
                     WHERE b.siren = lc.siren AND b.ville IS NOT NULL
                     ORDER BY b.date_parution DESC LIMIT 1) AS ville_bodacc
             FROM last_compte lc
+            LEFT JOIN bronze.inpi_formalites_entreprises ife ON ife.siren = lc.siren
+            LEFT JOIN LATERAL (
+                SELECT commune, code_postal
+                FROM bronze.insee_sirene_siret_raw
+                WHERE siren = lc.siren AND etat = 'A'
+                ORDER BY ingested_at DESC
+                LIMIT 1
+            ) sir ON true
         )
         SELECT siren,
                denomination,
                naf,
                NULL::text AS naf_libelle,
                forme_juridique,
-               COALESCE(dept_bodacc, LEFT(NULLIF(adresse_code_postal, ''), 2)) AS dept,
-               ville_bodacc AS ville,
+               COALESCE(dept_sirene, dept_bodacc, LEFT(NULLIF(adresse_code_postal, ''), 2)) AS dept,
+               COALESCE(ville_sirene, ville_bodacc) AS ville,
                COALESCE(adresse_code_postal, '') AS adresse_code_postal,
                COALESCE(date_creation_unite, date_cloture) AS date_creation,
                'actif' AS statut,
@@ -2015,67 +2028,6 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
         raise HTTPException(status_code=500, detail=f"Cibles silver fallback error: {type(e).__name__}: {e}")
 
     cibles = [_serialize(r) for r in rows]
-
-    # Enrichissement live API gouv (recherche-entreprises) en parallèle pour les
-    # cibles dont naf/forme/dept/ville sont null. silver.osint_companies_enriched
-    # est lockée pendant le rebuild silver_bootstrap → on tombe sur cette branche
-    # pour ne pas afficher des "—" partout côté UI (Chat, Dashboard, Compare).
-    sirens_to_enrich = [c["siren"] for c in cibles if not c.get("naf") or not c.get("ville")]
-    if sirens_to_enrich:
-        import asyncio as _asyncio
-        import httpx as _httpx
-
-        async def _enrich_one(client, siren):
-            try:
-                r = await client.get(
-                    f"https://recherche-entreprises.api.gouv.fr/search?q={siren}&per_page=1",
-                    timeout=2.0,
-                )
-                if r.status_code != 200:
-                    return None
-                data = r.json()
-                if not data.get("results"):
-                    return None
-                row = data["results"][0]
-                siege = row.get("siege") or {}
-                return {
-                    "siren": siren,
-                    "naf": siege.get("activite_principale") or row.get("activite_principale"),
-                    "naf_libelle": siege.get("libelle_activite_principale"),
-                    "forme_juridique": row.get("nature_juridique"),
-                    "dept": siege.get("departement") or (siege.get("code_postal") or "")[:2],
-                    "ville": siege.get("libelle_commune"),
-                    "adresse_code_postal": siege.get("code_postal"),
-                    "categorie_entreprise": row.get("categorie_entreprise"),
-                    "annee_creation": (
-                        int(str(row.get("date_creation") or "")[:4])
-                        if str(row.get("date_creation") or "").isdigit() or
-                           (str(row.get("date_creation") or "")[:4]).isdigit()
-                        else None
-                    ),
-                }
-            except Exception:
-                return None
-
-        # Limite à 20 cibles enrichies en parallèle (cap latence + rate limiter API gouv).
-        async with _httpx.AsyncClient(timeout=2.0) as client:
-            results = await _asyncio.gather(
-                *[_enrich_one(client, s) for s in sirens_to_enrich[:20]],
-                return_exceptions=True,
-            )
-        by_siren = {
-            r["siren"]: r for r in results
-            if isinstance(r, dict) and r is not None
-        }
-        for c in cibles:
-            enr = by_siren.get(c["siren"])
-            if not enr:
-                continue
-            for k in ("naf", "naf_libelle", "forme_juridique", "dept", "ville",
-                     "adresse_code_postal", "categorie_entreprise", "annee_creation"):
-                if c.get(k) in (None, "") and enr.get(k) is not None:
-                    c[k] = enr[k]
-
     return {"cibles": cibles, "limit": limit, "offset": offset, "has_more": len(cibles) == limit, "source": "silver_fallback"}
 
 
