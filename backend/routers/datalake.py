@@ -1668,9 +1668,9 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
                    COALESCE(ul.code_ape, oce.code_ape) AS naf,
                    COALESCE(ul.categorie_juridique, oce.forme_juridique) AS forme_juridique,
                    COALESCE(ul.date_creation, oce.date_immatriculation) AS date_creation_unite,
-                   COALESCE(et.code_postal, oce.adresse_code_postal) AS adresse_code_postal,
-                   et.commune AS ville_etab,
-                   et.code_dept AS dept_etab,
+                   oce.adresse_code_postal AS adresse_code_postal,
+                   NULL::text AS ville_etab,
+                   NULL::text AS dept_etab,
                    -- Fallback dept/ville depuis bodacc si insee siège manque
                    (SELECT b.code_dept FROM silver.bodacc_annonces b
                     WHERE b.siren = lc.siren AND b.code_dept IS NOT NULL
@@ -1685,12 +1685,8 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
             FROM last_compte lc
             LEFT JOIN silver.insee_unites_legales ul ON ul.siren = lc.siren
             LEFT JOIN silver.osint_companies_enriched oce ON oce.siren = lc.siren::char(9)
-            LEFT JOIN LATERAL (
-                SELECT code_postal, commune, code_dept
-                FROM silver.insee_etablissements
-                WHERE siren = lc.siren AND etablissement_siege = true
-                LIMIT 1
-            ) et ON true
+            -- insee_etablissements 43M rows fait timeout meme avec LATERAL
+            -- LIMIT 1. On utilise osint pour code_postal + bodacc pour ville/dept.
         )
         SELECT siren,
                denomination,
