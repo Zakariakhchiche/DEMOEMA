@@ -2015,6 +2015,67 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
         raise HTTPException(status_code=500, detail=f"Cibles silver fallback error: {type(e).__name__}: {e}")
 
     cibles = [_serialize(r) for r in rows]
+
+    # Enrichissement live API gouv (recherche-entreprises) en parallèle pour les
+    # cibles dont naf/forme/dept/ville sont null. silver.osint_companies_enriched
+    # est lockée pendant le rebuild silver_bootstrap → on tombe sur cette branche
+    # pour ne pas afficher des "—" partout côté UI (Chat, Dashboard, Compare).
+    sirens_to_enrich = [c["siren"] for c in cibles if not c.get("naf") or not c.get("ville")]
+    if sirens_to_enrich:
+        import asyncio as _asyncio
+        import httpx as _httpx
+
+        async def _enrich_one(client, siren):
+            try:
+                r = await client.get(
+                    f"https://recherche-entreprises.api.gouv.fr/search?q={siren}&per_page=1",
+                    timeout=2.0,
+                )
+                if r.status_code != 200:
+                    return None
+                data = r.json()
+                if not data.get("results"):
+                    return None
+                row = data["results"][0]
+                siege = row.get("siege") or {}
+                return {
+                    "siren": siren,
+                    "naf": siege.get("activite_principale") or row.get("activite_principale"),
+                    "naf_libelle": siege.get("libelle_activite_principale"),
+                    "forme_juridique": row.get("nature_juridique"),
+                    "dept": siege.get("departement") or (siege.get("code_postal") or "")[:2],
+                    "ville": siege.get("libelle_commune"),
+                    "adresse_code_postal": siege.get("code_postal"),
+                    "categorie_entreprise": row.get("categorie_entreprise"),
+                    "annee_creation": (
+                        int(str(row.get("date_creation") or "")[:4])
+                        if str(row.get("date_creation") or "").isdigit() or
+                           (str(row.get("date_creation") or "")[:4]).isdigit()
+                        else None
+                    ),
+                }
+            except Exception:
+                return None
+
+        # Limite à 20 cibles enrichies en parallèle (cap latence + rate limiter API gouv).
+        async with _httpx.AsyncClient(timeout=2.0) as client:
+            results = await _asyncio.gather(
+                *[_enrich_one(client, s) for s in sirens_to_enrich[:20]],
+                return_exceptions=True,
+            )
+        by_siren = {
+            r["siren"]: r for r in results
+            if isinstance(r, dict) and r is not None
+        }
+        for c in cibles:
+            enr = by_siren.get(c["siren"])
+            if not enr:
+                continue
+            for k in ("naf", "naf_libelle", "forme_juridique", "dept", "ville",
+                     "adresse_code_postal", "categorie_entreprise", "annee_creation"):
+                if c.get(k) in (None, "") and enr.get(k) is not None:
+                    c[k] = enr[k]
+
     return {"cibles": cibles, "limit": limit, "offset": offset, "has_more": len(cibles) == limit, "source": "silver_fallback"}
 
 
