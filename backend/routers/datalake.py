@@ -1238,8 +1238,8 @@ async def groupe_filiation(req: Request, siren: str):
               entreprise_indicateur_associe_unique AS associe_unique
            FROM bronze.inpi_formalites_personnes
            WHERE siren = $1
-             AND type_de_personne = 'entreprise'
-             AND actif = true
+             AND UPPER(type_de_personne) = 'ENTREPRISE'
+             AND COALESCE(actif, true) = true
              AND entreprise_siren IS NOT NULL
              AND entreprise_siren != $1
            LIMIT 10""",
@@ -1258,8 +1258,8 @@ async def groupe_filiation(req: Request, siren: str):
            FROM bronze.inpi_formalites_personnes p
            LEFT JOIN bronze.inpi_formalites_entreprises e ON e.siren = p.siren
            WHERE p.entreprise_siren = $1
-             AND p.type_de_personne = 'entreprise'
-             AND p.actif = true
+             AND p.UPPER(type_de_personne) = 'ENTREPRISE'
+             AND COALESCE(p.actif, true) = true
              AND p.siren != $1
            LIMIT 50""",
         siren,
