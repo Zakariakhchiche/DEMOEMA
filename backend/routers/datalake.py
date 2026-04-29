@@ -562,7 +562,7 @@ async def fiche_entreprise(req: Request, siren: str):
             from defusedxml import ElementTree as _ET
             import urllib.parse as _urlparse
             q_press = _urlparse.quote(fiche["denomination"])
-            async with _httpx3.AsyncClient(timeout=4.0) as client:
+            async with _httpx3.AsyncClient(timeout=4.0, follow_redirects=True) as client:
                 resp = await client.get(
                     f"https://news.google.com/rss/search?q={q_press}&hl=fr-FR&gl=FR&ceid=FR:fr"
                 )
