@@ -95,6 +95,7 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
   const fiche = data?.fiche ?? {};
   const denomination = String(fiche.denomination || target.denomination);
   const naf = String(fiche.naf || target.naf || "—");
+  const nafLib = String(fiche.naf_libelle || target.naf_label || naf);
   const dept = String(fiche.dept || target.dept || "");
   const forme = String(fiche.forme_juridique || target.forme || "");
   const annee = fiche.annee_creation ? String(fiche.annee_creation) : target.creation;
@@ -104,8 +105,19 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
   const effectif = fiche.effectif_exact ?? target.effectif;
   const capital = fiche.capital_social;
   const cp = fiche.adresse_code_postal as string | undefined;
+  const ville = fiche.ville as string | undefined;
+  const region = fiche.region as string | undefined;
+  const adresse = fiche.adresse as string | undefined;
   const caHistory = (fiche.ca_history as number[] | undefined) ?? [];
   const exercices = (fiche.exercices as string[] | undefined) ?? [];
+  const tranche = fiche.tranche_effectifs as string | undefined;
+  const categorie = fiche.categorie_entreprise as string | undefined;
+  const etat = fiche.etat_administratif as string | undefined;
+  const dateFermeture = fiche.date_fermeture as string | undefined;
+  const nEtab = fiche.n_etablissements as number | undefined;
+  const nEtabOuv = fiche.n_etablissements_ouverts as number | undefined;
+  const sigle = fiche.sigle as string | undefined;
+  const isCesse = fiche.statut === "cesse" || etat === "C";
 
   return (
     <>
@@ -121,25 +133,46 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
               fontSize: 11, color: "var(--text-tertiary)",
               textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600,
             }}>
-              Cible M&A · {target.naf_label || naf || "—"}
+              Cible M&A · NAF {naf}{nafLib && nafLib !== naf ? ` — ${nafLib}` : ""}
             </div>
             <div style={{
               fontSize: 26, fontWeight: 700, letterSpacing: "-0.02em",
               color: "var(--text-primary)", marginTop: 4,
+              display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
             }}>
               {denomination}
+              {sigle && <span style={{ fontSize: 16, color: "var(--text-tertiary)", fontWeight: 500 }}>({sigle})</span>}
+              {isCesse && (
+                <span style={{
+                  fontSize: 11, padding: "3px 9px", borderRadius: 999,
+                  background: "rgba(251,113,133,0.10)",
+                  border: "1px solid rgba(251,113,133,0.30)",
+                  color: "var(--accent-rose)", fontWeight: 600,
+                  letterSpacing: "0.06em",
+                }}>
+                  CESSÉE{dateFermeture ? ` ${fmtDate(dateFermeture)}` : ""}
+                </span>
+              )}
             </div>
             <div style={{
               display: "flex", gap: 14, marginTop: 6, fontSize: 12,
-              color: "var(--text-secondary)", flexWrap: "wrap",
+              color: "var(--text-secondary)", flexWrap: "wrap", alignItems: "center",
             }}>
               <span className="dem-mono">siren {target.siren}</span>
-              {forme && <span>{forme}</span>}
-              {annee && annee !== "—" && <span>Créé en {annee}</span>}
-              {(cp || dept) && <span>{cp ? `${cp}` : ""}{dept ? ` · dept ${dept}` : ""}</span>}
-              {Boolean(fiche.has_linkedin_page) && <span style={{ color: "var(--accent-cyan)" }}>· LinkedIn</span>}
-              {Boolean(fiche.has_github_org) && <span style={{ color: "var(--accent-purple)" }}>· GitHub</span>}
+              {forme && <span>Forme {forme}</span>}
+              {annee && annee !== "—" && <span>Créée en {annee}</span>}
+              {ville && <span>{ville}{cp ? ` · ${cp}` : ""}{dept ? ` (${dept})` : ""}</span>}
+              {tranche && tranche !== "NN" && <span>Tranche {tranche}</span>}
+              {categorie && <span>{categorie}</span>}
+              {nEtab != null && <span>{nEtab} étab.{nEtabOuv != null && nEtab !== nEtabOuv ? ` · ${nEtabOuv} ouverts` : ""}</span>}
+              {Boolean(fiche.has_linkedin_page) && <span style={{ color: "var(--accent-cyan)" }}>LinkedIn</span>}
+              {Boolean(fiche.has_github_org) && <span style={{ color: "var(--accent-purple)" }}>GitHub</span>}
             </div>
+            {adresse && (
+              <div style={{ marginTop: 4, fontSize: 11.5, color: "var(--text-tertiary)" }}>
+                📍 {adresse}{region ? ` · région ${region}` : ""}
+              </div>
+            )}
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <button className="dem-btn dem-btn-primary" onClick={onPitch}>
