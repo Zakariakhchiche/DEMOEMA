@@ -948,6 +948,29 @@ async def _dirigeant_full(
         nom_u, prenom_u, date_n,
     ))
 
+    # 3 bis. OSINT brut : URLs LinkedIn / GitHub / Twitter / Crunchbase / Medium /
+    # YouTube / Facebook / Instagram + emails testes/valides + sources scannees.
+    # Source : silver.osint_persons_enriched (yaml etendu, exposera ces colonnes
+    # apres le prochain refresh interval_hours=6).
+    osint_raw = await _safe(pool.fetchrow(
+        """SELECT
+              linkedin_urls, github_usernames, twitter_handles,
+              instagram_handles, medium_profiles, facebook_urls,
+              youtube_channels, crunchbase_url,
+              other_sites, emails_tested, emails_valid, email_services,
+              sources_scanned
+           FROM silver.osint_persons_enriched
+           WHERE UPPER(unaccent(nom)) = UPPER(unaccent($1))
+             AND EXISTS (
+                   SELECT 1 FROM unnest(prenoms) p
+                   WHERE UPPER(unaccent(p)) = UPPER(unaccent($2))
+             )
+             AND ($3::text IS NULL OR date_naissance = $3)
+           ORDER BY last_scanned_at DESC NULLS LAST
+           LIMIT 1""",
+        nom_u, prenom_u, date_n,
+    ))
+
     # 4. Sanctions personne — match dans caption insensible casse/accents
     sanctions = await _safe(pool.fetch(
         """SELECT entity_id, caption, schema, topics, countries,
@@ -987,6 +1010,7 @@ async def _dirigeant_full(
         "sci_value_total": sci_value_total,
         "sci_values_per_company": [_serialize(v) for v in sci_values],
         "osint": _serialize(osint) if osint else None,
+        "osint_raw": _serialize(osint_raw) if osint_raw else None,
         "sanctions": [_serialize(s) for s in sanctions],
         "dvf_zones": dvf_summary,
     }

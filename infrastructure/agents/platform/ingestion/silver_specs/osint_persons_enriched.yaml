@@ -35,6 +35,23 @@ business_logic: |
     * has_linkedin = (linkedin_urls IS NOT NULL AND array_length(linkedin_urls,1) > 0)
     * has_github = ...
     * has_any_social = (n_total_social > 0)
+  - URLs / handles brutes (nouvelles colonnes — exposees au frontend pour fiche
+    drill-down dirigeant) :
+    * linkedin_urls text[]
+    * github_usernames text[]
+    * twitter_handles text[]
+    * instagram_handles text[]
+    * medium_profiles text[]
+    * facebook_urls text[]
+    * youtube_channels text[]
+    * crunchbase_url text
+    * other_sites jsonb
+  - Emails (utiles pour outreach M&A) :
+    * emails_valid text[]
+    * emails_tested text[]
+    * email_services jsonb
+  - Sources scannees :
+    * sources_scanned text[] (Maigret, Holehe, etc.)
   - Enrichissement INPI (join):
     * denomination_main_company (from entreprises via siren_main)
     * forme_juridique_main
@@ -47,6 +64,59 @@ business_logic: |
     * materialized_at = now()
 
 transformations: |
+  SELECT
+    op.person_uid,
+    op.siren_main,
+    op.representant_id,
+    op.nom,
+    op.prenoms,
+    op.date_naissance,
+    -- Counts
+    COALESCE(array_length(op.linkedin_urls, 1), 0) AS n_linkedin,
+    COALESCE(array_length(op.github_usernames, 1), 0) AS n_github,
+    COALESCE(array_length(op.twitter_handles, 1), 0) AS n_twitter,
+    CASE
+      WHEN jsonb_typeof(op.other_sites) = 'array' THEN jsonb_array_length(op.other_sites)
+      WHEN op.other_sites IS NOT NULL THEN (SELECT count(*) FROM jsonb_object_keys(op.other_sites))::int
+      ELSE 0
+    END AS n_other_sites,
+    (
+      COALESCE(array_length(op.linkedin_urls, 1), 0) +
+      COALESCE(array_length(op.github_usernames, 1), 0) +
+      COALESCE(array_length(op.twitter_handles, 1), 0)
+    ) AS n_total_social,
+    -- Flags
+    (op.linkedin_urls IS NOT NULL AND array_length(op.linkedin_urls, 1) > 0) AS has_linkedin,
+    (op.github_usernames IS NOT NULL AND array_length(op.github_usernames, 1) > 0) AS has_github,
+    (
+      (op.linkedin_urls IS NOT NULL AND array_length(op.linkedin_urls, 1) > 0)
+      OR (op.github_usernames IS NOT NULL AND array_length(op.github_usernames, 1) > 0)
+      OR (op.twitter_handles IS NOT NULL AND array_length(op.twitter_handles, 1) > 0)
+    ) AS has_any_social,
+    -- URLs brutes (NOUVEAU)
+    op.linkedin_urls,
+    op.github_usernames,
+    op.twitter_handles,
+    op.instagram_handles,
+    op.medium_profiles,
+    op.facebook_urls,
+    op.youtube_channels,
+    op.crunchbase_url,
+    op.other_sites,
+    -- Emails (NOUVEAU)
+    op.emails_valid,
+    op.emails_tested,
+    op.email_services,
+    -- Sources OSINT (NOUVEAU)
+    op.sources_scanned,
+    -- Enrichissement INPI entreprise principale
+    e.payload->>'denomination' AS denomination_main_company,
+    e.payload->>'forme_juridique' AS forme_juridique_main,
+    NULLIF(e.payload->>'capital', '')::numeric AS capital_main,
+    NULLIF(e.payload->>'date_immatriculation', '')::date AS date_immat_main,
+    mandats.n_mandats AS n_mandats_inpi,
+    op.last_scanned_at,
+    NOW() AS materialized_at
   FROM bronze.osint_persons op
   LEFT JOIN bronze.inpi_formalites_entreprises e ON e.siren = op.siren_main
   LEFT JOIN LATERAL (
