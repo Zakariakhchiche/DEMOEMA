@@ -50,6 +50,26 @@ def _serialize(row: asyncpg.Record) -> dict[str, Any]:
     return out
 
 
+@router.get("/_introspect")
+async def introspect(req: Request):
+    """Liste toutes les tables gold + silver présentes (schema, name, count approx).
+    Utile pour aligner la whitelist avec la réalité du datalake déployé."""
+    pool = _pool(req)
+    rows = await pool.fetch(
+        """
+        SELECT n.nspname AS schema,
+               c.relname AS table,
+               c.reltuples::bigint AS rows_approx
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.relkind IN ('r','m','p')
+          AND n.nspname IN ('gold','silver','bronze')
+        ORDER BY n.nspname, c.relname
+        """
+    )
+    return {"objects": [dict(r) for r in rows]}
+
+
 @router.get("/tables")
 async def list_tables(req: Request):
     """Liste les tables gold + silver presse + counts (head only). Query info_schema
