@@ -51,8 +51,11 @@ async def create_pool() -> asyncpg.Pool | None:
         dsn,
         min_size=2,
         max_size=10,
-        command_timeout=20,
-        server_settings={"application_name": "edrcf-backend"},
+        command_timeout=60,
+        server_settings={
+            "application_name": "edrcf-backend",
+            "statement_timeout": "60000",
+        },
     )
 
 

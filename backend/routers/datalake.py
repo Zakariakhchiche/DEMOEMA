@@ -427,38 +427,94 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
         "date_creation": "u.date_creation DESC NULLS LAST",
     }[sort]
 
-    sql = f"""
-        SELECT u.siren,
-               u.denomination_unite AS denomination,
-               u.code_ape AS naf,
-               u.code_ape AS naf_libelle,
-               u.categorie_juridique AS forme_juridique,
-               u.tranche_effectifs AS effectif_tranche,
-               u.date_creation,
-               u.etat_administratif,
-               c.ca_net AS ca_dernier,
-               c.resultat_net AS ebitda_dernier,
-               c.date_cloture AS date_derniers_comptes,
-               c.effectif_moyen::int AS effectif_exact,
-               c.capitaux_propres,
-               LEAST(95, 50 + (COALESCE(c.ca_net, 0) / 200000)::int) AS score_ma,
-               (COALESCE(c.ca_net, 0) >= 14000000) AS is_pro_ma,
-               false AS is_asset_rich,
-               false AS has_compliance_red_flag,
-               false AS is_listed,
-               'actif' AS statut
-        FROM silver.insee_unites_legales u
-        LEFT JOIN LATERAL (
-            SELECT ca_net, resultat_net, capitaux_propres, effectif_moyen, date_cloture
-            FROM silver.inpi_comptes
-            WHERE siren = u.siren
-            ORDER BY date_cloture DESC
-            LIMIT 1
-        ) c ON true
-        WHERE {' AND '.join(where)}
-        ORDER BY {order_sql}
-        LIMIT {int(limit)} OFFSET {int(offset)}
-    """
+    # Stratégie : pour `score_ma`/`ca_dernier` on PART du dernier exercice INPI
+    # (DISTINCT ON siren) qui est ordonné — bien plus rapide qu'un seq scan
+    # sur 29M unites_legales avec LATERAL JOIN. Pour `date_creation` on reste
+    # côté insee.
+    if sort in ("score_ma", "ca_dernier"):
+        # Inversé : ca DESC d'abord, puis enrichir via insee_unites_legales
+        # On prend top 5*limit pour avoir de la marge avec le filtre, puis
+        # filter actif après le join.
+        ca_min = max(0, (min_score - 50) * 200_000) if min_score is not None else 0
+        # Construire WHERE pour la sous-requête comptes
+        ca_where = [f"c.ca_net >= {int(ca_min)}"]
+        c_params: list[Any] = []
+        if q:
+            if q.isdigit() and len(q) == 9:
+                c_params.append(q)
+                ca_where.append(f"c.siren = ${len(c_params)}")
+            # else q is name — applied on join below
+        sql = f"""
+            WITH last_compte AS (
+                SELECT DISTINCT ON (c.siren) c.siren, c.ca_net, c.resultat_net,
+                                              c.capitaux_propres, c.effectif_moyen,
+                                              c.date_cloture
+                FROM silver.inpi_comptes c
+                WHERE {' AND '.join(ca_where)}
+                ORDER BY c.siren, c.date_cloture DESC
+            )
+            SELECT u.siren,
+                   u.denomination_unite AS denomination,
+                   u.code_ape AS naf,
+                   u.code_ape AS naf_libelle,
+                   u.categorie_juridique AS forme_juridique,
+                   u.tranche_effectifs AS effectif_tranche,
+                   u.date_creation,
+                   u.etat_administratif,
+                   lc.ca_net AS ca_dernier,
+                   lc.resultat_net AS ebitda_dernier,
+                   lc.date_cloture AS date_derniers_comptes,
+                   lc.effectif_moyen::int AS effectif_exact,
+                   lc.capitaux_propres,
+                   LEAST(95, 50 + (COALESCE(lc.ca_net, 0) / 200000)::int) AS score_ma,
+                   (COALESCE(lc.ca_net, 0) >= 14000000) AS is_pro_ma,
+                   false AS is_asset_rich,
+                   false AS has_compliance_red_flag,
+                   false AS is_listed,
+                   'actif' AS statut
+            FROM last_compte lc
+            JOIN silver.insee_unites_legales u ON u.siren = lc.siren
+            WHERE u.etat_administratif = 'A'
+            {('AND u.denomination_unite ILIKE $' + str(len(c_params) + 1)) if (q and not (q.isdigit() and len(q) == 9)) else ''}
+            ORDER BY lc.ca_net DESC NULLS LAST
+            LIMIT {int(limit)} OFFSET {int(offset)}
+        """
+        if q and not (q.isdigit() and len(q) == 9):
+            c_params.append(f"%{q}%")
+        params = c_params
+    else:
+        sql = f"""
+            SELECT u.siren,
+                   u.denomination_unite AS denomination,
+                   u.code_ape AS naf,
+                   u.code_ape AS naf_libelle,
+                   u.categorie_juridique AS forme_juridique,
+                   u.tranche_effectifs AS effectif_tranche,
+                   u.date_creation,
+                   u.etat_administratif,
+                   c.ca_net AS ca_dernier,
+                   c.resultat_net AS ebitda_dernier,
+                   c.date_cloture AS date_derniers_comptes,
+                   c.effectif_moyen::int AS effectif_exact,
+                   c.capitaux_propres,
+                   LEAST(95, 50 + (COALESCE(c.ca_net, 0) / 200000)::int) AS score_ma,
+                   (COALESCE(c.ca_net, 0) >= 14000000) AS is_pro_ma,
+                   false AS is_asset_rich,
+                   false AS has_compliance_red_flag,
+                   false AS is_listed,
+                   'actif' AS statut
+            FROM silver.insee_unites_legales u
+            LEFT JOIN LATERAL (
+                SELECT ca_net, resultat_net, capitaux_propres, effectif_moyen, date_cloture
+                FROM silver.inpi_comptes
+                WHERE siren = u.siren
+                ORDER BY date_cloture DESC
+                LIMIT 1
+            ) c ON true
+            WHERE {' AND '.join(where)}
+            ORDER BY u.date_creation DESC NULLS LAST
+            LIMIT {int(limit)} OFFSET {int(offset)}
+        """
     try:
         rows = await pool.fetch(sql, *params)
     except Exception as e:
