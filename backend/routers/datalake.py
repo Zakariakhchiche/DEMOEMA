@@ -539,7 +539,8 @@ async def fiche_entreprise(req: Request, siren: str):
                     AND COALESCE(os2.date_naissance, '') = COALESCE(d.date_naissance, '')
                   ORDER BY n_total_social DESC NULLS LAST
                   LIMIT 1
-           ) os ON true""",
+           ) os ON true
+           ORDER BY d.n_mandats_actifs DESC NULLS LAST""",
         siren,
     )
 
