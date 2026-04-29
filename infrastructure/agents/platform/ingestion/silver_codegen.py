@@ -539,6 +539,32 @@ async def generate_silver_sql(
                 (max_retries if feedback is None else max_retries - 1) - max_retries + 1,
                 max_retries,
             )
+            schema_hints = []
+            err_lower = apply_err.lower()
+            if "person_uid" in err_lower:
+                schema_hints.append(
+                    "ATTENTION: silver.inpi_dirigeants et silver.dirigeant_sci_patrimoine"
+                    " N'ONT PAS de colonne person_uid. Calcule-le inline via"
+                    " md5(coalesce(nom,'')||'|'||coalesce(prenom,'')||'|'||coalesce(date_naissance,''))."
+                )
+            if "denominations_mandats" in err_lower:
+                schema_hints.append(
+                    "ATTENTION: silver.inpi_dirigeants n'a PAS de colonne denominations_mandats."
+                    " La colonne réelle s'appelle `denominations` (text[])."
+                )
+            if "\"prenoms\"" in err_lower or "column prenoms" in err_lower:
+                schema_hints.append(
+                    "ATTENTION: silver.inpi_dirigeants n'a PAS de colonne prenoms (pluriel)."
+                    " La colonne s'appelle `prenom` (singulier, text)."
+                )
+            if "\"siren\"" in err_lower and "does not exist" in err_lower:
+                schema_hints.append(
+                    "ATTENTION: référence ambiguë à `siren`. TOUJOURS qualifier avec un alias"
+                    " explicite (e.siren, c.siren, etc.). Pour bronze.inpi_brevets_raw /"
+                    " bronze.inpi_marques_raw, la colonne siren peut être dans payload->>'siren'"
+                    " plutôt qu'une colonne directe."
+                )
+            hints_block = ("\n\nHINTS schéma:\n- " + "\n- ".join(schema_hints)) if schema_hints else ""
             new_feedback = (
                 (feedback + "\n\n---\n" if feedback else "")
                 + f"Le SQL généré au tour précédent a échoué à l'apply Postgres avec :\n"
@@ -547,6 +573,7 @@ async def generate_silver_sql(
                   f" des colonnes dans les SCHÉMAS BRONZE DISPONIBLES — n'invente aucune"
                   f" colonne. Pour les indexes multi-colonnes, syntaxe correcte :"
                   f" `CREATE INDEX ON t (col1, col2)` (UNE seule paire de parenthèses)."
+                + hints_block
             )
             retry = await generate_silver_sql(
                 silver_name=silver_name,

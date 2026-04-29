@@ -26,7 +26,14 @@ key_columns:
   - emails_count
 
 business_logic: |
-  Pour chaque person_uid INPI, agréger TOUS les emails + phones trouvés :
+  ⚠️ ATTENTION COLONNES silver.inpi_dirigeants (introspect — strict) :
+    nom (text), prenom (text, SINGULIER pas prenoms), date_naissance (varchar 10),
+    sirens_mandats (bpchar[]), denominations (text[], pas denominations_mandats),
+    n_mandats_actifs, roles (text[]), age_2026.
+  ⚠️ PAS DE COLONNE person_uid → CALCULER via md5(coalesce(nom,'')||'|'||coalesce(prenom,'')||'|'||coalesce(date_naissance,''))
+  ⚠️ Le bronze.osint_persons n'a PAS de colonne person_uid non plus — joindre par lower(nom) + lower(prenom).
+
+  Pour chaque dirigeant INPI, agréger TOUS les emails + phones trouvés :
 
   Schéma :
   - person_uid (FK)
@@ -70,8 +77,12 @@ business_logic: |
 
 transformations: |
   WITH base AS (
-    SELECT person_uid, prenom, nom, denominations_mandats
+    SELECT
+      md5(coalesce(nom,'')||'|'||coalesce(prenom,'')||'|'||coalesce(date_naissance,'')) AS person_uid,
+      prenom, nom,
+      denominations AS denominations_mandats
     FROM silver.inpi_dirigeants
+    WHERE nom IS NOT NULL AND prenom IS NOT NULL
   ),
   emails_github AS (
     SELECT b.person_uid,
@@ -107,17 +118,18 @@ transformations: |
     GROUP BY b.person_uid
   ),
   emails_holehe AS (
-    SELECT op.person_uid,
-           jsonb_agg(jsonb_build_object(
-             'value', e,
-             'source', 'holehe_validated',
-             'confidence', 'MEDIUM',
-             'validated', true
-           )) AS emails
+    SELECT
+      md5(coalesce(op.nom,'')||'|'||coalesce(op.prenom,'')||'|'||coalesce(op.date_naissance::text,'')) AS person_uid,
+      jsonb_agg(jsonb_build_object(
+        'value', e,
+        'source', 'holehe_validated',
+        'confidence', 'MEDIUM',
+        'validated', true
+      )) AS emails
     FROM bronze.osint_persons op,
          unnest(op.emails_valid) AS e
     WHERE op.emails_valid IS NOT NULL AND array_length(op.emails_valid, 1) > 0
-    GROUP BY op.person_uid
+    GROUP BY 1
   ),
   -- Phones depuis RDAP
   phones_rdap AS (

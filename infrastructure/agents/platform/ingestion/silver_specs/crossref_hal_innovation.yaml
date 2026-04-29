@@ -23,6 +23,11 @@ key_columns:
   - is_dirigeant_match
 
 business_logic: |
+  ⚠️ ATTENTION COLONNES silver.inpi_dirigeants (introspect — strict) :
+    nom, prenom (SINGULIER), date_naissance (varchar 10), age_2026.
+  ⚠️ PAS DE COLONNE person_uid → CALCULER via
+    md5(coalesce(nom,'')||'|'||coalesce(prenom,'')||'|'||coalesce(date_naissance,''))
+
   Pour chaque publication (Crossref ou HAL) :
   - Extract auteurs (array depuis payload)
   - Pour chaque auteur, tenter de matcher avec silver.inpi_dirigeants
@@ -93,23 +98,27 @@ transformations: |
   )
   SELECT
     md5(coalesce(p.publication_id, '') || '|' || p.author_raw) AS publication_author_uid,
-    d.person_uid,
+    CASE
+      WHEN d.nom IS NOT NULL THEN
+        md5(coalesce(d.nom,'')||'|'||coalesce(d.prenom,'')||'|'||coalesce(d.date_naissance,''))
+      ELSE NULL
+    END AS person_uid,
     p.publication_id,
     p.source_db,
     p.title,
     p.year,
     p.venue,
-    (d.person_uid IS NOT NULL) AS is_dirigeant_match,
+    (d.nom IS NOT NULL) AS is_dirigeant_match,
     p.author_nom,
     p.author_prenom
   FROM parsed p
   LEFT JOIN silver.inpi_dirigeants d
     ON lower(d.nom) = lower(trim(p.author_nom))
    AND lower(d.prenom) = lower(trim(p.author_prenom))
-   -- Anti-faux-positif : exclure si dirigeant trop âgé pour publication récente
-   AND (p.year IS NULL OR
-        (EXTRACT(YEAR FROM d.date_naissance::date) IS NULL OR
-         p.year - EXTRACT(YEAR FROM d.date_naissance::date) BETWEEN 18 AND 90));
+   -- Anti-faux-positif : silver.inpi_dirigeants.date_naissance est varchar 10 (YYYY-MM-DD), pas date
+   AND (p.year IS NULL OR d.date_naissance IS NULL OR
+        (NULLIF(left(d.date_naissance, 4),'')::int IS NULL OR
+         p.year - NULLIF(left(d.date_naissance, 4),'')::int BETWEEN 18 AND 90));
 
 indexes:
   - "person_uid WHERE person_uid IS NOT NULL"

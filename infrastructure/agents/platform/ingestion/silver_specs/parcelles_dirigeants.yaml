@@ -22,6 +22,15 @@ key_columns:
   - valeur_estimee_eur
 
 business_logic: |
+  ⚠️ ATTENTION COLONNES silver.dirigeant_sci_patrimoine (introspect — strict) :
+    nom, prenom, date_naissance (varchar 10),
+    n_sci (bigint), sci_sirens (bpchar[]), sci_denominations (text[]),
+    sci_code_postaux (text[]), first_sci_date (date),
+    total_capital_sci (numeric), n_total_mandats (bigint),
+    all_sirens_mandats (bpchar[]), materialized_at.
+  ⚠️ PAS DE COLONNE person_uid → CALCULER via
+    md5(coalesce(nom,'')||'|'||coalesce(prenom,'')||'|'||coalesce(date_naissance,''))
+
   Pour chaque dirigeant ayant des SCI (silver.dirigeant_sci_patrimoine), on
   cherche les parcelles cadastrales appartenant à ses SCI :
 
@@ -47,8 +56,10 @@ business_logic: |
 
 transformations: |
   WITH sci_dirigeants AS (
-    SELECT person_uid, nom, prenom, date_naissance,
-           sci_sirens, total_capital_sci
+    SELECT
+      md5(coalesce(nom,'')||'|'||coalesce(prenom,'')||'|'||coalesce(date_naissance,'')) AS person_uid,
+      nom, prenom, date_naissance,
+      sci_sirens, total_capital_sci
     FROM silver.dirigeant_sci_patrimoine
     WHERE sci_sirens IS NOT NULL AND array_length(sci_sirens, 1) > 0
   ),

@@ -50,6 +50,12 @@ business_logic: |
   - effectif_salarie (tranche INSEE)
   ⚠️ NE PAS utiliser code_ape_libelle (n'existe pas dans bronze.inpi_formalites_entreprises)
   ⚠️ NE PAS faire EXISTS sur bronze.inpi_brevets_raw avec b.siren — verifier que la colonne siren existe
+  ⚠️ TOUJOURS QUALIFIER les colonnes siren avec un alias explicite (e.siren,
+    c.siren, d_inpi.siren, etc.) — JAMAIS de `siren` nu, sinon UndefinedColumn.
+  ⚠️ Pour les sub-queries EXISTS / IN (SELECT ...), utiliser un alias DIFFÉRENT
+    de `e` (ex : `bx`, `sub`) afin de pouvoir référencer e.siren de l'extérieur.
+  ⚠️ bronze.inpi_brevets_raw et bronze.inpi_marques_raw n'ont PAS de colonne siren
+    directe — utiliser payload->>'siren' OU enlever ces signaux du SELECT.
 
   [Maturité dirigeant - 20pts scoring]
   - age_dirigeant_max = MAX(age_2026) parmi dirigeants (via silver.inpi_dirigeants joint sur sirens_mandats @> siren)

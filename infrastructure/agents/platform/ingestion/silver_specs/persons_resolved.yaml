@@ -18,7 +18,7 @@ source_tables:
   - silver.transparence_sante_dirigeants
   - silver.hatvp_conflits_interets
 
-grain: "1 row par person_uid INPI (extension du silver.inpi_dirigeants)"
+grain: "1 row par dirigeant INPI (clé composite nom+prenom+date_naissance, person_uid CALCULÉ via md5)"
 
 key_columns:
   - person_uid
@@ -27,7 +27,18 @@ key_columns:
   - date_naissance
 
 business_logic: |
-  Pour chaque person_uid INPI, chercher des matches dans chaque source
+  ⚠️ ATTENTION COLONNES silver.inpi_dirigeants (introspect — strict) :
+    nom (text), prenom (text, SINGULIER pas prenoms), date_naissance (varchar 10),
+    n_mandats_total, n_mandats_actifs (bigint),
+    sirens_mandats (bpchar[]), denominations (text[], pas denominations_mandats),
+    formes_juridiques (text[]), n_sci, sci_sirens (bpchar[]),
+    total_capital_sci (numeric), is_multi_mandat (boolean),
+    roles (text[]), age_2026 (integer),
+    first_mandat_date, last_mandat_date (date), materialized_at.
+  ⚠️ PAS DE COLONNE person_uid → CALCULER via md5(coalesce(nom,'')||'|'||coalesce(prenom,'')||'|'||coalesce(date_naissance,''))
+  ⚠️ PAS DE COLONNE prenoms ni denominations_mandats.
+
+  Pour chaque dirigeant INPI, chercher des matches dans chaque source
   externe via différents algorithmes selon le confidence souhaité :
 
   [Matching strict — HIGH confidence]
@@ -78,9 +89,12 @@ business_logic: |
 
 transformations: |
   WITH inpi_base AS (
-    SELECT person_uid, prenom, nom, date_naissance, sirens_mandats,
-           denominations_mandats
+    SELECT
+      md5(coalesce(nom,'')||'|'||coalesce(prenom,'')||'|'||coalesce(date_naissance,'')) AS person_uid,
+      prenom, nom, date_naissance, sirens_mandats,
+      denominations AS denominations_mandats
     FROM silver.inpi_dirigeants
+    WHERE nom IS NOT NULL AND prenom IS NOT NULL
   ),
   wikidata_matches AS (
     SELECT
@@ -97,9 +111,9 @@ transformations: |
       ) AS wikidata_match
     FROM inpi_base i
     JOIN bronze.wikidata_entreprises_raw w
-      ON lower(w.label) ILIKE '%' || lower(i.nom) || '%'
-      AND lower(w.label) ILIKE '%' || lower(i.prenom) || '%'
-      AND length(i.nom) >= 4  -- évite homonymes courts
+      ON lower(w.payload->>'label') ILIKE '%' || lower(i.nom) || '%'
+      AND lower(w.payload->>'label') ILIKE '%' || lower(i.prenom) || '%'
+      AND length(i.nom) >= 4  -- evite homonymes courts
   ),
   orcid_matches AS (
     SELECT i.person_uid, jsonb_build_object('value', o.orcid_id, ...) AS orcid_match

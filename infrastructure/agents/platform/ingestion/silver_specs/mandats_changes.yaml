@@ -22,6 +22,12 @@ key_columns:
   - role_apres
 
 business_logic: |
+  ⚠️ ATTENTION COLONNES silver.inpi_dirigeants (introspect — strict) :
+    nom, prenom (SINGULIER), date_naissance (varchar 10),
+    sirens_mandats (bpchar[]), denominations (text[]).
+  ⚠️ PAS DE COLONNE person_uid sur silver.inpi_dirigeants → CALCULER via
+    md5(coalesce(nom,'')||'|'||coalesce(prenom,'')||'|'||coalesce(date_naissance,''))
+
   Itère bronze.inpi_formalites_historique pour identifier les événements
   affectant les mandats :
 
@@ -76,15 +82,13 @@ transformations: |
   with_person AS (
     SELECT c.*,
            p.nom, p.prenom, p.date_naissance,
-           d.person_uid,
+           md5(coalesce(p.nom,'')||'|'||coalesce(p.prenom,'')||'|'||coalesce(p.date_naissance::text,'')) AS person_uid,
            p.role AS role_apres,
            lag(p.role) OVER (PARTITION BY c.siren, p.nom, p.prenom
                              ORDER BY c.date_evenement) AS role_avant
     FROM classified c
     LEFT JOIN bronze.inpi_formalites_personnes p
       ON p.formalite_id = c.formalite_id
-    LEFT JOIN silver.inpi_dirigeants d
-      ON d.nom = p.nom AND d.prenom = p.prenom AND d.date_naissance = p.date_naissance
   )
   SELECT
     md5(siren || '|' || coalesce(person_uid, '') || '|' || type_evenement || '|' || date_evenement::text) AS change_uid,
