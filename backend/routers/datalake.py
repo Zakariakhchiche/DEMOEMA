@@ -179,35 +179,69 @@ async def query_table(
 
 @router.get("/entreprise/{siren}")
 async def fiche_entreprise(req: Request, siren: str):
-    """Fiche complète gold.entreprises_master (toutes colonnes) + dirigeants top 5
-    + 10 derniers signaux + 5 derniers articles presse matchés."""
+    """Fiche complète — gold.entreprises_master si dispo, fallback sur
+    silver.insee_unites_legales + silver.inpi_comptes + silver.inpi_dirigeants."""
     if not siren.isdigit() or len(siren) != 9:
         raise HTTPException(status_code=400, detail="SIREN invalide")
     pool = _pool(req)
 
-    fiche = await pool.fetchrow(
-        "SELECT * FROM gold.entreprises_master WHERE siren = $1", siren
-    )
+    fiche = None
+    if await _table_exists(pool, "gold", "entreprises_master"):
+        fiche = await pool.fetchrow(
+            "SELECT * FROM gold.entreprises_master WHERE siren = $1", siren
+        )
     if not fiche:
-        raise HTTPException(status_code=404, detail=f"SIREN {siren} introuvable dans gold.entreprises_master")
+        # Fallback silver — JOIN unites_legales + dernier exercice INPI
+        fiche = await pool.fetchrow(
+            """SELECT u.*,
+                      c.chiffre_affaires AS ca_dernier,
+                      c.resultat_net AS ebitda_dernier,
+                      c.exercice AS date_derniers_comptes,
+                      c.effectif_moyen AS effectif_exact
+               FROM silver.insee_unites_legales u
+               LEFT JOIN LATERAL (
+                 SELECT chiffre_affaires, resultat_net, effectif_moyen, exercice
+                 FROM silver.inpi_comptes WHERE siren = u.siren
+                 ORDER BY exercice DESC LIMIT 1
+               ) c ON true
+               WHERE u.siren = $1""",
+            siren,
+        )
+    if not fiche:
+        raise HTTPException(status_code=404, detail=f"SIREN {siren} introuvable")
 
-    dirigeants = await pool.fetch(
-        """SELECT person_id, nom, prenom, qualite, age, n_mandats, score_decideur
-           FROM gold.dirigeants_master
-           WHERE siren_companies @> ARRAY[$1]::text[] OR siren = $1
-           ORDER BY score_decideur DESC NULLS LAST
-           LIMIT 5""",
-        siren,
-    ) if await _table_exists(pool, "gold", "dirigeants_master") else []
+    if await _table_exists(pool, "gold", "dirigeants_master"):
+        dirigeants = await pool.fetch(
+            """SELECT person_id, nom, prenom, qualite, age, n_mandats, score_decideur
+               FROM gold.dirigeants_master
+               WHERE siren_companies @> ARRAY[$1]::text[] OR siren = $1
+               ORDER BY score_decideur DESC NULLS LAST
+               LIMIT 5""",
+            siren,
+        )
+    elif await _table_exists(pool, "silver", "inpi_dirigeants"):
+        dirigeants = await pool.fetch(
+            """SELECT nom, prenom, qualite, date_naissance, nationalite
+               FROM silver.inpi_dirigeants
+               WHERE siren = $1
+               ORDER BY date_naissance NULLS LAST
+               LIMIT 10""",
+            siren,
+        )
+    else:
+        dirigeants = []
 
-    signaux = await pool.fetch(
-        """SELECT event_date, signal_type, severity, source, payload
-           FROM gold.signaux_ma_feed
-           WHERE siren = $1
-           ORDER BY event_date DESC
-           LIMIT 10""",
-        siren,
-    ) if await _table_exists(pool, "gold", "signaux_ma_feed") else []
+    signaux = []
+    if await _table_exists(pool, "silver", "bodacc_annonces"):
+        signaux = await pool.fetch(
+            """SELECT dateparution AS event_date, type_annonce AS signal_type,
+                      tribunal AS source, denomination
+               FROM silver.bodacc_annonces
+               WHERE siren = $1
+               ORDER BY dateparution DESC
+               LIMIT 10""",
+            siren,
+        )
 
     presse = await pool.fetch(
         """SELECT published_at, source, title, url, ma_signal_type
@@ -277,13 +311,18 @@ async def cibles_search(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
-    """Recherche cibles M&A — gold.entreprises_master enrichie avec colonnes
-    optionnelles (top_dirigeant, red_flags…). Renvoie row_to_json brut pour
-    rester résilient aux variations de schéma générées par codegen."""
+    """Recherche cibles M&A — privilégie gold.entreprises_master, fallback sur
+    JOIN silver.insee_unites_legales + silver.inpi_comptes si la couche gold
+    n'est pas encore matérialisée. Renvoie row_to_json brut, frontend mappe
+    vers Cible avec rowToCible (résilient aux variations)."""
     pool = _pool(req)
-    if not await _table_exists(pool, "gold", "entreprises_master"):
-        return {"cibles": [], "notice": "gold.entreprises_master pas encore matérialisée"}
 
+    if await _table_exists(pool, "gold", "entreprises_master"):
+        return await _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_rich, has_red_flags, sort, limit, offset)
+    return await _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset)
+
+
+async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_rich, has_red_flags, sort, limit, offset):
     where: list[str] = ["statut = 'actif'"]
     params: list[Any] = []
     if q:
@@ -318,19 +357,92 @@ async def cibles_search(
         ORDER BY {order_col} DESC NULLS LAST
         LIMIT {int(limit)} OFFSET {int(offset)}
     """
-    try:
-        rows = await pool.fetch(sql, *params)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Cibles query error: {type(e).__name__}: {e}")
-
+    rows = await pool.fetch(sql, *params)
     cibles = []
     for r in rows:
-        # row_to_json gives us a dict directly via asyncpg JSON codec, OR a string
         v = r["row"]
         if isinstance(v, str):
             v = json.loads(v)
         cibles.append(v)
-    return {"cibles": cibles, "limit": limit, "offset": offset, "has_more": len(cibles) == limit}
+    return {"cibles": cibles, "limit": limit, "offset": offset, "has_more": len(cibles) == limit, "source": "gold"}
+
+
+async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset):
+    """Fallback : JOIN silver.insee_unites_legales (29M) + silver.inpi_comptes (6M)
+    pour synthétiser une vue cible M&A en attendant que gold.entreprises_master
+    soit produit. Score M&A approx = 50 + (CA / 200K€), capé à 95."""
+    where: list[str] = ["u.etat_administratif = 'A'"]
+    params: list[Any] = []
+    if q:
+        if q.isdigit() and len(q) == 9:
+            params.append(q)
+            where.append(f"u.siren = ${len(params)}")
+        else:
+            params.append(f"%{q}%")
+            where.append(f"u.denomination ILIKE ${len(params)}")
+    if dept:
+        # dépt encodé sur les 2-3 premiers chars du code commune INSEE — on fait
+        # un best-effort via insee_etablissements (siège). Coûteux donc on
+        # squeeze sauf si dept fourni.
+        params.append(dept + "%")
+        where.append(
+            f"u.siren IN (SELECT DISTINCT siren FROM silver.insee_etablissements "
+            f"WHERE etablissement_siege = true AND code_commune ILIKE ${len(params)} LIMIT 5000)"
+        )
+    if naf:
+        params.append(f"{naf}%")
+        where.append(f"u.naf ILIKE ${len(params)}")
+    if min_score is not None:
+        # On ne peut pas filtrer sur le score calculé sans subquery — on filtre
+        # sur le CA approximativement.
+        approx_ca = max(0, (min_score - 50) * 200_000)
+        params.append(approx_ca)
+        where.append(f"COALESCE(c.chiffre_affaires, 0) >= ${len(params)}")
+
+    order_sql = {
+        "score_ma": "COALESCE(c.chiffre_affaires, 0) DESC NULLS LAST",
+        "ca_dernier": "c.chiffre_affaires DESC NULLS LAST",
+        "date_creation": "u.date_creation DESC NULLS LAST",
+    }[sort]
+
+    sql = f"""
+        SELECT u.siren,
+               u.denomination,
+               u.naf,
+               u.naf,
+               '' AS naf_libelle,
+               u.tranche_effectif_unite_legale AS effectif_tranche,
+               u.date_creation,
+               u.etat_administratif,
+               c.chiffre_affaires AS ca_dernier,
+               c.resultat_net AS ebitda_dernier,
+               c.exercice AS date_derniers_comptes,
+               c.effectif_moyen AS effectif_exact,
+               LEAST(95, 50 + (COALESCE(c.chiffre_affaires, 0) / 200000)::int) AS score_ma,
+               (COALESCE(c.chiffre_affaires, 0) >= 14000000) AS is_pro_ma,
+               false AS is_asset_rich,
+               false AS has_compliance_red_flag,
+               false AS is_listed,
+               'actif' AS statut
+        FROM silver.insee_unites_legales u
+        LEFT JOIN LATERAL (
+            SELECT chiffre_affaires, resultat_net, effectif_moyen, exercice
+            FROM silver.inpi_comptes
+            WHERE siren = u.siren
+            ORDER BY exercice DESC
+            LIMIT 1
+        ) c ON true
+        WHERE {' AND '.join(where)}
+        ORDER BY {order_sql}
+        LIMIT {int(limit)} OFFSET {int(offset)}
+    """
+    try:
+        rows = await pool.fetch(sql, *params)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Cibles silver fallback error: {type(e).__name__}: {e}")
+
+    cibles = [_serialize(r) for r in rows]
+    return {"cibles": cibles, "limit": limit, "offset": offset, "has_more": len(cibles) == limit, "source": "silver_fallback"}
 
 
 async def _table_exists(pool: asyncpg.Pool, schema: str, table: str) -> bool:
