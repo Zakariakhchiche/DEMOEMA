@@ -1235,14 +1235,60 @@ async def copilot_stream_endpoint(q: str = Query(...)):
         global enriched_targets, raw_targets
         targets_updated = False
 
+        # Context élargi : top 50 cibles au lieu de 5 (le LLM avait trop peu d'info
+        # et halluciné "199 cibles" alors qu'il n'en voyait que 5).
         context_lines = [
             f"- {t['name']} ({t['sector']}, {t.get('city','?')}): Score {t['globalScore']}, {t['priorityLevel']}"
-            for t in enriched_targets[:5]
+            for t in enriched_targets[:50]
         ]
         context = f"Cibles EdRCF ({len(enriched_targets)} total):\n" + "\n".join(context_lines)
 
-        # SIREN direct lookup
+        # Recherche par denomination si query mentionne un nom d'entreprise connu.
+        # Exemples : "TotalEnergies", "infos de Carrefour", "Renault dirigeants".
+        # On extrait les mots capitalisés ≥ 4 chars et on les cherche dans
+        # silver.inpi_comptes (denomination ILIKE). Si trouvé → on enrichit le
+        # context avec les détails de cette entreprise + on l'ajoute aux cibles.
         siren_match = re.search(r'\b(\d{9})\b', q)
+        if not siren_match:
+            # Cherche un nom propre dans la query (mots capitalisés)
+            name_candidates = re.findall(r'\b[A-Z][a-zA-Z]{3,}(?:\s+[A-Z][a-zA-Z]{2,})*\b', q)
+            for candidate in name_candidates:
+                # Skip mots français courants
+                if candidate.lower() in ("compare", "donne", "voici", "merci", "bonjour", "aide", "due", "diligence"):
+                    continue
+                try:
+                    pool = getattr(app.state, "dl_pool", None)
+                    if pool is None:
+                        break
+                    row = await pool.fetchrow(
+                        """SELECT siren, denomination, ca_net, capital_social,
+                                  effectif_moyen
+                           FROM silver.inpi_comptes
+                           WHERE denomination ILIKE $1 AND ca_net > 0
+                           ORDER BY ca_net DESC LIMIT 1""",
+                        f"%{candidate}%",
+                    )
+                    if row and row["siren"]:
+                        # Enrichit context + cible
+                        ca_b = float(row["ca_net"]) if row["ca_net"] else 0
+                        if ca_b >= 1_000_000_000:
+                            ca_extra = f"{ca_b/1e9:.1f} Md€"
+                        elif ca_b >= 1_000_000:
+                            ca_extra = f"{ca_b/1e6:.1f} M€"
+                        else:
+                            ca_extra = f"{ca_b/1e3:.0f} k€"
+                        context += (
+                            f"\n\n[Détails entreprise mentionnée] "
+                            f"{row['denomination']} (siren {row['siren']}) — "
+                            f"CA {ca_extra}, "
+                            f"capital {row['capital_social'] or 'N/A'}, "
+                            f"effectif {row['effectif_moyen'] or 'N/A'}"
+                        )
+                        break
+                except Exception as e:
+                    print(f"[Stream] denomination lookup error: {e}")
+
+        # SIREN direct lookup
         if siren_match:
             siren_val = siren_match.group(1)
             try:
@@ -1255,7 +1301,16 @@ async def copilot_stream_endpoint(q: str = Query(...)):
                     ville = siege.get("ville", "")
                     naf = company_info.get("libelle_code_naf", "")
                     ca = company_info.get("chiffre_affaires", 0)
-                    ca_str = f"{ca/1e6:.1f}M EUR" if ca and ca > 0 else "N/A"
+                    # Format CA lisible : Md€ si ≥ 1B, M€ sinon (le LLM hallucinait
+                    # avant : "214550.0M EUR" pour TotalEnergies = 214 Md€).
+                    if ca and ca >= 1_000_000_000:
+                        ca_str = f"{ca/1e9:.1f} Md€"
+                    elif ca and ca >= 1_000_000:
+                        ca_str = f"{ca/1e6:.1f} M€"
+                    elif ca and ca > 0:
+                        ca_str = f"{ca/1e3:.0f} k€"
+                    else:
+                        ca_str = "N/A"
                     reps = company_info.get("representants") or []
                     rep_lines = "\n".join([
                         f"  - {r.get('prenom','')} {r.get('nom','')} ({r.get('qualite','')})"
