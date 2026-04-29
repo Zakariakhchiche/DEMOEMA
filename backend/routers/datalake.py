@@ -499,6 +499,46 @@ async def pipeline(req: Request):
     }
 
 
+@router.get("/audit/log")
+async def audit_log(req: Request, limit: int = Query(50, ge=1, le=200)):
+    """Audit log live depuis audit.agent_actions (4k+ entries) — actions des
+    agents codegen + ingest sur les sources."""
+    pool = _pool(req)
+    if not bool(await pool.fetchval(
+        """SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE n.nspname = 'audit' AND c.relname = 'agent_actions'""",
+    )):
+        return {"entries": [], "notice": "audit.agent_actions non disponible"}
+
+    rows = await pool.fetch(
+        f"""SELECT id, agent_role, source_id, action, status,
+                  duration_ms, llm_model, llm_tokens, created_at
+           FROM audit.agent_actions
+           ORDER BY created_at DESC
+           LIMIT {int(limit)}"""
+    )
+    return {"entries": [_serialize(r) for r in rows]}
+
+
+@router.get("/audit/freshness")
+async def audit_freshness(req: Request):
+    """Statut santé des sources bronze/silver — last success, sla, completeness."""
+    pool = _pool(req)
+    if not bool(await pool.fetchval(
+        """SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE n.nspname = 'audit' AND c.relname = 'source_freshness'""",
+    )):
+        return {"sources": []}
+    rows = await pool.fetch(
+        """SELECT source_id, last_success_at, last_failure_at,
+                  rows_last_run, total_rows, sla_minutes, status,
+                  completeness_pct, retry_count
+           FROM audit.source_freshness
+           ORDER BY last_success_at DESC NULLS LAST"""
+    )
+    return {"sources": [_serialize(r) for r in rows]}
+
+
 @router.get("/network/{siren}")
 async def network_for_siren(req: Request, siren: str):
     """Réseau autour d'un siren : nœuds (entreprise centrale, dirigeants top 5,

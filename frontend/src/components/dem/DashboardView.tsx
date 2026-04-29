@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import { Icon } from "./Icon";
 import { ScoreBadge } from "./ScoreBadge";
 import { Sparkline } from "./Sparkline";
-import { KPIS, HEATMAP, WATCHLIST_ALERTS } from "@/lib/dem/data";
-import { fetchTargets } from "@/lib/dem/adapter";
+import { datalakeApi } from "@/lib/api";
+import { rowToTarget } from "@/lib/dem/adapter";
 import type { Mode, Target } from "@/lib/dem/types";
 
 interface Props {
@@ -13,18 +13,47 @@ interface Props {
   onOpenTarget: (t: Target) => void;
 }
 
+interface DashboardData {
+  kpis: {
+    n_cibles_pro_ma?: number;
+    n_red_flags?: number;
+    sigma_top50_ca?: number;
+    n_signals_7d?: number;
+    n_qualified_30d?: number;
+  };
+  heatmap: { dept: string; count: number; label: string }[];
+  alerts: Record<string, unknown>[];
+  top_targets: Record<string, unknown>[];
+}
+
+function fmtBigEur(n: number | undefined): string {
+  if (n == null) return "—";
+  if (n >= 1e12) return `${(n / 1e12).toFixed(1)} Bn€`;
+  if (n >= 1e9) return `${(n / 1e9).toFixed(0)} Md€`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(0)} M€`;
+  return n.toLocaleString("fr-FR") + " €";
+}
+
+function severityFor(family: unknown): "high" | "med" | "low" {
+  const s = String(family || "").toLowerCase();
+  if (s.includes("liquidation") || s.includes("redressement")) return "high";
+  if (s.includes("procédure") || s.includes("procedure")) return "high";
+  if (s.includes("cession")) return "med";
+  return "low";
+}
+
 export function DashboardView({ onMode, onOpenTarget }: Props) {
-  const [topTargets, setTopTargets] = useState<Target[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setLoading(true);
-    fetchTargets({ limit: 5 })
-      .then(setTopTargets)
-      .finally(() => setLoading(false));
+    datalakeApi
+      .dashboard()
+      .then(setData)
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
 
-  const maxCount = Math.max(...HEATMAP.map((h) => h.count));
+  const maxCount = Math.max(1, ...(data?.heatmap.map((h) => h.count) ?? [1]));
   const colorScale = (c: number) => {
     const t = c / maxCount;
     return `rgba(96, 165, 250, ${0.10 + t * 0.55})`;
@@ -37,11 +66,40 @@ export function DashboardView({ onMode, onOpenTarget }: Props) {
           Bonjour Anne ☕
         </div>
         <div style={{ fontSize: 13, color: "var(--text-tertiary)" }}>
-          Mardi 29 avril · 8h14 · 47 nouveaux signaux cette nuit
+          {data?.kpis.n_signals_7d != null
+            ? `${data.kpis.n_signals_7d.toLocaleString("fr-FR")} nouveaux signaux BODACC sur 7 jours · datalake live`
+            : error
+            ? `Datalake indisponible : ${error}`
+            : "Chargement live…"}
         </div>
 
         <div style={{ marginTop: 22, display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
-          {KPIS.map((k, i) => (
+          {[
+            {
+              label: "Cibles Pro M&A (CA ≥ 14M€)",
+              value: data?.kpis.n_cibles_pro_ma?.toLocaleString("fr-FR") ?? "…",
+              delta: "INPI live",
+              color: "var(--accent-blue)",
+            },
+            {
+              label: "Red flags compliance",
+              value: data?.kpis.n_red_flags?.toLocaleString("fr-FR") ?? "…",
+              delta: "OpenSanctions",
+              color: "var(--accent-rose)",
+            },
+            {
+              label: "Σ Top-50 CA",
+              value: fmtBigEur(data?.kpis.sigma_top50_ca),
+              delta: "INPI comptes",
+              color: "var(--accent-emerald)",
+            },
+            {
+              label: "Cibles qualifiées (30j)",
+              value: data?.kpis.n_qualified_30d?.toLocaleString("fr-FR") ?? "…",
+              delta: "exercices déposés 30j",
+              color: "var(--accent-purple)",
+            },
+          ].map((k, i) => (
             <div
               key={i}
               className="dem-glass card-lift fade-up"
@@ -64,75 +122,91 @@ export function DashboardView({ onMode, onOpenTarget }: Props) {
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
               <div style={{ fontSize: 14, fontWeight: 700 }}>Top cibles · score décroissant</div>
               <span className="dem-mono" style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
-                · {topTargets.length} actives (live)
+                · {data?.top_targets.length ?? 0} live
               </span>
               <button className="dem-btn dem-btn-ghost" style={{ marginLeft: "auto" }} onClick={() => onMode("explorer")}>
                 Tout voir →
               </button>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {loading && <div style={{ padding: 12, fontSize: 12, color: "var(--text-tertiary)" }}>Chargement…</div>}
-              {!loading && topTargets.length === 0 && (
+              {!data && !error && <div style={{ padding: 12, fontSize: 12, color: "var(--text-tertiary)" }}>Chargement…</div>}
+              {data?.top_targets.length === 0 && (
                 <div style={{ padding: 12, fontSize: 12, color: "var(--text-tertiary)" }}>
-                  Datalake non joignable. Vérifie /api/datalake/cibles.
+                  Aucune cible disponible dans le datalake actuel.
                 </div>
               )}
-              {topTargets.map((t, i) => (
-                <div
-                  key={t.siren}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 12,
-                    padding: "10px 12px", borderRadius: 8,
-                    background: "rgba(255,255,255,0.02)", cursor: "pointer",
-                  }}
-                  onClick={() => onOpenTarget(t)}
-                >
-                  <span className="dem-mono tab-num" style={{ fontSize: 11, color: "var(--text-muted)", width: 18 }}>#{i + 1}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{t.denomination}</div>
-                    <div style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
-                      {t.naf_label}{t.dept && ` · ${t.dept}`} · {t.ca_str}
+              {data?.top_targets.map((row, i) => {
+                const t = rowToTarget(row);
+                return (
+                  <div
+                    key={t.siren}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 12,
+                      padding: "10px 12px", borderRadius: 8,
+                      background: "rgba(255,255,255,0.02)", cursor: "pointer",
+                    }}
+                    onClick={() => onOpenTarget(t)}
+                  >
+                    <span className="dem-mono tab-num" style={{ fontSize: 11, color: "var(--text-muted)", width: 18 }}>#{i + 1}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{t.denomination}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+                        {t.naf || "—"}{t.dept && ` · ${t.dept}`} · {t.ca_str}
+                      </div>
                     </div>
+                    {t.ca_history.length >= 2 && (
+                      <Sparkline data={t.ca_history} color="var(--accent-blue)" width={64} height={20} />
+                    )}
+                    <ScoreBadge value={t.score} size="sm" />
                   </div>
-                  {t.ca_history.length >= 2 && (
-                    <Sparkline data={t.ca_history} color="var(--accent-blue)" width={64} height={20} />
-                  )}
-                  <ScoreBadge value={t.score} size="sm" />
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
           <div className="dem-glass" style={{ borderRadius: 12, padding: 18 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>Alertes 24h</div>
-              <span className="dem-mono" style={{ fontSize: 11, color: "var(--accent-rose)" }}>· 2 critiques</span>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>Alertes BODACC 14j</div>
+              <span className="dem-mono" style={{ fontSize: 11, color: "var(--accent-rose)" }}>· {data?.alerts.length ?? 0}</span>
               <button className="dem-btn dem-btn-ghost" style={{ marginLeft: "auto" }} onClick={() => onMode("watchlist")}>
                 Tout voir →
               </button>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {WATCHLIST_ALERTS.slice(0, 4).map((a) => (
-                <div
-                  key={a.id}
-                  style={{
-                    display: "flex", alignItems: "flex-start", gap: 10,
-                    padding: "10px 12px", borderRadius: 8,
-                    background: "rgba(255,255,255,0.02)",
-                  }}
-                >
-                  <span className={`sev-dot ${a.severity}`} style={{ marginTop: 5 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 600 }}>{a.target}</div>
-                    <div style={{
-                      fontSize: 11.5,
-                      color: a.severity === "high" ? "var(--accent-rose)" : "var(--text-secondary)",
-                      marginTop: 2,
-                    }}>{a.title}</div>
-                    <div style={{ fontSize: 10.5, color: "var(--text-tertiary)", marginTop: 2 }}>{a.time}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 420, overflowY: "auto" }}>
+              {data?.alerts.slice(0, 6).map((a, i) => {
+                const sev = severityFor(a.family);
+                const date = String(a.date_parution || "").slice(0, 10);
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      display: "flex", alignItems: "flex-start", gap: 10,
+                      padding: "10px 12px", borderRadius: 8,
+                      background: "rgba(255,255,255,0.02)",
+                    }}
+                  >
+                    <span className={`sev-dot ${sev}`} style={{ marginTop: 5 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 600 }}>
+                        {String(a.denomination ?? a.siren ?? "—")}
+                      </div>
+                      <div style={{
+                        fontSize: 11.5,
+                        color: sev === "high" ? "var(--accent-rose)" : "var(--text-secondary)",
+                        marginTop: 2,
+                      }}>{String(a.title ?? "")}</div>
+                      <div style={{ fontSize: 10.5, color: "var(--text-tertiary)", marginTop: 2 }}>
+                        {date} · {String(a.ville ?? "")}{a.code_dept ? ` (${a.code_dept})` : ""}
+                      </div>
+                    </div>
                   </div>
+                );
+              })}
+              {data?.alerts.length === 0 && (
+                <div style={{ padding: 12, fontSize: 12, color: "var(--text-tertiary)" }}>
+                  Aucune alerte sur 14j.
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </div>
@@ -140,12 +214,16 @@ export function DashboardView({ onMode, onOpenTarget }: Props) {
         <div className="dem-glass" style={{ borderRadius: 12, padding: 18, marginTop: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
             <div style={{ fontSize: 14, fontWeight: 700 }}>Sourcing par département</div>
-            <span className="dem-mono" style={{ fontSize: 11, color: "var(--text-tertiary)" }}>· top 12 · 208 cibles total</span>
+            <span className="dem-mono" style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+              · top {data?.heatmap.length ?? 0} · live OSINT companies
+            </span>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8 }}>
-            {HEATMAP.map((h) => (
+            {data?.heatmap.map((h) => (
               <div key={h.dept} className="heat-cell" style={{ background: colorScale(h.count) }}>
-                <div className="dem-mono tab-num" style={{ fontSize: 18, fontWeight: 700, color: "var(--text-primary)" }}>{h.count}</div>
+                <div className="dem-mono tab-num" style={{ fontSize: 18, fontWeight: 700, color: "var(--text-primary)" }}>
+                  {h.count.toLocaleString("fr-FR")}
+                </div>
                 <div style={{ marginTop: 2, fontSize: 11, color: "var(--text-secondary)" }}>{h.label}</div>
                 <div className="dem-mono" style={{ fontSize: 10, color: "var(--text-tertiary)" }}>{h.dept}</div>
               </div>

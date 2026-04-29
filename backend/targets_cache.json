@@ -1,0 +1,1608 @@
+[
+  {
+    "id": "edrcf-002",
+    "siren": "305362162",
+    "name": "ASSURANCES 2000",
+    "sector": "Courtage d'assurance",
+    "sub_sector": "N/A",
+    "region": "Ile-de-France",
+    "city": "93048",
+    "code_naf": "66.22Z",
+    "creation_date": "1976-01-01",
+    "structure": "Familiale",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "76.4M EUR",
+      "revenue_growth": "N/A",
+      "ebitda": "11.5M EUR",
+      "ebitda_margin": "15.0%",
+      "ebitda_range": "10-30M",
+      "effectif": "NN",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "ca_growth_2years",
+      "headcount_growth_20",
+      "big4_audit",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 40,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Ouverture de Capital",
+      "window": "6-12 mois",
+      "narrative": "Des signaux patrimoniaux (structuration holding, audit Big 4) confirment une preparation de cession ou de reorganisation. La dynamique financiere positive (croissance CA, expansion) renforce l'attractivite de la cible pour les acquéreurs. Le secteur Courtage d'assurance est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Courtage d'assurance."
+    },
+    "risks": {
+      "falsePositive": "Faible (0.12)",
+      "uncertainties": "Convergence de plusieurs signaux. Verifier la volonte reelle du dirigeant et le calendrier de cession."
+    }
+  },
+  {
+    "id": "edrcf-004",
+    "siren": "383952470",
+    "name": "CAISSE D'EPARGNE ET DE PREVOYANCE LOIRE-CENTRE (CELC)",
+    "sector": "Services B2B",
+    "sub_sector": "N/A",
+    "region": "France",
+    "city": "45234",
+    "code_naf": "64.19Z",
+    "creation_date": "1991-09-19",
+    "structure": "Familiale",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "268.6M EUR",
+      "revenue_growth": "N/A",
+      "ebitda": "40.3M EUR",
+      "ebitda_margin": "15.0%",
+      "ebitda_range": "> 30M",
+      "effectif": "6-9",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "ca_growth_2years",
+      "headcount_growth_20",
+      "big4_audit",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 40,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Ouverture de Capital",
+      "window": "6-12 mois",
+      "narrative": "Des signaux patrimoniaux (structuration holding, audit Big 4) confirment une preparation de cession ou de reorganisation. La dynamique financiere positive (croissance CA, expansion) renforce l'attractivite de la cible pour les acquéreurs. Le secteur Services B2B est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Services B2B."
+    },
+    "risks": {
+      "falsePositive": "Faible (0.12)",
+      "uncertainties": "Convergence de plusieurs signaux. Verifier la volonte reelle du dirigeant et le calendrier de cession."
+    }
+  },
+  {
+    "id": "edrcf-006",
+    "siren": "479459570",
+    "name": "MMA GESTION",
+    "sector": "Courtage d'assurance",
+    "sub_sector": "N/A",
+    "region": "France",
+    "city": "28085",
+    "code_naf": "66.22Z",
+    "creation_date": "2004-11-17",
+    "structure": "Groupe cote",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "10.6M EUR",
+      "revenue_growth": "N/A",
+      "ebitda": "1.6M EUR",
+      "ebitda_margin": "15.0%",
+      "ebitda_range": "< 3M",
+      "effectif": "NN",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "ca_growth_2years",
+      "headcount_growth_20",
+      "big4_audit",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 40,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Ouverture de Capital",
+      "window": "6-12 mois",
+      "narrative": "Des signaux patrimoniaux (structuration holding, audit Big 4) confirment une preparation de cession ou de reorganisation. La dynamique financiere positive (croissance CA, expansion) renforce l'attractivite de la cible pour les acquéreurs. Le secteur Courtage d'assurance est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Courtage d'assurance."
+    },
+    "risks": {
+      "falsePositive": "Faible (0.12)",
+      "uncertainties": "Convergence de plusieurs signaux. Verifier la volonte reelle du dirigeant et le calendrier de cession."
+    }
+  },
+  {
+    "id": "edrcf-008",
+    "siren": "350379251",
+    "name": "APRIL MON ASSURANCE",
+    "sector": "Courtage d'assurance",
+    "sub_sector": "N/A",
+    "region": "Auvergne-Rhone-Alpes",
+    "city": "69386",
+    "code_naf": "66.22Z",
+    "creation_date": "1989-04-30",
+    "structure": "Familiale",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "13.1M EUR",
+      "revenue_growth": "N/A",
+      "ebitda": "2.0M EUR",
+      "ebitda_margin": "15.0%",
+      "ebitda_range": "< 3M",
+      "effectif": "NN",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "ca_growth_2years",
+      "headcount_growth_20",
+      "big4_audit",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 40,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Ouverture de Capital",
+      "window": "6-12 mois",
+      "narrative": "Des signaux patrimoniaux (structuration holding, audit Big 4) confirment une preparation de cession ou de reorganisation. La dynamique financiere positive (croissance CA, expansion) renforce l'attractivite de la cible pour les acquéreurs. Le secteur Courtage d'assurance est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Courtage d'assurance."
+    },
+    "risks": {
+      "falsePositive": "Faible (0.12)",
+      "uncertainties": "Convergence de plusieurs signaux. Verifier la volonte reelle du dirigeant et le calendrier de cession."
+    }
+  },
+  {
+    "id": "edrcf-010",
+    "siren": "410569776",
+    "name": "GAN PREVOYANCE",
+    "sector": "Courtage d'assurance",
+    "sub_sector": "N/A",
+    "region": "Ile-de-France",
+    "city": "75108",
+    "code_naf": "66.22Z",
+    "creation_date": "1996-12-10",
+    "structure": "Groupe cote",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "79.1M EUR",
+      "revenue_growth": "N/A",
+      "ebitda": "11.9M EUR",
+      "ebitda_margin": "15.0%",
+      "ebitda_range": "10-30M",
+      "effectif": "NN",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "ca_growth_2years",
+      "headcount_growth_20",
+      "big4_audit",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 40,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Ouverture de Capital",
+      "window": "6-12 mois",
+      "narrative": "Des signaux patrimoniaux (structuration holding, audit Big 4) confirment une preparation de cession ou de reorganisation. La dynamique financiere positive (croissance CA, expansion) renforce l'attractivite de la cible pour les acquéreurs. Le secteur Courtage d'assurance est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Courtage d'assurance."
+    },
+    "risks": {
+      "falsePositive": "Faible (0.12)",
+      "uncertainties": "Convergence de plusieurs signaux. Verifier la volonte reelle du dirigeant et le calendrier de cession."
+    }
+  },
+  {
+    "id": "edrcf-012",
+    "siren": "751726076",
+    "name": "ALBEA PATRIMOINE",
+    "sector": "Courtage d'assurance",
+    "sub_sector": "N/A",
+    "region": "Ile-de-France",
+    "city": "92009",
+    "code_naf": "66.22Z",
+    "creation_date": "2012-05-18",
+    "structure": "Groupe cote",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "55.4M EUR",
+      "revenue_growth": "N/A",
+      "ebitda": "8.3M EUR",
+      "ebitda_margin": "15.0%",
+      "ebitda_range": "3-10M",
+      "effectif": "20-49",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "ca_growth_2years",
+      "headcount_growth_20",
+      "big4_audit",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 40,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Ouverture de Capital",
+      "window": "6-12 mois",
+      "narrative": "Des signaux patrimoniaux (structuration holding, audit Big 4) confirment une preparation de cession ou de reorganisation. La dynamique financiere positive (croissance CA, expansion) renforce l'attractivite de la cible pour les acquéreurs. Le secteur Courtage d'assurance est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Courtage d'assurance."
+    },
+    "risks": {
+      "falsePositive": "Faible (0.12)",
+      "uncertainties": "Convergence de plusieurs signaux. Verifier la volonte reelle du dirigeant et le calendrier de cession."
+    }
+  },
+  {
+    "id": "edrcf-014",
+    "siren": "832189468",
+    "name": "SFS FRANCE COURTAGE (SFS FRANCE COURTAGE)",
+    "sector": "Courtage d'assurance",
+    "sub_sector": "N/A",
+    "region": "Ile-de-France",
+    "city": "75108",
+    "code_naf": "66.22Z",
+    "creation_date": "2017-09-01",
+    "structure": "Familiale",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "N/A",
+      "revenue_growth": "N/A",
+      "ebitda": "N/A",
+      "ebitda_margin": "N/A",
+      "ebitda_range": "< 3M",
+      "effectif": "NN",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 16,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Monitoring",
+      "window": "12-18 mois",
+      "narrative": "Le secteur Courtage d'assurance est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Courtage d'assurance."
+    },
+    "risks": {
+      "falsePositive": "Moyen (0.25)",
+      "uncertainties": "Signaux partiels. La situation pourrait evoluer favorablement ou se stabiliser. Surveillance recommandee."
+    }
+  },
+  {
+    "id": "edrcf-016",
+    "siren": "348220948",
+    "name": "SEDGWICK FRANCE",
+    "sector": "Services B2B",
+    "sub_sector": "N/A",
+    "region": "Ile-de-France",
+    "city": "92050",
+    "code_naf": "66.21Z",
+    "creation_date": "1988-10-01",
+    "structure": "Familiale",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "93.3M EUR",
+      "revenue_growth": "N/A",
+      "ebitda": "14.0M EUR",
+      "ebitda_margin": "15.0%",
+      "ebitda_range": "10-30M",
+      "effectif": "250-499",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "ca_growth_2years",
+      "headcount_growth_20",
+      "big4_audit",
+      "new_establishment",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 48,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Ouverture de Capital",
+      "window": "6-12 mois",
+      "narrative": "Des signaux patrimoniaux (structuration holding, audit Big 4) confirment une preparation de cession ou de reorganisation. La dynamique financiere positive (croissance CA, expansion) renforce l'attractivite de la cible pour les acquéreurs. Le secteur Services B2B est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Services B2B."
+    },
+    "risks": {
+      "falsePositive": "Faible (0.12)",
+      "uncertainties": "Convergence de plusieurs signaux. Verifier la volonte reelle du dirigeant et le calendrier de cession."
+    }
+  },
+  {
+    "id": "edrcf-018",
+    "siren": "444275671",
+    "name": "ASTORIA FINANCE (ASTORIA FINANCE)",
+    "sector": "Courtage d'assurance",
+    "sub_sector": "N/A",
+    "region": "Ile-de-France",
+    "city": "75107",
+    "code_naf": "66.22Z",
+    "creation_date": "2002-11-21",
+    "structure": "Familiale",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "30.4M EUR",
+      "revenue_growth": "N/A",
+      "ebitda": "4.6M EUR",
+      "ebitda_margin": "15.0%",
+      "ebitda_range": "3-10M",
+      "effectif": "50-99",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "ca_growth_2years",
+      "headcount_growth_20",
+      "big4_audit",
+      "new_establishment",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 48,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Ouverture de Capital",
+      "window": "6-12 mois",
+      "narrative": "Des signaux patrimoniaux (structuration holding, audit Big 4) confirment une preparation de cession ou de reorganisation. La dynamique financiere positive (croissance CA, expansion) renforce l'attractivite de la cible pour les acquéreurs. Le secteur Courtage d'assurance est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Courtage d'assurance."
+    },
+    "risks": {
+      "falsePositive": "Faible (0.12)",
+      "uncertainties": "Convergence de plusieurs signaux. Verifier la volonte reelle du dirigeant et le calendrier de cession."
+    }
+  },
+  {
+    "id": "edrcf-020",
+    "siren": "311248637",
+    "name": "WILLIS TOWERS WATSON FRANCE",
+    "sector": "Courtage d'assurance",
+    "sub_sector": "N/A",
+    "region": "Ile-de-France",
+    "city": "92062",
+    "code_naf": "66.22Z",
+    "creation_date": "1900-01-01",
+    "structure": "Familiale",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "429.8M EUR",
+      "revenue_growth": "N/A",
+      "ebitda": "64.5M EUR",
+      "ebitda_margin": "15.0%",
+      "ebitda_range": "> 30M",
+      "effectif": "NN",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "ca_growth_2years",
+      "headcount_growth_20",
+      "big4_audit",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 40,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Ouverture de Capital",
+      "window": "6-12 mois",
+      "narrative": "Des signaux patrimoniaux (structuration holding, audit Big 4) confirment une preparation de cession ou de reorganisation. La dynamique financiere positive (croissance CA, expansion) renforce l'attractivite de la cible pour les acquéreurs. Le secteur Courtage d'assurance est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Courtage d'assurance."
+    },
+    "risks": {
+      "falsePositive": "Faible (0.12)",
+      "uncertainties": "Convergence de plusieurs signaux. Verifier la volonte reelle du dirigeant et le calendrier de cession."
+    }
+  },
+  {
+    "id": "edrcf-022",
+    "siren": "480434281",
+    "name": "ADEP",
+    "sector": "Courtage d'assurance",
+    "sub_sector": "N/A",
+    "region": "France",
+    "city": "97103",
+    "code_naf": "66.22Z",
+    "creation_date": "2004-12-21",
+    "structure": "Familiale",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "21.3M EUR",
+      "revenue_growth": "N/A",
+      "ebitda": "3.2M EUR",
+      "ebitda_margin": "15.0%",
+      "ebitda_range": "3-10M",
+      "effectif": "10-19",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "ca_growth_2years",
+      "headcount_growth_20",
+      "big4_audit",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 40,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Ouverture de Capital",
+      "window": "6-12 mois",
+      "narrative": "Des signaux patrimoniaux (structuration holding, audit Big 4) confirment une preparation de cession ou de reorganisation. La dynamique financiere positive (croissance CA, expansion) renforce l'attractivite de la cible pour les acquéreurs. Le secteur Courtage d'assurance est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Courtage d'assurance."
+    },
+    "risks": {
+      "falsePositive": "Faible (0.12)",
+      "uncertainties": "Convergence de plusieurs signaux. Verifier la volonte reelle du dirigeant et le calendrier de cession."
+    }
+  },
+  {
+    "id": "edrcf-024",
+    "siren": "384956884",
+    "name": "LAPLACE",
+    "sector": "Courtage d'assurance",
+    "sub_sector": "N/A",
+    "region": "Occitanie",
+    "city": "34172",
+    "code_naf": "66.22Z",
+    "creation_date": "1992-03-01",
+    "structure": "Familiale",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "80.9M EUR",
+      "revenue_growth": "N/A",
+      "ebitda": "12.1M EUR",
+      "ebitda_margin": "15.0%",
+      "ebitda_range": "10-30M",
+      "effectif": "50-99",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "ca_growth_2years",
+      "headcount_growth_20",
+      "big4_audit",
+      "new_establishment",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 48,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Ouverture de Capital",
+      "window": "6-12 mois",
+      "narrative": "Des signaux patrimoniaux (structuration holding, audit Big 4) confirment une preparation de cession ou de reorganisation. La dynamique financiere positive (croissance CA, expansion) renforce l'attractivite de la cible pour les acquéreurs. Le secteur Courtage d'assurance est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Courtage d'assurance."
+    },
+    "risks": {
+      "falsePositive": "Faible (0.12)",
+      "uncertainties": "Convergence de plusieurs signaux. Verifier la volonte reelle du dirigeant et le calendrier de cession."
+    }
+  },
+  {
+    "id": "edrcf-026",
+    "siren": "509280368",
+    "name": "GESTION SERVICE AGENCES",
+    "sector": "Courtage d'assurance",
+    "sub_sector": "N/A",
+    "region": "France",
+    "city": "45089",
+    "code_naf": "66.22Z",
+    "creation_date": "2009-01-01",
+    "structure": "Familiale",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "2.6M EUR",
+      "revenue_growth": "N/A",
+      "ebitda": "0.4M EUR",
+      "ebitda_margin": "15.0%",
+      "ebitda_range": "< 3M",
+      "effectif": "NN",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 16,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Monitoring",
+      "window": "12-18 mois",
+      "narrative": "Le secteur Courtage d'assurance est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Courtage d'assurance."
+    },
+    "risks": {
+      "falsePositive": "Moyen (0.25)",
+      "uncertainties": "Signaux partiels. La situation pourrait evoluer favorablement ou se stabiliser. Surveillance recommandee."
+    }
+  },
+  {
+    "id": "edrcf-028",
+    "siren": "503659732",
+    "name": "VALORITY GESTION PRIVEE",
+    "sector": "Courtage d'assurance",
+    "sub_sector": "N/A",
+    "region": "Auvergne-Rhone-Alpes",
+    "city": "69386",
+    "code_naf": "66.22Z",
+    "creation_date": "2008-04-01",
+    "structure": "Familiale",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "8.9M EUR",
+      "revenue_growth": "N/A",
+      "ebitda": "1.3M EUR",
+      "ebitda_margin": "15.0%",
+      "ebitda_range": "< 3M",
+      "effectif": "6-9",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "ca_growth_2years",
+      "big4_audit",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 32,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Ouverture de Capital",
+      "window": "6-12 mois",
+      "narrative": "Des signaux patrimoniaux (structuration holding, audit Big 4) confirment une preparation de cession ou de reorganisation. La dynamique financiere positive (croissance CA, expansion) renforce l'attractivite de la cible pour les acquéreurs. Le secteur Courtage d'assurance est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Courtage d'assurance."
+    },
+    "risks": {
+      "falsePositive": "Faible (0.12)",
+      "uncertainties": "Convergence de plusieurs signaux. Verifier la volonte reelle du dirigeant et le calendrier de cession."
+    }
+  },
+  {
+    "id": "edrcf-030",
+    "siren": "538503079",
+    "name": "APS PREVOYANCE (APS PREVOYANCE APS ASSURANCE APS GESTION ASSURANCE CHEVALIER)",
+    "sector": "Courtage d'assurance",
+    "sub_sector": "N/A",
+    "region": "Provence-Alpes-Cote d'Azur",
+    "city": "13027",
+    "code_naf": "66.22Z",
+    "creation_date": "2011-12-09",
+    "structure": "Familiale",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "4.2M EUR",
+      "revenue_growth": "N/A",
+      "ebitda": "0.6M EUR",
+      "ebitda_margin": "15.0%",
+      "ebitda_range": "< 3M",
+      "effectif": "20-49",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "ca_growth_2years",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 24,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Ouverture de Capital",
+      "window": "12-18 mois",
+      "narrative": "La dynamique financiere positive (croissance CA, expansion) renforce l'attractivite de la cible pour les acquéreurs. Le secteur Courtage d'assurance est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Courtage d'assurance."
+    },
+    "risks": {
+      "falsePositive": "Moyen (0.25)",
+      "uncertainties": "Signaux partiels. La situation pourrait evoluer favorablement ou se stabiliser. Surveillance recommandee."
+    }
+  },
+  {
+    "id": "edrcf-032",
+    "siren": "388156499",
+    "name": "SIRCA SNC (SIRCA)",
+    "sector": "Courtage d'assurance",
+    "sub_sector": "N/A",
+    "region": "Ile-de-France",
+    "city": "75115",
+    "code_naf": "66.22Z",
+    "creation_date": "1992-07-01",
+    "structure": "Familiale",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "214.6M EUR",
+      "revenue_growth": "N/A",
+      "ebitda": "32.2M EUR",
+      "ebitda_margin": "15.0%",
+      "ebitda_range": "> 30M",
+      "effectif": "100-199",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "ca_growth_2years",
+      "headcount_growth_20",
+      "big4_audit",
+      "new_establishment",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 48,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Ouverture de Capital",
+      "window": "6-12 mois",
+      "narrative": "Des signaux patrimoniaux (structuration holding, audit Big 4) confirment une preparation de cession ou de reorganisation. La dynamique financiere positive (croissance CA, expansion) renforce l'attractivite de la cible pour les acquéreurs. Le secteur Courtage d'assurance est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Courtage d'assurance."
+    },
+    "risks": {
+      "falsePositive": "Faible (0.12)",
+      "uncertainties": "Convergence de plusieurs signaux. Verifier la volonte reelle du dirigeant et le calendrier de cession."
+    }
+  },
+  {
+    "id": "edrcf-034",
+    "siren": "498688126",
+    "name": "SOCIETE DE GESTION ET DE TRANSMISSION D'AGENCES DE LA REGION NORD (SGTA NORD) (SGTA NORD)",
+    "sector": "Courtage d'assurance",
+    "sub_sector": "N/A",
+    "region": "Grand Est",
+    "city": "54395",
+    "code_naf": "66.22Z",
+    "creation_date": "2007-06-15",
+    "structure": "Familiale",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "2.9M EUR",
+      "revenue_growth": "N/A",
+      "ebitda": "0.4M EUR",
+      "ebitda_margin": "15.0%",
+      "ebitda_range": "< 3M",
+      "effectif": "NN",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 16,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Monitoring",
+      "window": "12-18 mois",
+      "narrative": "Le secteur Courtage d'assurance est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Courtage d'assurance."
+    },
+    "risks": {
+      "falsePositive": "Moyen (0.25)",
+      "uncertainties": "Signaux partiels. La situation pourrait evoluer favorablement ou se stabiliser. Surveillance recommandee."
+    }
+  },
+  {
+    "id": "edrcf-036",
+    "siren": "752220251",
+    "name": "VALORIA CAPITAL",
+    "sector": "Courtage d'assurance",
+    "sub_sector": "N/A",
+    "region": "Ile-de-France",
+    "city": "75117",
+    "code_naf": "66.22Z",
+    "creation_date": "2012-06-06",
+    "structure": "Familiale",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "8.8M EUR",
+      "revenue_growth": "N/A",
+      "ebitda": "1.3M EUR",
+      "ebitda_margin": "15.0%",
+      "ebitda_range": "< 3M",
+      "effectif": "20-49",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "ca_growth_2years",
+      "big4_audit",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 32,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Ouverture de Capital",
+      "window": "6-12 mois",
+      "narrative": "Des signaux patrimoniaux (structuration holding, audit Big 4) confirment une preparation de cession ou de reorganisation. La dynamique financiere positive (croissance CA, expansion) renforce l'attractivite de la cible pour les acquéreurs. Le secteur Courtage d'assurance est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Courtage d'assurance."
+    },
+    "risks": {
+      "falsePositive": "Faible (0.12)",
+      "uncertainties": "Convergence de plusieurs signaux. Verifier la volonte reelle du dirigeant et le calendrier de cession."
+    }
+  },
+  {
+    "id": "edrcf-038",
+    "siren": "751953225",
+    "name": "ACCES ASSURANCE",
+    "sector": "Courtage d'assurance",
+    "sub_sector": "N/A",
+    "region": "Ile-de-France",
+    "city": "93073",
+    "code_naf": "66.22Z",
+    "creation_date": "2012-07-06",
+    "structure": "Familiale",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "2.7M EUR",
+      "revenue_growth": "N/A",
+      "ebitda": "0.4M EUR",
+      "ebitda_margin": "15.0%",
+      "ebitda_range": "< 3M",
+      "effectif": "1-2",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 16,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Monitoring",
+      "window": "12-18 mois",
+      "narrative": "Le secteur Courtage d'assurance est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Courtage d'assurance."
+    },
+    "risks": {
+      "falsePositive": "Moyen (0.25)",
+      "uncertainties": "Signaux partiels. La situation pourrait evoluer favorablement ou se stabiliser. Surveillance recommandee."
+    }
+  },
+  {
+    "id": "edrcf-040",
+    "siren": "798671335",
+    "name": "MANDAE",
+    "sector": "Courtage d'assurance",
+    "sub_sector": "N/A",
+    "region": "Ile-de-France",
+    "city": "94028",
+    "code_naf": "66.22Z",
+    "creation_date": "2013-11-04",
+    "structure": "Familiale",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "19.2M EUR",
+      "revenue_growth": "N/A",
+      "ebitda": "2.9M EUR",
+      "ebitda_margin": "15.0%",
+      "ebitda_range": "< 3M",
+      "effectif": "20-49",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "ca_growth_2years",
+      "headcount_growth_20",
+      "big4_audit",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 40,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Ouverture de Capital",
+      "window": "6-12 mois",
+      "narrative": "Des signaux patrimoniaux (structuration holding, audit Big 4) confirment une preparation de cession ou de reorganisation. La dynamique financiere positive (croissance CA, expansion) renforce l'attractivite de la cible pour les acquéreurs. Le secteur Courtage d'assurance est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Courtage d'assurance."
+    },
+    "risks": {
+      "falsePositive": "Faible (0.12)",
+      "uncertainties": "Convergence de plusieurs signaux. Verifier la volonte reelle du dirigeant et le calendrier de cession."
+    }
+  },
+  {
+    "id": "edrcf-042",
+    "siren": "907987010",
+    "name": "SAGIPA 1",
+    "sector": "Courtage d'assurance",
+    "sub_sector": "N/A",
+    "region": "Ile-de-France",
+    "city": "75108",
+    "code_naf": "66.22Z",
+    "creation_date": "2021-11-16",
+    "structure": "Familiale",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "N/A",
+      "revenue_growth": "N/A",
+      "ebitda": "N/A",
+      "ebitda_margin": "N/A",
+      "ebitda_range": "< 3M",
+      "effectif": "NN",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 16,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Monitoring",
+      "window": "12-18 mois",
+      "narrative": "Le secteur Courtage d'assurance est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Courtage d'assurance."
+    },
+    "risks": {
+      "falsePositive": "Moyen (0.25)",
+      "uncertainties": "Signaux partiels. La situation pourrait evoluer favorablement ou se stabiliser. Surveillance recommandee."
+    }
+  },
+  {
+    "id": "edrcf-044",
+    "siren": "421734286",
+    "name": "LEADER ASSURANCES (RC)",
+    "sector": "Courtage d'assurance",
+    "sub_sector": "N/A",
+    "region": "Ile-de-France",
+    "city": "78361",
+    "code_naf": "66.22Z",
+    "creation_date": "1999-01-01",
+    "structure": "Familiale",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "3.9M EUR",
+      "revenue_growth": "N/A",
+      "ebitda": "0.6M EUR",
+      "ebitda_margin": "15.0%",
+      "ebitda_range": "< 3M",
+      "effectif": "1-2",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "ca_growth_2years",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 24,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Ouverture de Capital",
+      "window": "12-18 mois",
+      "narrative": "La dynamique financiere positive (croissance CA, expansion) renforce l'attractivite de la cible pour les acquéreurs. Le secteur Courtage d'assurance est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Courtage d'assurance."
+    },
+    "risks": {
+      "falsePositive": "Moyen (0.25)",
+      "uncertainties": "Signaux partiels. La situation pourrait evoluer favorablement ou se stabiliser. Surveillance recommandee."
+    }
+  },
+  {
+    "id": "edrcf-046",
+    "siren": "378566533",
+    "name": "UNOFI PATRIMOINE",
+    "sector": "Courtage d'assurance",
+    "sub_sector": "N/A",
+    "region": "Ile-de-France",
+    "city": "75101",
+    "code_naf": "66.22Z",
+    "creation_date": "1990-05-14",
+    "structure": "Groupe cote",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "29.9M EUR",
+      "revenue_growth": "N/A",
+      "ebitda": "4.5M EUR",
+      "ebitda_margin": "15.0%",
+      "ebitda_range": "3-10M",
+      "effectif": "20-49",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "ca_growth_2years",
+      "headcount_growth_20",
+      "big4_audit",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 40,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Ouverture de Capital",
+      "window": "6-12 mois",
+      "narrative": "Des signaux patrimoniaux (structuration holding, audit Big 4) confirment une preparation de cession ou de reorganisation. La dynamique financiere positive (croissance CA, expansion) renforce l'attractivite de la cible pour les acquéreurs. Le secteur Courtage d'assurance est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Courtage d'assurance."
+    },
+    "risks": {
+      "falsePositive": "Faible (0.12)",
+      "uncertainties": "Convergence de plusieurs signaux. Verifier la volonte reelle du dirigeant et le calendrier de cession."
+    }
+  },
+  {
+    "id": "edrcf-048",
+    "siren": "485372247",
+    "name": "OLIFAN COURTAGE (OLIFAN GROUP)",
+    "sector": "Courtage d'assurance",
+    "sub_sector": "N/A",
+    "region": "Provence-Alpes-Cote d'Azur",
+    "city": "13001",
+    "code_naf": "66.22Z",
+    "creation_date": "2006-01-02",
+    "structure": "Familiale",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "19.5M EUR",
+      "revenue_growth": "N/A",
+      "ebitda": "2.9M EUR",
+      "ebitda_margin": "15.0%",
+      "ebitda_range": "< 3M",
+      "effectif": "10-19",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "ca_growth_2years",
+      "headcount_growth_20",
+      "big4_audit",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 40,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Ouverture de Capital",
+      "window": "6-12 mois",
+      "narrative": "Des signaux patrimoniaux (structuration holding, audit Big 4) confirment une preparation de cession ou de reorganisation. La dynamique financiere positive (croissance CA, expansion) renforce l'attractivite de la cible pour les acquéreurs. Le secteur Courtage d'assurance est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Courtage d'assurance."
+    },
+    "risks": {
+      "falsePositive": "Faible (0.12)",
+      "uncertainties": "Convergence de plusieurs signaux. Verifier la volonte reelle du dirigeant et le calendrier de cession."
+    }
+  },
+  {
+    "id": "edrcf-050",
+    "siren": "498484690",
+    "name": "SOCIETE DE GESTION ET DE TRANSMISSION D'AGENCES DE LA REGION SUD (SGTA SUD)",
+    "sector": "Courtage d'assurance",
+    "sub_sector": "N/A",
+    "region": "Auvergne-Rhone-Alpes",
+    "city": "69383",
+    "code_naf": "66.22Z",
+    "creation_date": "2007-06-15",
+    "structure": "Familiale",
+    "publication_status": "Publie",
+    "dirigeants": [
+      {
+        "name": "Dirigeant principal",
+        "role": "President",
+        "age": 0,
+        "since": "N/A"
+      }
+    ],
+    "financials": {
+      "revenue": "4.0M EUR",
+      "revenue_growth": "N/A",
+      "ebitda": "0.6M EUR",
+      "ebitda_margin": "15.0%",
+      "ebitda_range": "< 3M",
+      "effectif": "1-2",
+      "last_published_year": 2024
+    },
+    "active_signals": [
+      "sector_consolidation",
+      "ca_growth_2years",
+      "press_regional"
+    ],
+    "group": {
+      "is_group": false,
+      "parent": null,
+      "subsidiaries": [],
+      "consolidated_revenue": null
+    },
+    "relationship": {
+      "strength": 24,
+      "path": "Identifie via Copilot Pappers",
+      "common_connections": 0,
+      "edr_banker": null
+    },
+    "analysis": {
+      "type": "Ouverture de Capital",
+      "window": "12-18 mois",
+      "narrative": "La dynamique financiere positive (croissance CA, expansion) renforce l'attractivite de la cible pour les acquéreurs. Le secteur Courtage d'assurance est en phase de consolidation active, offrant un contexte favorable a une transaction."
+    },
+    "activation": {
+      "deciders": [
+        "A identifier"
+      ],
+      "approach": "Qualification via screening Pappers",
+      "reason": "Entreprise identifiee par le Copilot IA dans le secteur Courtage d'assurance."
+    },
+    "risks": {
+      "falsePositive": "Moyen (0.25)",
+      "uncertainties": "Signaux partiels. La situation pourrait evoluer favorablement ou se stabiliser. Surveillance recommandee."
+    }
+  }
+]

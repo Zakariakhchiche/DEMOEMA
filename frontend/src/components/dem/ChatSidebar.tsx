@@ -1,23 +1,49 @@
 "use client";
 
 import { Icon } from "./Icon";
-import { CONVERSATIONS, SAVED_SEARCHES } from "@/lib/dem/data";
+
+export interface ChatConvSummary {
+  id: string;
+  title: string;
+  updated_at: number;
+  type?: "sourcing" | "dd" | "compare" | "graph";
+}
 
 interface Props {
   active?: string;
+  conversations: ChatConvSummary[];
   onSelect: (id: string) => void;
   onNew: () => void;
   collapsed?: boolean;
 }
 
-const GROUPS = [
-  { key: "today" as const, label: "Aujourd'hui" },
-  { key: "7d" as const, label: "7 derniers jours" },
-  { key: "30d" as const, label: "30 derniers jours" },
-];
+function relativeTime(ts: number): string {
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return "à l'instant";
+  if (diff < 3600_000) return `il y a ${Math.floor(diff / 60_000)} min`;
+  if (diff < 86_400_000) return `il y a ${Math.floor(diff / 3600_000)} h`;
+  const d = new Date(ts);
+  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+}
 
-export function ChatSidebar({ active, onSelect, onNew, collapsed }: Props) {
+function bucket(ts: number): "today" | "7d" | "30d" | "older" {
+  const age = Date.now() - ts;
+  if (age < 86_400_000) return "today";
+  if (age < 7 * 86_400_000) return "7d";
+  if (age < 30 * 86_400_000) return "30d";
+  return "older";
+}
+
+export function ChatSidebar({ active, conversations, onSelect, onNew, collapsed }: Props) {
   if (collapsed) return null;
+
+  const groups: { key: "today" | "7d" | "30d" | "older"; label: string }[] = [
+    { key: "today", label: "Aujourd'hui" },
+    { key: "7d", label: "7 derniers jours" },
+    { key: "30d", label: "30 derniers jours" },
+    { key: "older", label: "Plus ancien" },
+  ];
+
   return (
     <div style={{
       width: 264, borderRight: "1px solid var(--border-subtle)",
@@ -39,8 +65,14 @@ export function ChatSidebar({ active, onSelect, onNew, collapsed }: Props) {
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: "4px 6px 12px" }}>
-        {GROUPS.map((g) => {
-          const items = CONVERSATIONS.filter((c) => c.group === g.key);
+        {conversations.length === 0 && (
+          <div style={{ padding: "20px 14px", fontSize: 12, color: "var(--text-tertiary)", textAlign: "center" }}>
+            Aucune conversation.<br />
+            Démarre la première en posant une question.
+          </div>
+        )}
+        {groups.map((g) => {
+          const items = conversations.filter((c) => bucket(c.updated_at) === g.key);
           if (!items.length) return null;
           return (
             <div key={g.key} style={{ marginTop: 10 }}>
@@ -64,48 +96,18 @@ export function ChatSidebar({ active, onSelect, onNew, collapsed }: Props) {
                     if (active !== c.id) e.currentTarget.style.background = "transparent";
                   }}
                 >
-                  {c.proactive ? (
-                    <span style={{
-                      width: 6, height: 6, borderRadius: 999,
-                      background: "var(--accent-cyan)",
-                      boxShadow: "0 0 8px var(--accent-cyan)",
-                      flexShrink: 0,
-                    }} />
-                  ) : (
-                    <Icon
-                      name={c.type === "dd" ? "shield" : c.type === "compare" ? "layers" : c.type === "graph" ? "network" : "search"}
-                      size={11}
-                      color="var(--text-tertiary)"
-                    />
-                  )}
+                  <Icon
+                    name={c.type === "dd" ? "shield" : c.type === "compare" ? "layers" : c.type === "graph" ? "network" : "search"}
+                    size={11}
+                    color="var(--text-tertiary)"
+                  />
                   <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span>
-                  <span style={{ fontSize: 10.5, color: "var(--text-muted)", flexShrink: 0 }}>{c.time}</span>
+                  <span style={{ fontSize: 10.5, color: "var(--text-muted)", flexShrink: 0 }}>{relativeTime(c.updated_at)}</span>
                 </button>
               ))}
             </div>
           );
         })}
-
-        <div style={{ marginTop: 18 }}>
-          <div className="section-label" style={{ padding: "6px 10px" }}>Recherches sauvées</div>
-          {SAVED_SEARCHES.map((s) => (
-            <button
-              key={s.id}
-              style={{
-                display: "flex", alignItems: "center", gap: 8, width: "100%",
-                padding: "8px 10px", borderRadius: 7, border: "none",
-                background: "transparent", color: "var(--text-secondary)",
-                cursor: "pointer", fontSize: 12.5, textAlign: "left",
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.025)")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-            >
-              <Icon name="bookmark" size={11} color="var(--text-tertiary)" />
-              <span style={{ flex: 1 }}>{s.name}</span>
-              <span className="dem-mono" style={{ fontSize: 10.5, color: "var(--text-muted)" }}>{s.count}</span>
-            </button>
-          ))}
-        </div>
       </div>
 
       <div style={{ borderTop: "1px solid var(--border-subtle)", padding: "8px 10px", display: "flex", gap: 4 }}>

@@ -94,7 +94,7 @@ export default function Home() {
         {mode === "pipeline" && <PipelineView onOpenTarget={setOpenTarget} />}
         {mode === "watchlist" && <WatchlistView onOpenTarget={setOpenTarget} />}
         {mode === "explorer" && <DataExplorerView onOpenTarget={setOpenTarget} />}
-        {mode === "graph" && <NetworkGraphView />}
+        {mode === "graph" && <NetworkGraphView onOpenTarget={setOpenTarget} />}
         {mode === "compare" && <CompareView />}
         {mode === "audit" && <AuditView />}
       </div>

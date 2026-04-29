@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Icon } from "./Icon";
-import { CONVERSATIONS, SLASH_COMMANDS } from "@/lib/dem/data";
+import { SLASH_COMMANDS } from "@/lib/dem/data";
 
 interface Item {
   icon: string;
@@ -18,20 +18,12 @@ interface Props {
 
 export function CmdPalette({ onClose, onCommand }: Props) {
   const [q, setQ] = useState("");
-  const items: Item[] = [
-    ...SLASH_COMMANDS.map((c) => ({
-      icon: "chat",
-      label: c.cmd,
-      sub: c.desc,
-      action: () => onCommand(c.example),
-    })),
-    ...CONVERSATIONS.slice(0, 4).map((c) => ({
-      icon: "history",
-      label: c.title,
-      sub: c.time,
-      action: () => onClose(),
-    })),
-  ];
+  const items: Item[] = SLASH_COMMANDS.map((c) => ({
+    icon: "chat",
+    label: c.cmd,
+    sub: c.desc,
+    action: () => onCommand(c.example),
+  }));
   const filtered = q
     ? items.filter((i) => i.label.toLowerCase().includes(q.toLowerCase()) || i.sub.toLowerCase().includes(q.toLowerCase()))
     : items;

@@ -133,9 +133,11 @@ export const datalakeApi = {
 
   ficheEntreprise: (siren: string) =>
     jget<{
-      fiche: Partial<Cible> & Record<string, unknown>;
+      fiche: Record<string, unknown>;
       dirigeants: Record<string, unknown>[];
       signaux: Record<string, unknown>[];
+      red_flags: Record<string, unknown>[];
+      network: Record<string, unknown>[];
       presse: Record<string, unknown>[];
     }>(`/api/datalake/entreprise/${siren}`),
 
@@ -148,6 +150,76 @@ export const datalakeApi = {
       `/api/datalake/press/recent?${p.toString()}`
     );
   },
+
+  dashboard: () =>
+    jget<{
+      kpis: {
+        n_cibles_pro_ma?: number;
+        n_red_flags?: number;
+        sigma_top50_ca?: number;
+        n_signals_7d?: number;
+        n_qualified_30d?: number;
+      };
+      heatmap: { dept: string; count: number; label: string }[];
+      alerts: Record<string, unknown>[];
+      top_targets: Record<string, unknown>[];
+    }>(`/api/datalake/dashboard`),
+
+  pipeline: () =>
+    jget<{
+      stages: { id: string; label: string; color: string }[];
+      deals: {
+        id: string;
+        siren: string;
+        name: string;
+        stage: string;
+        value: string;
+        value_num: number;
+        owner: string;
+        days: number;
+        score: number;
+        side: "buy-side" | "sell-side";
+        next: string;
+        urgent: boolean;
+      }[];
+    }>(`/api/datalake/pipeline`),
+
+  network: (siren: string) =>
+    jget<{
+      nodes: { id: string; label: string; type: "target" | "person" | "company" | "sci"; x: number; y: number }[];
+      links: { source: string; target: string; kind: string }[];
+    }>(`/api/datalake/network/${siren}`),
+
+  auditLog: (limit = 50) =>
+    jget<{
+      entries: {
+        id: number;
+        agent_role: string;
+        source_id: string;
+        action: string;
+        status: string;
+        duration_ms: number;
+        llm_model: string | null;
+        llm_tokens: number | null;
+        created_at: string;
+      }[];
+      notice?: string;
+    }>(`/api/datalake/audit/log?limit=${limit}`),
+
+  auditFreshness: () =>
+    jget<{
+      sources: {
+        source_id: string;
+        last_success_at: string | null;
+        last_failure_at: string | null;
+        rows_last_run: number | null;
+        total_rows: number;
+        sla_minutes: number;
+        status: string;
+        completeness_pct: number | null;
+        retry_count: number;
+      }[];
+    }>(`/api/datalake/audit/freshness`),
 };
 
 // ───── Copilot SSE streaming ──────────────────────────────────────────
