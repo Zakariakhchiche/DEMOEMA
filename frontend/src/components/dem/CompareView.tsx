@@ -149,9 +149,12 @@ export function CompareView() {
   const [selected, setSelected] = useState<string[]>([]);
   const [anchorSiren, setAnchorSiren] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState("");
 
   useEffect(() => {
-    fetchTargets({ limit: 8 }).then((ts) => {
+    // Pool large (50) pour pouvoir ajouter et chercher d'autres cibles que les
+    // 3 initiales — sinon le picker n'a presque rien à proposer.
+    fetchTargets({ limit: 50 }).then((ts) => {
       setPool(ts);
       const initial = ts.slice(0, 3).map((t) => t.siren);
       setSelected(initial);
@@ -200,8 +203,34 @@ export function CompareView() {
             · {targets.length}/5 cibles{anchor && ` · ancre ${anchor.denomination}`}
           </span>
           <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-            <button className="dem-btn"><Icon name="download" size={11} /> Export PDF</button>
-            <button className="dem-btn"><Icon name="bookmark" size={11} /> Sauver vue</button>
+            <button
+              className="dem-btn"
+              onClick={() => {
+                if (typeof window !== "undefined") {
+                  // Astuce simple : window.print() ouvre le dialog de la page
+                  // courante en pdf. Le CSS @media print du shell rend le grid
+                  // proprement (cf. globals.css).
+                  window.print();
+                }
+              }}
+            >
+              <Icon name="download" size={11} /> Export PDF
+            </button>
+            <button
+              className="dem-btn"
+              onClick={() => {
+                try {
+                  const view = { selected, anchorSiren, savedAt: new Date().toISOString() };
+                  const all = JSON.parse(localStorage.getItem("dem.compare.views") || "[]");
+                  localStorage.setItem("dem.compare.views", JSON.stringify([view, ...all].slice(0, 20)));
+                  alert("Vue comparateur sauvegardée localement.");
+                } catch {
+                  alert("Impossible de sauvegarder (localStorage indisponible).");
+                }
+              }}
+            >
+              <Icon name="bookmark" size={11} /> Sauver vue
+            </button>
           </span>
         </div>
         {targets.length >= 2 && (
@@ -285,43 +314,92 @@ export function CompareView() {
                   <div style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{5 - selected.length} slot{5 - selected.length > 1 ? "s" : ""} dispo</div>
                 </button>
                 {pickerOpen && (
-                  <div style={{
-                    position: "absolute", top: "100%", left: 12, right: 12, marginTop: 4,
-                    background: "var(--bg-elevated)",
-                    border: "1px solid var(--border-mid)", borderRadius: 10,
-                    padding: 6, zIndex: 10, maxHeight: 280, overflowY: "auto",
-                    boxShadow: "0 12px 32px rgba(0,0,0,0.4)",
-                  }}>
-                    {available.length === 0 && (
-                      <div style={{ padding: 12, fontSize: 12, color: "var(--text-tertiary)" }}>Toutes les cibles sont déjà ajoutées.</div>
-                    )}
-                    {available.map((t) => (
-                      <button
-                        key={t.siren}
-                        onClick={() => add(t.siren)}
-                        style={{
-                          width: "100%", display: "flex",
-                          alignItems: "center", gap: 10,
-                          padding: "8px 10px", background: "transparent",
-                          border: "none", borderRadius: 6,
-                          color: "var(--text-primary)", cursor: "pointer",
-                          textAlign: "left", fontSize: 12.5,
-                        }}
-                        onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.04)")}
-                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                      >
-                        <ScoreBadge value={t.score} />
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{
-                            fontWeight: 500, whiteSpace: "nowrap",
-                            overflow: "hidden", textOverflow: "ellipsis",
-                          }}>{t.denomination}</div>
-                          <div className="dem-mono" style={{ fontSize: 10.5, color: "var(--text-tertiary)" }}>
-                            {t.ca_str} · {t.naf}
-                          </div>
+                  <div
+                    role="dialog"
+                    style={{
+                      // position:fixed centré pour ne pas être clippé par le grid
+                      // overflow auto qui contient la card placeholder.
+                      position: "fixed",
+                      inset: 0,
+                      background: "rgba(0,0,0,0.5)",
+                      zIndex: 100,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: 20,
+                    }}
+                    onClick={() => setPickerOpen(false)}
+                  >
+                    <div
+                      style={{
+                        width: "min(560px, 92vw)", maxHeight: "70vh",
+                        background: "var(--bg-elevated)",
+                        border: "1px solid var(--border-mid)", borderRadius: 12,
+                        boxShadow: "0 20px 48px rgba(0,0,0,0.6)",
+                        display: "flex", flexDirection: "column",
+                        overflow: "hidden",
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--border-subtle)" }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+                          Ajouter une cible au comparatif
                         </div>
-                      </button>
-                    ))}
+                        <input
+                          autoFocus
+                          value={pickerQuery}
+                          onChange={(e) => setPickerQuery(e.target.value)}
+                          placeholder="Rechercher par nom, SIREN, ville…"
+                          className="dem-input"
+                          style={{ width: "100%" }}
+                        />
+                      </div>
+                      <div style={{ flex: 1, overflowY: "auto", padding: 6 }}>
+                        {available.length === 0 && (
+                          <div style={{ padding: 24, fontSize: 12, color: "var(--text-tertiary)", textAlign: "center" }}>
+                            Toutes les cibles disponibles sont déjà ajoutées.
+                          </div>
+                        )}
+                        {available
+                          .filter((t) => {
+                            const q = pickerQuery.trim().toLowerCase();
+                            if (!q) return true;
+                            return (
+                              t.denomination.toLowerCase().includes(q) ||
+                              t.siren.includes(q) ||
+                              (t.ville || "").toLowerCase().includes(q) ||
+                              (t.naf || "").toLowerCase().includes(q)
+                            );
+                          })
+                          .map((t) => (
+                            <button
+                              key={t.siren}
+                              onClick={() => add(t.siren)}
+                              style={{
+                                width: "100%", display: "flex",
+                                alignItems: "center", gap: 10,
+                                padding: "8px 10px", background: "transparent",
+                                border: "none", borderRadius: 6,
+                                color: "var(--text-primary)", cursor: "pointer",
+                                textAlign: "left", fontSize: 12.5,
+                              }}
+                              onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.04)")}
+                              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                            >
+                              <ScoreBadge value={t.score} />
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{
+                                  fontWeight: 500, whiteSpace: "nowrap",
+                                  overflow: "hidden", textOverflow: "ellipsis",
+                                }}>{t.denomination}</div>
+                                <div className="dem-mono" style={{ fontSize: 10.5, color: "var(--text-tertiary)" }}>
+                                  {t.siren} · {t.ca_str} · {t.naf || t.ville || "—"}
+                                </div>
+                              </div>
+                            </button>
+                          ))}
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>

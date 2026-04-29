@@ -24,6 +24,27 @@ interface Alert {
   severity: "high" | "med" | "low";
 }
 
+interface Rule {
+  id: string;
+  name: string;
+  ca_min?: number;
+  ca_max?: number;
+  dept?: string;
+  naf_prefix?: string;
+  with_red_flags: boolean;
+  pro_ma_only: boolean;
+  created_at: string;
+}
+
+const RULES_KEY = "dem.watchlist.rules";
+function loadRules(): Rule[] {
+  try { return JSON.parse(localStorage.getItem(RULES_KEY) || "[]"); }
+  catch { return []; }
+}
+function saveRules(r: Rule[]) {
+  try { localStorage.setItem(RULES_KEY, JSON.stringify(r)); } catch {}
+}
+
 function severityFor(family: unknown): "high" | "med" | "low" {
   const s = String(family || "").toLowerCase();
   if (s.includes("liquidation") || s.includes("redressement") || s.includes("procédure") || s.includes("procedure")) return "high";
@@ -35,6 +56,9 @@ export function WatchlistView({ onOpenTarget }: Props) {
   const [tab, setTab] = useState<"alerts" | "rules">("alerts");
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
+  const [rules, setRules] = useState<Rule[]>(() => loadRules());
+  const [showRuleForm, setShowRuleForm] = useState(false);
+  const [draft, setDraft] = useState<Partial<Rule>>({ with_red_flags: false, pro_ma_only: false });
 
   useEffect(() => {
     setLoading(true);
@@ -74,7 +98,12 @@ export function WatchlistView({ onOpenTarget }: Props) {
             · {alerts.length} alertes BODACC 14j · datalake live
           </span>
           <span style={{ marginLeft: "auto" }}>
-            <button className="dem-btn dem-btn-primary"><Icon name="plus" size={11} /> Nouvelle règle</button>
+            <button
+              className="dem-btn dem-btn-primary"
+              onClick={() => { setTab("rules"); setShowRuleForm(true); }}
+            >
+              <Icon name="plus" size={11} /> Nouvelle règle
+            </button>
           </span>
         </div>
         <div style={{ display: "flex", gap: 4, marginTop: 14 }}>
@@ -135,18 +164,165 @@ export function WatchlistView({ onOpenTarget }: Props) {
         )}
         {tab === "rules" && (
           <div style={{ maxWidth: 920, margin: "0 auto", padding: 24 }}>
-            <div className="dem-glass" style={{ padding: 32, borderRadius: 12, textAlign: "center", color: "var(--text-tertiary)", fontSize: 13 }}>
-              <Icon name="bookmark" size={24} color="var(--text-muted)" />
-              <div style={{ marginTop: 8, fontSize: 14, color: "var(--text-secondary)", fontWeight: 600 }}>
-                Aucune règle sauvegardée
+            {showRuleForm && (
+              <div className="dem-glass" style={{ padding: 20, borderRadius: 12, marginBottom: 16 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Nouvelle règle de watchlist</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <Field label="Nom de la règle">
+                    <input
+                      value={draft.name || ""}
+                      onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                      placeholder="ex: Cibles Île-de-France 5-15M€"
+                      className="dem-input"
+                    />
+                  </Field>
+                  <Field label="Département (code 2 chiffres)">
+                    <input
+                      value={draft.dept || ""}
+                      onChange={(e) => setDraft({ ...draft, dept: e.target.value })}
+                      placeholder="ex: 75"
+                      className="dem-input"
+                    />
+                  </Field>
+                  <Field label="CA minimum (€)">
+                    <input
+                      type="number"
+                      value={draft.ca_min ?? ""}
+                      onChange={(e) => setDraft({ ...draft, ca_min: e.target.value ? Number(e.target.value) : undefined })}
+                      placeholder="ex: 5000000"
+                      className="dem-input"
+                    />
+                  </Field>
+                  <Field label="CA maximum (€)">
+                    <input
+                      type="number"
+                      value={draft.ca_max ?? ""}
+                      onChange={(e) => setDraft({ ...draft, ca_max: e.target.value ? Number(e.target.value) : undefined })}
+                      placeholder="ex: 15000000"
+                      className="dem-input"
+                    />
+                  </Field>
+                  <Field label="Code NAF (préfixe)">
+                    <input
+                      value={draft.naf_prefix || ""}
+                      onChange={(e) => setDraft({ ...draft, naf_prefix: e.target.value })}
+                      placeholder="ex: 62 (informatique)"
+                      className="dem-input"
+                    />
+                  </Field>
+                  <Field label="Filtres rapides">
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+                        <input
+                          type="checkbox"
+                          checked={!!draft.pro_ma_only}
+                          onChange={(e) => setDraft({ ...draft, pro_ma_only: e.target.checked })}
+                        /> Pro M&A
+                      </label>
+                      <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+                        <input
+                          type="checkbox"
+                          checked={!!draft.with_red_flags}
+                          onChange={(e) => setDraft({ ...draft, with_red_flags: e.target.checked })}
+                        /> Avec red flags
+                      </label>
+                    </div>
+                  </Field>
+                </div>
+                <div style={{ marginTop: 14, display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                  <button className="dem-btn" onClick={() => { setShowRuleForm(false); setDraft({ with_red_flags: false, pro_ma_only: false }); }}>Annuler</button>
+                  <button
+                    className="dem-btn dem-btn-primary"
+                    onClick={() => {
+                      if (!draft.name) { alert("Donne un nom à la règle"); return; }
+                      const rule: Rule = {
+                        id: `r_${Date.now()}`,
+                        name: draft.name,
+                        ca_min: draft.ca_min,
+                        ca_max: draft.ca_max,
+                        dept: draft.dept,
+                        naf_prefix: draft.naf_prefix,
+                        with_red_flags: !!draft.with_red_flags,
+                        pro_ma_only: !!draft.pro_ma_only,
+                        created_at: new Date().toISOString(),
+                      };
+                      const next = [rule, ...rules];
+                      setRules(next);
+                      saveRules(next);
+                      setShowRuleForm(false);
+                      setDraft({ with_red_flags: false, pro_ma_only: false });
+                    }}
+                  >
+                    Enregistrer la règle
+                  </button>
+                </div>
               </div>
-              <div style={{ marginTop: 4, fontSize: 12 }}>
-                Crée ta première règle de watchlist pour être alerté automatiquement.
+            )}
+
+            {rules.length === 0 && !showRuleForm && (
+              <div className="dem-glass" style={{ padding: 32, borderRadius: 12, textAlign: "center", color: "var(--text-tertiary)", fontSize: 13 }}>
+                <Icon name="bookmark" size={24} color="var(--text-muted)" />
+                <div style={{ marginTop: 8, fontSize: 14, color: "var(--text-secondary)", fontWeight: 600 }}>
+                  Aucune règle sauvegardée
+                </div>
+                <div style={{ marginTop: 4, fontSize: 12 }}>
+                  Crée ta première règle de watchlist pour être alerté automatiquement.
+                </div>
+                <button
+                  className="dem-btn dem-btn-primary"
+                  style={{ marginTop: 12 }}
+                  onClick={() => setShowRuleForm(true)}
+                >
+                  <Icon name="plus" size={11} /> Créer une règle
+                </button>
               </div>
-            </div>
+            )}
+
+            {rules.length > 0 && (
+              <div style={{ display: "grid", gap: 8 }}>
+                {rules.map((r) => (
+                  <div key={r.id} className="dem-glass" style={{ padding: 14, borderRadius: 10, display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600 }}>{r.name}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 2 }}>
+                        {[
+                          r.dept && `dept ${r.dept}`,
+                          r.ca_min && `CA ≥ ${(r.ca_min / 1e6).toFixed(1)} M€`,
+                          r.ca_max && `CA ≤ ${(r.ca_max / 1e6).toFixed(1)} M€`,
+                          r.naf_prefix && `NAF ${r.naf_prefix}`,
+                          r.pro_ma_only && "Pro M&A",
+                          r.with_red_flags && "Red flags",
+                        ].filter(Boolean).join(" · ") || "Aucun filtre"}
+                      </div>
+                    </div>
+                    <button
+                      className="dem-btn"
+                      onClick={() => {
+                        const next = rules.filter((x) => x.id !== r.id);
+                        setRules(next);
+                        saveRules(next);
+                      }}
+                    >
+                      <Icon name="trash" size={11} /> Supprimer
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginBottom: 4, textTransform: "uppercase", letterSpacing: ".06em" }}>
+        {label}
+      </div>
+      {children}
     </div>
   );
 }
