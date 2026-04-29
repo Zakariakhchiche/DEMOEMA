@@ -263,7 +263,7 @@ async def fiche_entreprise(req: Request, siren: str):
         insee = await _safe(pool.fetchrow(
             """SELECT denomination_unite, sigle, code_ape, categorie_juridique,
                       categorie_entreprise, tranche_effectifs, date_creation,
-                      date_derniere_maj
+                      date_derniere_maj, etat_administratif
                FROM silver.insee_unites_legales WHERE siren = $1""",
             siren,
         ))
