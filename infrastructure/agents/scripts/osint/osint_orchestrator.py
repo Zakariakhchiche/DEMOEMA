@@ -135,19 +135,47 @@ def run_holehe(email: str, timeout: int = 45) -> dict:
 # ─── Main pipeline ────────────────────────────────────────────────────────
 
 PICK_SQL = """
--- M&A-relevant targeting: dirigeants of SAS/SA with capital > 500k€
+-- M&A-relevant targeting (29/04/2026 — switched from montant_capital filter to
+-- pro_ma_score). Le filtre montant_capital >= 500k limitait à ~2K dirigeants ;
+-- pro_ma_score >= 50 cible ~150K Tier 1+2 (multi-axes : holding/co-mandataires/
+-- patrimoine SCI/secteur). Voir silver.dirigeants_360 + gold.dirigeants_master.
+--
+-- Stratégie multi-axes (UNION) :
+--   1. pro_ma_score >= 50 dans gold.dirigeants_master (priorité)
+--   2. is_pro_ma (n_mandats_actifs >= 10) — multi-mandats
+--   3. has_holding_patrimoniale = true
+--   4. n_co_mandataires >= 5 — réseaux denses
+--   5. SAS/SA capital >= 100k (au lieu de 500k) — fallback historique étendu
 WITH targets AS (
   SELECT p.representant_id, p.siren, p.individu_nom, p.individu_prenoms, p.individu_date_naissance
   FROM bronze.inpi_formalites_personnes p
   JOIN bronze.inpi_formalites_entreprises e ON e.siren = p.siren
+  -- LEFT JOIN gold/silver (peut ne pas exister sur fresh boot)
+  LEFT JOIN silver.inpi_dirigeants d
+    ON d.nom = p.individu_nom
+   AND d.prenom = (p.individu_prenoms->>0)
+   AND d.date_naissance = p.individu_date_naissance::date
+  -- Optional join gold.dirigeants_master pour pro_ma_score (peut ne pas exister)
+  LEFT JOIN gold.dirigeants_master gd ON gd.person_uid = d.person_uid
   WHERE p.type_de_personne = 'INDIVIDU'
     AND p.actif = true
     AND p.individu_nom IS NOT NULL
     AND length(p.individu_nom) > 2
     AND p.siren IS NOT NULL
-    AND e.forme_juridique IN ('5710','5720','5730','5485','5499','5505','5510','5515','5520','5530','5540','5599',
-                              '5385','5308','5306','5202','5203')
-    AND COALESCE(e.montant_capital, 0) >= 500000
+    AND (
+        -- Axis 1 : top scoring M&A (gold dispo)
+        gd.pro_ma_score >= 50
+        -- Axis 2 : multi-mandats
+        OR d.n_mandats_actifs >= 10
+        -- Axis 3 : holding patrimoniale
+        OR coalesce((SELECT count(*) FROM silver.dirigeant_sci_patrimoine sci
+                     WHERE sci.nom = d.nom AND sci.prenom = d.prenom
+                       AND sci.date_naissance = d.date_naissance), 0) >= 2
+        -- Axis 4 : SAS/SA capital >= 100k (fallback étendu vs 500k)
+        OR (e.forme_juridique IN ('5710','5720','5730','5485','5499','5505','5510','5515','5520','5530','5540','5599',
+                                  '5385','5308','5306','5202','5203')
+            AND COALESCE(e.montant_capital, 0) >= 100000)
+    )
     AND p.representant_id NOT IN (
         SELECT representant_id FROM bronze.osint_persons
         WHERE representant_id IS NOT NULL AND last_scanned_at > now() - interval '90 days'
@@ -156,7 +184,15 @@ WITH targets AS (
 SELECT t.*
 FROM targets t
 JOIN bronze.inpi_formalites_entreprises e ON e.siren = t.siren
-ORDER BY e.montant_capital DESC NULLS LAST, t.siren
+LEFT JOIN silver.inpi_dirigeants d
+  ON d.nom = t.individu_nom AND d.prenom = (t.individu_prenoms->>0)
+LEFT JOIN gold.dirigeants_master gd ON gd.person_uid = d.person_uid
+ORDER BY
+  -- Priorité 1 : pro_ma_score si dispo, sinon montant_capital, sinon nb mandats
+  coalesce(gd.pro_ma_score, 0) DESC,
+  coalesce(e.montant_capital, 0) DESC NULLS LAST,
+  coalesce(d.n_mandats_actifs, 0) DESC,
+  t.siren
 LIMIT %s
 """
 
