@@ -418,25 +418,41 @@ async def dashboard(req: Request):
         "94": "Val-de-Marne", "95": "Val-d'Oise",
     }
 
-    alerts = await pool.fetch(
-        """SELECT b.date_parution, b.siren, b.typeavis_lib AS title,
-                  b.familleavis_lib AS family, b.tribunal AS source,
-                  b.ville, b.departement, b.code_dept,
-                  ic.denomination
-           FROM silver.bodacc_annonces b
-           LEFT JOIN LATERAL (
-              SELECT denomination FROM silver.inpi_comptes
-              WHERE siren = b.siren
-              ORDER BY date_cloture DESC LIMIT 1
-           ) ic ON true
-           WHERE b.date_parution >= CURRENT_DATE - INTERVAL '14 days'
-             AND (b.familleavis_lib ILIKE '%procédure%'
-                  OR b.familleavis_lib ILIKE '%redressement%'
-                  OR b.familleavis_lib ILIKE '%liquidation%'
-                  OR b.typeavis_lib ILIKE '%cession%')
-           ORDER BY b.date_parution DESC
+    # Simple bodacc fetch — pas de LATERAL inpi_comptes (timeout). Le frontend
+    # peut enrichir avec /api/datalake/cibles?q=siren si besoin.
+    alerts_raw = await pool.fetch(
+        """SELECT date_parution, siren, typeavis_lib AS title,
+                  familleavis_lib AS family, tribunal AS source,
+                  ville, departement, code_dept
+           FROM silver.bodacc_annonces
+           WHERE date_parution >= CURRENT_DATE - INTERVAL '14 days'
+             AND (familleavis_lib ILIKE '%procédure%'
+                  OR familleavis_lib ILIKE '%redressement%'
+                  OR familleavis_lib ILIKE '%liquidation%'
+                  OR typeavis_lib ILIKE '%cession%')
+           ORDER BY date_parution DESC
            LIMIT 20""",
     ) if await _table_exists(pool, "silver", "bodacc_annonces") else []
+
+    # Resolve denominations en batch via une seule requête sur inpi_comptes
+    # (DISTINCT ON siren, ORDER BY date_cloture). Ça touche un index PK siren.
+    siren_list = [r["siren"] for r in alerts_raw if r["siren"]]
+    deno_map: dict[str, str] = {}
+    if siren_list:
+        deno_rows = await pool.fetch(
+            """SELECT DISTINCT ON (siren) siren, denomination
+               FROM silver.inpi_comptes
+               WHERE siren = ANY($1::text[])
+               ORDER BY siren, date_cloture DESC""",
+            siren_list,
+        )
+        deno_map = {r["siren"]: r["denomination"] for r in deno_rows if r["denomination"]}
+
+    alerts = []
+    for r in alerts_raw:
+        d = dict(r)
+        d["denomination"] = deno_map.get(r["siren"], r["siren"])
+        alerts.append(d)
 
     top_targets = await _cibles_from_silver(pool, None, None, None, None, "score_ma", 5, 0)
 
