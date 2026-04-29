@@ -123,11 +123,10 @@ async def list_tables(req: Request):
     return {"tables": out}
 
 
-@router.get("/{schema}/{table}", responses={404: {"description": "Table non whitelisted"}})
 async def query_table(
     req: Request,
-    schema: str = Path(..., pattern="^(gold|silver|bronze)$"),
-    table: str = Path(..., min_length=1, max_length=64),
+    schema: str,
+    table: str,
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     q: str | None = Query(None, description="Recherche textuelle (cols whitelisted)"),
@@ -864,3 +863,11 @@ async def _table_exists(pool: asyncpg.Pool, schema: str, table: str) -> bool:
             table,
         )
     )
+
+
+# IMPORTANT : registration EN DERNIER. FastAPI matche en order de registration
+# et le pattern /{schema}/{table} catche tout (entreprise/X, network/Y, etc).
+# En l'enregistrant après les routes spécifiques (fiche, co-mandats, dashboard,
+# pipeline, cibles, press/recent, agent-actions, source-health, _introspect,
+# tables), elles sont essayées d'abord.
+router.add_api_route("/{schema}/{table}", query_table, methods=["GET"], tags=["datalake"])
