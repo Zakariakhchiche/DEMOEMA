@@ -51,10 +51,19 @@ def _serialize(row: asyncpg.Record) -> dict[str, Any]:
 
 
 @router.get("/_introspect")
-async def introspect(req: Request):
-    """Liste toutes les tables gold + silver présentes (schema, name, count approx).
-    Utile pour aligner la whitelist avec la réalité du datalake déployé."""
+async def introspect(req: Request, schema: str | None = None, table: str | None = None):
+    """Liste toutes les tables (et colonnes si table=...) du datalake."""
     pool = _pool(req)
+    if schema and table:
+        rows = await pool.fetch(
+            """SELECT column_name, data_type
+               FROM information_schema.columns
+               WHERE table_schema = $1 AND table_name = $2
+               ORDER BY ordinal_position""",
+            schema,
+            table,
+        )
+        return {"columns": [dict(r) for r in rows]}
     rows = await pool.fetch(
         """
         SELECT n.nspname AS schema,
