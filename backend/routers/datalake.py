@@ -196,6 +196,7 @@ async def fiche_entreprise(req: Request, siren: str):
     pool = _pool(req)
 
     fiche = None
+    gouv = None
     if await _table_exists(pool, "gold", "entreprises_master"):
         fiche = await pool.fetchrow(
             "SELECT * FROM gold.entreprises_master WHERE siren = $1", siren
@@ -289,33 +290,70 @@ async def fiche_entreprise(req: Request, siren: str):
         resultat = float(compte["resultat_net"]) if compte["resultat_net"] is not None else None
         marge_pct = round((resultat / ca_net) * 100, 1) if ca_net and ca_net > 0 and resultat is not None else None
 
+        # 7. Fallback live API gouv pour siren ghost-row (NAF, dept, ville,
+        # forme, etc. quand silver est vide). API gratuite, < 200ms.
+        if not osint and (not insee or not insee["code_ape"]):
+            import httpx as _httpx
+            try:
+                async with _httpx.AsyncClient(timeout=4.0) as client:
+                    resp = await client.get(
+                        f"https://recherche-entreprises.api.gouv.fr/search?q={siren}&per_page=1"
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if data.get("results"):
+                            r = data["results"][0]
+                            siege = r.get("siege") or {}
+                            gouv = {
+                                "naf": r.get("activite_principale"),
+                                "naf_libelle": r.get("libelle_activite_principale"),
+                                "forme_juridique": r.get("nature_juridique"),
+                                "categorie_entreprise": r.get("categorie_entreprise"),
+                                "date_creation": r.get("date_creation"),
+                                "denomination": r.get("nom_complet") or r.get("nom_raison_sociale"),
+                                "sigle": r.get("sigle"),
+                                "tranche_effectifs": r.get("tranche_effectif_salarie"),
+                                "ville": siege.get("libelle_commune"),
+                                "code_postal": siege.get("code_postal"),
+                                "dept": (siege.get("code_postal") or "")[:2] or siege.get("departement"),
+                                "region": siege.get("region"),
+                                "etat_administratif": r.get("etat_administratif"),
+                                "dirigeants": r.get("dirigeants") or [],
+                            }
+            except Exception as e:
+                print(f"[fiche] gouv API fallback failed: {type(e).__name__}: {str(e)[:80]}")
+
         fiche = {
             "siren": compte["siren"],
-            "denomination": compte["denomination"] or (insee["denomination_unite"] if insee else None),
-            "sigle": insee["sigle"] if insee else None,
+            "denomination": compte["denomination"] or (insee["denomination_unite"] if insee else None) or (gouv["denomination"] if gouv else None),
+            "sigle": (insee["sigle"] if insee else None) or (gouv["sigle"] if gouv else None),
             "ca_dernier": compte["ca_net"],
             "ebitda_dernier": compte["resultat_net"],
             "capitaux_propres": compte["capitaux_propres"],
             "effectif_exact": compte["effectif_exact"],
-            "tranche_effectifs": insee["tranche_effectifs"] if insee else None,
+            "tranche_effectifs": (insee["tranche_effectifs"] if insee else None) or (gouv["tranche_effectifs"] if gouv else None),
             "date_derniers_comptes": compte["date_cloture"].isoformat() if compte["date_cloture"] else None,
             "marge_pct": marge_pct,
-            "naf": (osint["naf"] if osint else None) or (insee["code_ape"] if insee else None),
-            "forme_juridique": (osint["forme_juridique"] if osint else None) or (insee["categorie_juridique"] if insee else None),
+            "naf": (osint["naf"] if osint else None) or (insee["code_ape"] if insee else None) or (gouv["naf"] if gouv else None),
+            "naf_libelle": (gouv["naf_libelle"] if gouv else None),
+            "forme_juridique": (osint["forme_juridique"] if osint else None) or (insee["categorie_juridique"] if insee else None) or (gouv["forme_juridique"] if gouv else None),
             "capital_social": osint["capital_social"] if osint else None,
-            "adresse_code_postal": osint["adresse_code_postal"] if osint else None,
+            "adresse_code_postal": (osint["adresse_code_postal"] if osint else None) or (gouv["code_postal"] if gouv else None),
             "annee_creation": (osint["annee_creation"] if osint and osint["annee_creation"] else None) or (
-                int(str(insee["date_creation"])[:4]) if insee and insee["date_creation"] else None
+                int(str(insee["date_creation"])[:4]) if insee and insee["date_creation"] else (
+                    int(str(gouv["date_creation"])[:4]) if gouv and gouv["date_creation"] else None
+                )
             ),
             "primary_domain": osint["primary_domain"] if osint else None,
             "has_linkedin_page": osint["has_linkedin_page"] if osint else None,
             "has_github_org": osint["has_github_org"] if osint else None,
             "linkedin_employees": osint["linkedin_employees"] if osint else None,
             "digital_presence_score": osint["digital_presence_score"] if osint else None,
-            "categorie_entreprise": insee["categorie_entreprise"] if insee else None,
-            "dept": (osint["adresse_code_postal"][:2] if osint and osint["adresse_code_postal"] else None) or (loc["dept"] if loc else None),
-            "ville": loc["ville"] if loc else None,
-            "region": loc["region"] if loc else None,
+            "categorie_entreprise": (insee["categorie_entreprise"] if insee else None) or (gouv["categorie_entreprise"] if gouv else None),
+            "dept": (osint["adresse_code_postal"][:2] if osint and osint["adresse_code_postal"] else None) or (loc["dept"] if loc else None) or (gouv["dept"] if gouv else None),
+            "ville": (loc["ville"] if loc else None) or (gouv["ville"] if gouv else None),
+            "region": (loc["region"] if loc else None) or (gouv["region"] if gouv else None),
+            "etat_administratif": gouv["etat_administratif"] if gouv else None,
             "ca_history": ca_history,
             "exercices": exercices,
             "n_dirigeants": n_dirigeants or 0,
@@ -327,8 +365,9 @@ async def fiche_entreprise(req: Request, siren: str):
     if not fiche:
         raise HTTPException(status_code=404, detail=f"SIREN {siren} introuvable")
 
-    # Dirigeants détaillés — top 10 par mandats actifs, joint avec patrimoine SCI
-    dirigeants = await pool.fetch(
+    # Dirigeants détaillés — top 10 par mandats actifs, joint avec patrimoine SCI.
+    # On essaie d'abord en silver (8M dirigeants), fallback sur l'API gouv si vide.
+    dirigeants_silver = await pool.fetch(
         """WITH dirig AS (
               SELECT nom, prenom, date_naissance, age_2026 AS age,
                      n_mandats_actifs, n_mandats_total, sirens_mandats,
@@ -350,6 +389,37 @@ async def fiche_entreprise(req: Request, siren: str):
                   ON os.nom = d.nom AND $1 = os.siren_main""",
         siren,
     )
+
+    # Fallback : si silver vide, dérive depuis le gouv API (déjà fetché)
+    if not dirigeants_silver and gouv and gouv.get("dirigeants"):
+        dirigeants = [
+            {
+                "nom": d.get("nom", ""),
+                "prenom": d.get("prenoms", ""),
+                "date_naissance": d.get("date_de_naissance"),
+                "age": None,
+                "n_mandats_actifs": 1,
+                "n_mandats_total": 1,
+                "sirens_mandats": [siren],
+                "denominations": [fiche["denomination"]],
+                "roles": [d.get("qualite", "")] if d.get("qualite") else [],
+                "is_multi_mandat": False,
+                "n_sci": None,
+                "total_capital_sci": None,
+                "sci_denominations": None,
+                "has_linkedin": None,
+                "has_github": None,
+                "n_total_social": None,
+                "is_sanctioned": False,
+            }
+            for d in gouv["dirigeants"][:10]
+        ]
+    else:
+        dirigeants = dirigeants_silver
+
+    # Override n_dirigeants if we got data from gouv fallback
+    if isinstance(fiche, dict) and not dirigeants_silver and dirigeants:
+        fiche["n_dirigeants"] = len(dirigeants)
 
     # Signaux M&A — BODACC (annonces commerciales)
     signaux = await pool.fetch(
