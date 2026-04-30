@@ -124,12 +124,41 @@ export async function fetchTargets(opts: { limit?: number; minScore?: number; q?
 }
 
 export async function fetchPersons(limit = 4): Promise<Person[]> {
+  // PIVOT v3 PRO : gold.dirigeants_master au lieu de silver.inpi_dirigeants raw.
+  // L'ancien orderBy n_mandats_actifs DESC retournait toujours THIBAUD/ERIC/BASTIEN/
+  // VINCENT (avocats / CAC concentrateurs avec 6000+ mandats), pas des cibles M&A.
+  // Maintenant : filtrer par pro_ma_score (signaux dirigeant pertinents) + bornes
+  // raisonnables sur n_mandats (2-50) pour exclure les concentrateurs.
+  try {
+    // Tentative 1 : gold.dirigeants_master (best signal)
+    const r = await datalakeApi.queryTable("gold", "dirigeants_master", {
+      limit,
+      orderBy: "-pro_ma_score",
+      // Note : queryTable n'accepte pas WHERE générique pour l'instant.
+      // Le pro_ma_score DESC + dirigeants_master qui est filtré par
+      // is_multi_mandat reste un meilleur signal que silver brut.
+    });
+    if (r.rows.length > 0) {
+      return r.rows.map((row, i) => rowToPerson(row, i));
+    }
+  } catch (e) {
+    console.warn("[dem] fetchPersons gold failed, fallback silver:", e);
+  }
+  // Fallback : silver.inpi_dirigeants avec borne mandats (exclut concentrateurs)
   try {
     const r = await datalakeApi.queryTable("silver", "inpi_dirigeants", {
-      limit,
-      orderBy: "-n_mandats_actifs",
+      limit: limit * 5,  // sur-échantillonner puis filtrer côté client
+      orderBy: "-age_2026",  // age senior d'abord, plus pertinent que mandats brut
     });
-    return r.rows.map((row, i) => rowToPerson(row, i));
+    const filtered = r.rows
+      .filter((row) => {
+        const n = num(row.n_mandats_actifs) ?? 0;
+        const age = num(row.age_2026) ?? 0;
+        // Cibles M&A : 2-50 mandats (pas les concentrateurs CAC), age 55+
+        return n >= 2 && n <= 50 && age >= 55;
+      })
+      .slice(0, limit);
+    return filtered.map((row, i) => rowToPerson(row, i));
   } catch (e) {
     console.error("[dem] fetchPersons failed:", e);
     return [];

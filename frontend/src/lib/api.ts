@@ -141,6 +141,40 @@ export const datalakeApi = {
       presse: Record<string, unknown>[];
     }>(`/api/datalake/fiche/${siren}`),
 
+  /** Scoring v3 PRO : 4 axes business + tier + percentile + EV estimée */
+  scoringDetail: (siren: string) =>
+    jget<{
+      siren: string;
+      denomination: string;
+      deal_score: number;
+      deal_percentile: number | null;
+      tier: string | null;
+      axes: { transmission: number; attractivity: number; scale: number; structure: number };
+      risk: {
+        multiplier: number;
+        has_sanction_ofac_eu: boolean;
+        has_sanction_cnil: boolean;
+        has_sanction_dgccrf: boolean;
+        has_proc_collective_recent: boolean;
+        has_cession_recent: boolean;
+        n_contentieux_recent: number;
+        has_late_filing: boolean;
+      };
+      financials: {
+        ca_latest: number | null;
+        capitaux_propres_latest: number | null;
+        resultat_net_latest: number | null;
+        proxy_ebitda: number | null;
+        proxy_margin: number | null;
+        sector_multiple: number | null;
+        ev_estimated_eur: number | null;
+      };
+      context: Record<string, unknown>;
+      score_total: number;
+      feature_version: string;
+      derniere_maj: string | null;
+    }>(`/api/datalake/scoring/${siren}`),
+
   pressRecent: (opts: { limit?: number; siren?: string; signal?: string } = {}) => {
     const p = new URLSearchParams();
     if (opts.limit) p.set("limit", String(opts.limit));

@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Icon } from "./Icon";
 import { ScoreBadge } from "./ScoreBadge";
+import { ScoreAxes, TierBadge } from "./ScoreAxes";
 import { datalakeApi } from "@/lib/api";
 import { formatSiren } from "@/lib/dem/format";
 import type { Target } from "@/lib/dem/types";
@@ -272,6 +273,7 @@ function BarChart({ data, labels }: { data: number[]; labels: string[] }) {
 export function TargetSheet({ target, onClose, onPitch }: Props) {
   const [tab, setTab] = useState<typeof TABS[number]["k"]>("overview");
   const [data, setData] = useState<FicheData | null>(null);
+  const [scoring, setScoring] = useState<Awaited<ReturnType<typeof datalakeApi.scoringDetail>> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [drillDirig, setDrillDirig] = useState<{
@@ -304,6 +306,10 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
       .then(setData)
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
+    // Scoring v3 PRO en parallèle (silent fail si pas matérialisé)
+    datalakeApi.scoringDetail(target.siren)
+      .then(setScoring)
+      .catch(() => setScoring(null));
   }, [target.siren]);
 
   useEffect(() => {
@@ -480,6 +486,86 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
 
             {tab === "overview" && !loading && (
               <div>
+                {/* Scoring v3 PRO — 4 axes business + tier + EV */}
+                {scoring && (
+                  <div className="dem-glass" style={{
+                    padding: "16px 18px",
+                    borderRadius: 12,
+                    marginBottom: 14,
+                    background: "rgba(255,255,255,0.02)",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap", marginBottom: 12 }}>
+                      <div style={{ fontSize: 11, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700 }}>
+                        Deal Score
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 700, color: "var(--text-primary)", lineHeight: 1 }}>
+                        {scoring.deal_score}<span style={{ fontSize: 14, color: "var(--text-tertiary)", fontWeight: 400 }}>/100</span>
+                      </div>
+                      {scoring.tier && <TierBadge tier={scoring.tier as any} percentile={scoring.deal_percentile ?? undefined} />}
+                      {scoring.financials.ev_estimated_eur && (
+                        <span style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>
+                          <span style={{ color: "var(--text-muted)" }}>EV indicative</span>{" "}
+                          <span className="dem-mono tab-num" style={{ fontWeight: 600, color: "var(--accent-emerald)" }}>
+                            {fmtEur(scoring.financials.ev_estimated_eur)}
+                          </span>
+                          {scoring.financials.sector_multiple && (
+                            <span style={{ color: "var(--text-tertiary)" }}> ×{scoring.financials.sector_multiple.toFixed(1)} sector</span>
+                          )}
+                        </span>
+                      )}
+                      {scoring.risk.multiplier < 1 && (
+                        <span style={{
+                          fontSize: 11, padding: "2px 8px", borderRadius: 999,
+                          background: "rgba(251,113,133,0.10)",
+                          border: "1px solid rgba(251,113,133,0.30)",
+                          color: "var(--accent-rose)", fontWeight: 600,
+                        }}>
+                          Risk haircut −{Math.round((1 - scoring.risk.multiplier) * 100)}%
+                        </span>
+                      )}
+                    </div>
+                    <ScoreAxes axes={scoring.axes} variant="detailed" />
+                    {(scoring.risk.has_sanction_ofac_eu || scoring.risk.has_proc_collective_recent ||
+                      scoring.risk.has_sanction_cnil || scoring.risk.has_sanction_dgccrf ||
+                      scoring.risk.n_contentieux_recent > 0 || scoring.risk.has_late_filing) && (
+                      <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border-subtle)", display: "flex", flexWrap: "wrap", gap: 8 }}>
+                        {scoring.risk.has_sanction_ofac_eu && (
+                          <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#dc2626", color: "#fff", fontWeight: 600 }}>SANCTION OFAC/UE</span>
+                        )}
+                        {scoring.risk.has_proc_collective_recent && (
+                          <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#dc2626", color: "#fff", fontWeight: 600 }}>PROCÉDURE COLLECTIVE</span>
+                        )}
+                        {scoring.risk.has_sanction_cnil && (
+                          <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "rgba(251,113,133,0.20)", color: "var(--accent-rose)", fontWeight: 600 }}>Sanction CNIL</span>
+                        )}
+                        {scoring.risk.has_sanction_dgccrf && (
+                          <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "rgba(251,113,133,0.20)", color: "var(--accent-rose)", fontWeight: 600 }}>Sanction DGCCRF</span>
+                        )}
+                        {scoring.risk.n_contentieux_recent > 0 && (
+                          <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "rgba(251,191,36,0.15)", color: "var(--accent-amber)", fontWeight: 600 }}>{scoring.risk.n_contentieux_recent} contentieux récents</span>
+                        )}
+                        {scoring.risk.has_late_filing && (
+                          <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "rgba(251,191,36,0.15)", color: "var(--accent-amber)", fontWeight: 600 }}>Late filing bilan</span>
+                        )}
+                      </div>
+                    )}
+                    {scoring.financials.proxy_margin != null && scoring.financials.proxy_ebitda != null && (
+                      <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border-subtle)", display: "flex", gap: 18, fontSize: 11.5, color: "var(--text-secondary)", flexWrap: "wrap" }}>
+                        <span>
+                          <span style={{ color: "var(--text-muted)" }}>Proxy EBITDA</span>{" "}
+                          <span className="dem-mono tab-num" style={{ color: "var(--text-primary)", fontWeight: 600 }}>{fmtEur(scoring.financials.proxy_ebitda)}</span>
+                        </span>
+                        <span>
+                          <span style={{ color: "var(--text-muted)" }}>Marge proxy</span>{" "}
+                          <span className="dem-mono tab-num" style={{ color: "var(--text-primary)", fontWeight: 600 }}>{(scoring.financials.proxy_margin * 100).toFixed(1)}%</span>
+                        </span>
+                        <span style={{ color: "var(--text-muted)", fontStyle: "italic", fontSize: 10.5 }}>
+                          baseline = resultat_net + 5% capital social
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
                   {[
                     { l: "CA dernier", v: fmtEur(ca), sub: exercices.length ? `Exercice ${String(exercices[exercices.length - 1] || "").slice(0, 4)}` : "", color: "var(--accent-emerald)" },
