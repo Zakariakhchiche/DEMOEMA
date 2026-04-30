@@ -114,6 +114,50 @@ async def lifespan(app):
         # ne pas bloquer l'event loop (audit PERF-3)
         await asyncio.to_thread(_load_targets_sync)
 
+    # Bug 3.1 rapport QA v4 — chat aveugle au datalake
+    # Si Supabase + cache vides MAIS gold.cibles_ma_top existe (matérialisée
+    # par silver_runner), on hydrate depuis là. Évite le LLM de répondre
+    # "0 cible" alors que le datalake en contient 82k+.
+    if not enriched_targets and getattr(app.state, "dl_pool", None):
+        try:
+            gold_pool = app.state.dl_pool
+            has_gold = await gold_pool.fetchval(
+                """SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                   WHERE n.nspname='gold' AND c.relname='cibles_ma_top'"""
+            )
+            if has_gold:
+                rows = await gold_pool.fetch(
+                    """SELECT siren, denomination, code_ape, adresse_dept,
+                              adresse_commune, ca_latest, deal_score_raw, tier
+                       FROM gold.cibles_ma_top
+                       ORDER BY deal_score_raw DESC NULLS LAST
+                       LIMIT 200"""
+                )
+                if rows:
+                    # Mappe vers le format enriched_target legacy
+                    fetched = []
+                    for r in rows:
+                        siren = r["siren"]
+                        deno = r.get("denomination") or siren
+                        fetched.append({
+                            "siren": str(siren).strip(),
+                            "nom_entreprise": deno,
+                            "name": deno,
+                            "siege": {
+                                "ville": r.get("adresse_commune") or "",
+                                "departement": r.get("adresse_dept") or "",
+                            },
+                            "code_naf": r.get("code_ape") or "",
+                            "ca_dernier": r.get("ca_latest"),
+                            "score_ma": r.get("deal_score_raw") or 0,
+                            "tier": r.get("tier"),
+                        })
+                    raw_targets = fetched
+                    enriched_targets = [enrich_target(c) for c in fetched]
+                    print(f"[EdRCF] Hydrated {len(enriched_targets)} targets from gold.cibles_ma_top")
+        except Exception as _e:
+            print(f"[EdRCF] gold.cibles_ma_top hydrate failed: {_e}")
+
     # 3. Last resort: fetch companies from free gov APIs (200 targets) — runs
     # IN BACKGROUND post-yield pour ne pas bloquer le boot du serveur HTTP.
     # Avant : 5+ min de Papperclip avant que /api/health réponde.
@@ -164,6 +208,33 @@ app = FastAPI(
     version="6.0.0",
     lifespan=lifespan,
 )
+
+# Rate limiting (Bug 3.5 rapport QA v4) — slowapi protège contre :
+# - DDoS application (un script peut saturer en quelques sec)
+# - Coût LLM non capé (DeepSeek API : facture pourrait exploser)
+# Config :
+# - 120 req/min/IP par défaut sur toute route /api/*
+# - 15 req/min/IP sur /api/copilot/* (LLM coûteux)
+try:
+    from slowapi import Limiter, _rate_limit_exceeded_handler
+    from slowapi.util import get_remote_address
+    from slowapi.errors import RateLimitExceeded
+    from slowapi.middleware import SlowAPIMiddleware
+
+    # Désactivation possible via env (CI/tests local)
+    _rate_disabled = os.getenv("DISABLE_RATE_LIMIT", "").lower() in ("1", "true", "yes")
+    limiter = Limiter(
+        key_func=get_remote_address,
+        default_limits=[] if _rate_disabled else ["120/minute"],
+        storage_uri="memory://",
+    )
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_middleware(SlowAPIMiddleware)
+except Exception as _re:
+    import logging as _l
+    _l.getLogger(__name__).warning("slowapi setup failed (rate limit OFF): %s", _re)
+    limiter = None  # type: ignore
 
 # Structured JSON logging + Prometheus /metrics
 try:
@@ -1232,9 +1303,18 @@ async def copilot_stream_endpoint(q: str = Query(...)):
     """Server-Sent Events streaming version of the copilot.
     Yields: data: {"chunk": "..."}\n\n  and  data: {"done": true, "source": "...", "targets_updated": bool}\n\n
     """
+    # Bug 3.2 rapport QA v4 — guardrail prompt injection
+    _refusal_msg = _detect_prompt_injection(q)
+
     async def generate():
         global enriched_targets, raw_targets
         targets_updated = False
+
+        # Court-circuit prompt injection
+        if _refusal_msg:
+            yield f"data: {json.dumps({'chunk': _refusal_msg})}\n\n"
+            yield f"data: {json.dumps({'done': True, 'source': 'guardrail'})}\n\n"
+            return
 
         # Context élargi : top 50 cibles au lieu de 5 (le LLM avait trop peu d'info
         # et halluciné "199 cibles" alors qu'il n'en voyait que 5).
@@ -1374,9 +1454,42 @@ async def copilot_stream_endpoint(q: str = Query(...)):
     )
 
 
+# Bug 3.2 rapport QA v4 — prompt injection filter
+_PROMPT_INJECTION_PATTERNS = re.compile(
+    r"\b(?:ignore\s+(?:all\s+)?(?:previous|prior|above)\s+(?:instructions?|rules|prompts?)"
+    r"|disregard\s+(?:previous|all|above)"
+    r"|forget\s+(?:everything|all\s+(?:previous|above))"
+    r"|tu\s+es\s+(?:un\s+)?(?:nouveau|nouvel)\s+(?:assistant|agent|llm)"
+    r"|you\s+are\s+now\s+(?:a\s+)?(?:new|different)"
+    r"|pretend\s+(?:you|to)\s+(?:are|be)"
+    r"|act\s+as\s+(?:if|a)"
+    r"|system\s+prompt|<\s*/\s*system\s*>|<\s*/\s*q\s*>|\[INST\]|\[/INST\]|<\|im_(?:start|end)\|>)",
+    re.IGNORECASE,
+)
+
+
+def _detect_prompt_injection(q: str) -> str | None:
+    """Retourne un message de refus si q contient un pattern d'injection,
+    sinon None. Cf. rapport QA v4 §3.2."""
+    if not isinstance(q, str) or len(q) > 4000:
+        return None
+    if _PROMPT_INJECTION_PATTERNS.search(q):
+        return (
+            "Je ne peux pas suivre des instructions cachées dans la requête. "
+            "Si tu veux poser une question M&A, formule-la directement (ex: "
+            "« combien de cibles tech IDF avec dirigeant 60+ ? »)."
+        )
+    return None
+
+
 @app.get("/api/copilot/query")
 async def copilot_query(q: str = Query(...)):
     global enriched_targets, raw_targets
+
+    # Bug 3.2 — filtre prompt injection
+    _refusal = _detect_prompt_injection(q)
+    if _refusal:
+        return {"response": _refusal, "source": "guardrail", "targets_updated": False}
 
     # Build compact context from local targets (top 5 only to save tokens)
     context_lines = []

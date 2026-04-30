@@ -2018,33 +2018,28 @@ async def graph_for_siren(req: Request, siren: str, depth: int = Query(1, ge=1, 
     if not center_row:
         raise HTTPException(status_code=404, detail=f"siren {siren} introuvable")
 
-    # Co-mandats — même query que /fiche.network
-    network_rows = await _safe(pool.fetch(
-        """WITH top_dirig AS (
-              SELECT nom, prenom, sirens_mandats, denominations,
-                     n_mandats_actifs
-              FROM silver.inpi_dirigeants
-              WHERE $1::char(9) = ANY(sirens_mandats)
-              ORDER BY n_mandats_actifs DESC NULLS LAST
-              LIMIT 5
-           ),
-           expanded AS (
-              SELECT d.nom, d.prenom, d.n_mandats_actifs,
-                     unnest(d.sirens_mandats) AS other_siren,
-                     unnest(d.denominations) AS other_deno
-              FROM top_dirig d
-           )
-           SELECT other_siren AS siren,
-                  max(other_deno) AS denomination,
-                  string_agg(DISTINCT prenom || ' ' || nom, ', ') AS via_dirigeants,
-                  count(DISTINCT prenom || ' ' || nom) AS n_dirig_communs
-           FROM expanded
-           WHERE other_siren != $1::char(9) AND other_siren IS NOT NULL
-           GROUP BY other_siren
-           ORDER BY n_dirig_communs DESC
-           LIMIT 30""",
-        siren,
-    ), default=[])
+    # Co-mandats — Bug M rapport QA v4 : pour des siren cessés (DUFOUR 005650189),
+    # silver.inpi_dirigeants.sirens_mandats ne contient QUE les mandats actifs,
+    # donc 0 résultats. On délègue désormais à fiche_entreprise.network qui a
+    # le bon fallback (gouv API personnes morales, BODACC, etc.) — garantit que
+    # /graph et /fiche.network montrent le MÊME réseau.
+    try:
+        fiche_data = await fiche_entreprise(req, siren)
+        fiche_network = fiche_data.get("network") or []
+    except Exception:
+        fiche_network = []
+
+    # Format network_rows compatible avec le code downstream (siren, denomination, via_dirigeants)
+    network_rows = [
+        {
+            "siren": (str(n.get("siren") or "")).strip(),
+            "denomination": n.get("denomination") or "",
+            "via_dirigeants": n.get("via_dirigeants") or "co-mandat",
+            "n_dirig_communs": int(n.get("n_dirig_communs") or 1),
+        }
+        for n in fiche_network
+        if n.get("siren") and str(n.get("siren")).strip() != siren
+    ][:30]
 
     # Construction graphe
     center_id = f"target-{siren}"
@@ -2294,21 +2289,30 @@ async def press_recent(
             raise HTTPException(status_code=400, detail="SIREN invalide")
         where.append(f"siren = ${len(params) + 1}")
         params.append(siren)
+    # Bug 3.4 rapport QA v4 — colonnes ma_signal_type/sentiment/summary
+    # n'existent pas dans silver.press_mentions_matched (introspect confirmé).
+    # On les expose en NULL pour rétrocompat front, et on filtre par siren only.
     if signal:
-        where.append(f"ma_signal_type = ${len(params) + 1}")
-        params.append(signal)
+        # Le filtre par signal_type n'est plus possible — silent ignore
+        pass
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
-    rows = await pool.fetch(
-        f"""SELECT published_at, source, title, url, denomination, siren,
-                   ma_signal_type, sentiment, summary
-            FROM silver.press_mentions_matched
-            {where_sql}
-            ORDER BY published_at DESC
-            LIMIT {int(limit)}""",
-        *params,
-    )
-    return {"articles": [_serialize(r) for r in rows]}
+    try:
+        rows = await pool.fetch(
+            f"""SELECT published_at, source, title, url, denomination, siren,
+                       NULL::text AS ma_signal_type, NULL::text AS sentiment,
+                       snippet AS summary, match_method, match_score, is_recent
+                FROM silver.press_mentions_matched
+                {where_sql}
+                ORDER BY published_at DESC NULLS LAST
+                LIMIT {int(limit)}""",
+            *params,
+        )
+        return {"articles": [_serialize(r) for r in rows]}
+    except Exception as e:
+        # Pas de 500 utilisateur — on retourne empty + notice diagnostique
+        print(f"[press/recent] failed: {type(e).__name__}: {e}")
+        return {"articles": [], "notice": f"erreur silver.press_mentions_matched: {type(e).__name__}"}
 
 
 @router.get("/cibles")
