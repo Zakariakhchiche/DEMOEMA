@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     inpi_username: str = Field(default="", description="Email du compte INPI (login RNE)")
     inpi_password: str = Field(default="", description="Password du compte INPI (login RNE)")
 
+    # ─── France Travail (Pôle Emploi API offres d'emploi) ─────────────────────
+    # Bug rapport QA v4 §3.9 : worker france_travail crashait sur AttributeError
+    # car FRANCE_TRAVAIL_CLIENT_ID n'était pas déclaré dans Settings.
+    # OAuth2 client credentials — créer un app sur https://francetravail.io/
+    FRANCE_TRAVAIL_CLIENT_ID: str = Field(default="", description="OAuth2 client_id France Travail (https://francetravail.io)")
+    FRANCE_TRAVAIL_CLIENT_SECRET: str = Field(default="", description="OAuth2 client_secret France Travail")
+
     # Postgres datalake. La DSN peut être fournie explicitement (DATABASE_URL),
     # ou dérivée des composantes (DATALAKE_POSTGRES_ROOT_PASSWORD + host/db
     # par défaut qui matchent docker-compose.agents.yml). Cette dérivation est
