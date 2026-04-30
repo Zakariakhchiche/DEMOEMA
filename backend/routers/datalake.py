@@ -2112,48 +2112,66 @@ async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_r
     # Sinon fallback sur entreprises_master.score_ma (formule heuristique 8
     # signaux). À terme cette branche disparaîtra et entreprises_master sera
     # alimentée par scoring_ma directement.
+    # Adapté schema v3 PRO de gold.entreprises_master :
+    # - statut → insee_etat_administratif (A/F)
+    # - siege_dept → adresse_dept
+    # - naf → code_ape
+    # - score_ma → pro_ma_score (legacy) / sm.deal_score_raw (v3)
+    # - is_pro_ma → has_pro_ma
+    # - is_asset_rich → has_holding_patrimoniale
+    # - ca_dernier → ca_latest
+    # - date_creation → date_immatriculation
     has_scoring = await _table_exists(pool, "gold", "scoring_ma")
     score_join = ""
-    score_col = "score_ma"
+    score_col = "t.pro_ma_score"
     extra_select = ""
     if has_scoring:
         score_join = " LEFT JOIN gold.scoring_ma sm ON sm.siren = t.siren"
-        # Format v3 PRO : on remonte le deal_score_raw + 4 axes + tier + EV
-        score_col = "COALESCE(sm.deal_score_raw, sm.score_total, t.score_ma)"
+        score_col = "COALESCE(sm.deal_score_raw, sm.score_total, t.pro_ma_score)"
         extra_select = (
             ", sm.transmission_score, sm.attractivity_score, sm.scale_score, "
             "sm.structure_score, sm.tier, sm.deal_percentile, sm.risk_multiplier, "
             "sm.ev_estimated_eur, sm.proxy_margin, sm.sector_multiple"
         )
 
-    where: list[str] = ["statut = 'actif'"]
+    # Statut "actif" v3 = insee_etat_administratif != 'F' (F = Fermé/Radié)
+    where: list[str] = ["(t.insee_etat_administratif IS NULL OR t.insee_etat_administratif != 'F')"]
     params: list[Any] = []
     if q:
         if q.isdigit() and len(q) == 9:
             params.append(q)
-            where.append(f"siren = ${len(params)}")
+            where.append(f"t.siren = ${len(params)}")
         else:
             params.append(f"%{q}%")
-            where.append(f"denomination ILIKE ${len(params)}")
+            where.append(f"t.denomination ILIKE ${len(params)}")
     if dept:
         params.append(dept)
-        where.append(f"siege_dept = ${len(params)}")
+        where.append(f"t.adresse_dept = ${len(params)}")
     if naf:
         params.append(f"{naf}%")
-        where.append(f"naf ILIKE ${len(params)}")
+        where.append(f"t.code_ape ILIKE ${len(params)}")
     if min_score is not None:
         params.append(min_score)
-        where.append(f"COALESCE(score_ma, pro_ma_score) >= ${len(params)}")
+        if has_scoring:
+            where.append(f"COALESCE(sm.deal_score_raw, sm.score_total, t.pro_ma_score) >= ${len(params)}")
+        else:
+            where.append(f"t.pro_ma_score >= ${len(params)}")
     if is_pro_ma is True:
-        where.append("COALESCE(is_pro_ma, false) = true")
+        where.append("COALESCE(t.has_pro_ma, false) = true")
     if is_asset_rich is True:
-        where.append("COALESCE(is_asset_rich, false) = true")
-    if has_red_flags is True:
-        where.append("COALESCE(has_compliance_red_flag, false) = true")
-    elif has_red_flags is False:
-        where.append("COALESCE(has_compliance_red_flag, false) = false")
+        where.append("COALESCE(t.has_holding_patrimoniale, false) = true")
+    if has_red_flags is True and has_scoring:
+        # Risk haircut > 0 = au moins une pénalité
+        where.append("(sm.risk_multiplier IS NOT NULL AND sm.risk_multiplier < 1.0)")
+    elif has_red_flags is False and has_scoring:
+        where.append("(sm.risk_multiplier IS NULL OR sm.risk_multiplier >= 1.0)")
 
-    order_col = {"score_ma": score_col, "ca_dernier": "t.ca_dernier", "date_creation": "t.date_creation"}[sort]
+    # Mapping order_col v3
+    order_col = {
+        "score_ma": score_col,
+        "ca_dernier": "t.ca_latest",
+        "date_creation": "t.date_immatriculation",
+    }[sort]
     sql = f"""
         SELECT row_to_json(t.*) AS row, {score_col} AS score_ma_resolved{extra_select}
         FROM gold.entreprises_master t
@@ -2168,9 +2186,16 @@ async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_r
         v = r["row"]
         if isinstance(v, str):
             v = json.loads(v)
-        # Override score_ma avec la vraie valeur depuis scoring_ma v3 si dispo
-        if "score_ma_resolved" in r and r["score_ma_resolved"] is not None:
-            v["score_ma"] = r["score_ma_resolved"]
+        # Compat ascendante : alias score_ma + statut + naf + siege_dept + ca_dernier
+        # depuis les noms v3 de gold.entreprises_master
+        v["score_ma"] = r["score_ma_resolved"] if r.get("score_ma_resolved") is not None else v.get("pro_ma_score")
+        v.setdefault("statut", "actif" if v.get("insee_etat_administratif") != "F" else "cessé")
+        v.setdefault("naf", v.get("code_ape"))
+        v.setdefault("siege_dept", v.get("adresse_dept"))
+        v.setdefault("ca_dernier", v.get("ca_latest"))
+        v.setdefault("date_creation", v.get("date_immatriculation"))
+        v.setdefault("is_pro_ma", v.get("has_pro_ma"))
+        v.setdefault("is_asset_rich", v.get("has_holding_patrimoniale"))
         # Hydrate les champs scoring v3 (axes + tier + EV) si dispo
         for k in (
             "transmission_score", "attractivity_score", "scale_score", "structure_score",
@@ -2178,7 +2203,7 @@ async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_r
             "proxy_margin", "sector_multiple",
         ):
             if k in r and r[k] is not None:
-                v[k] = float(r[k]) if isinstance(r[k], (int, float)) and k in ("risk_multiplier", "proxy_margin", "sector_multiple", "ev_estimated_eur") else r[k]
+                v[k] = float(r[k]) if k in ("risk_multiplier", "proxy_margin", "sector_multiple", "ev_estimated_eur") else r[k]
         cibles.append(v)
     return {"cibles": cibles, "limit": limit, "offset": offset, "has_more": len(cibles) == limit, "source": "gold", "scoring_v2": has_scoring}
 
