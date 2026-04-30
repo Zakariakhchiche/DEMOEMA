@@ -342,10 +342,11 @@ async def generate_gold_sql(
     use_tools = _os.environ.get("CODEGEN_USE_TOOLS", "").lower() in ("1", "true", "yes")
     tool_audit: list = []
     response = None
-    if use_tools and agent.model.startswith("deepseek") and settings.database_url:
+    if use_tools and settings.deepseek_api_key and settings.database_url:
         from ingestion.codegen_tools import llm_chat_with_tools
         from deepseek_client import DeepSeekClient
-        ds_client = DeepSeekClient(model=agent.model, timeout=settings.deepseek_timeout_s)
+        ds_model = agent.model if agent.model.startswith("deepseek") else "deepseek-chat"
+        ds_client = DeepSeekClient(model=ds_model, timeout=settings.deepseek_timeout_s)
         tools_system = (
             agent.system_prompt
             + "\n\nTu disposes de tools READ-ONLY pour vérifier le schéma "
