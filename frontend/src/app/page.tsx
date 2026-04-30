@@ -81,7 +81,13 @@ export default function Home() {
 
       <TopHeader mode={mode} setMode={setMode} onCmdK={() => setShowCmdK(true)} />
 
-      <div style={{ flex: 1, display: "flex", overflow: "hidden", position: "relative", zIndex: 1 }}>
+      {/* Bug v6/1.7 — landmark <main> requis (axe 'landmark-one-main' violation
+          serious sur les 8 vues). Tout le contenu de la vue doit vivre dans
+          un seul <main> pour les lecteurs d'écran. */}
+      <main role="main" aria-label="Contenu principal" style={{
+        flex: 1, display: "flex", overflow: "hidden",
+        position: "relative", zIndex: 1,
+      }}>
         {mode === "dashboard" && <DashboardView onMode={setMode} onOpenTarget={setOpenTarget} />}
         {mode === "chat" && (
           <ChatPanel
@@ -97,7 +103,7 @@ export default function Home() {
         {mode === "graph" && <NetworkGraphView onOpenTarget={setOpenTarget} />}
         {mode === "compare" && <CompareView />}
         {mode === "audit" && <AuditView />}
-      </div>
+      </main>
 
       {openTarget && (
         <TargetSheet

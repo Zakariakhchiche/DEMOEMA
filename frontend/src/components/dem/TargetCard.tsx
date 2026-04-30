@@ -45,6 +45,10 @@ export function TargetCard({ target, density = "comfortable", selected, onSelect
       <div style={{ display: "flex", alignItems: compact ? "center" : "flex-start", paddingTop: compact ? 0 : 2 }}>
         <button
           type="button"
+          // Bug v6/1.7 — axe critical 'button-name' : checkbox sans texte
+          // discernable. aria-label décrit la cible pour les lecteurs d'écran.
+          aria-label={selected ? `Désélectionner ${target.name}` : `Sélectionner ${target.name}`}
+          aria-pressed={selected}
           onClick={(e) => { e.stopPropagation(); onSelect?.(); }}
           style={{
             width: 16, height: 16, borderRadius: 4,

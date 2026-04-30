@@ -7,6 +7,7 @@ toujours bindées en paramètres asyncpg ($1, $2…).
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -456,6 +457,15 @@ async def fiche_entreprise(req: Request, siren: str):
                     int(str(gouv["date_creation"])[:4]) if gouv and gouv["date_creation"] else None
                 )
             ),
+            # Bug v5/3.14 — ancienneté manquait sur le silver path. Calculé
+            # symétriquement au gold path pour cohérence des fiches.
+            "age_entreprise": (
+                lambda y: (2026 - y) if y else None
+            )(
+                (osint["annee_creation"] if osint and osint["annee_creation"] else None)
+                or (int(str(insee["date_creation"])[:4]) if insee and insee["date_creation"] else None)
+                or (int(str(gouv["date_creation"])[:4]) if gouv and gouv["date_creation"] else None)
+            ),
             "primary_domain": osint["primary_domain"] if osint else None,
             "has_linkedin_page": osint["has_linkedin_page"] if osint else None,
             "has_github_org": osint["has_github_org"] if osint else None,
@@ -842,13 +852,16 @@ async def fiche_entreprise(req: Request, siren: str):
                          unnest(d.denominations) AS other_deno
                   FROM top_dirig d
                )
-               SELECT DISTINCT other_siren AS siren,
-                      other_deno AS denomination,
+               -- Bug v5/3.13 — SIREN apparaissait 2-3× quand silver avait
+               -- plusieurs orthographes pour la même entité (ex 441639465).
+               -- GROUP BY siren only + max(denomination) consolide.
+               SELECT other_siren AS siren,
+                      max(other_deno) AS denomination,
                       string_agg(DISTINCT prenom || ' ' || nom, ', ') AS via_dirigeants
                FROM expanded
                WHERE other_siren != $1::char(9) AND other_siren IS NOT NULL
-               GROUP BY other_siren, other_deno
-               ORDER BY other_deno
+               GROUP BY other_siren
+               ORDER BY max(other_deno)
                LIMIT 20""",
             siren,
         )
@@ -2369,18 +2382,28 @@ async def press_recent(
         pass
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
+    # Bug v5/3.4 + v6 — endpoint timeoutait à 30s sur une MV vide ou en
+    # refresh long. Cap explicite à 4s pour ne JAMAIS bloquer l'UI : si la
+    # table est lente (locks, refresh), on retourne vide avec notice plutôt
+    # que de bloquer le chargement de la fiche.
     try:
-        rows = await pool.fetch(
-            f"""SELECT published_at, source, title, url, denomination, siren,
-                       NULL::text AS ma_signal_type, NULL::text AS sentiment,
-                       snippet AS summary, match_method, match_score, is_recent
-                FROM silver.press_mentions_matched
-                {where_sql}
-                ORDER BY published_at DESC NULLS LAST
-                LIMIT {int(limit)}""",
-            *params,
+        rows = await asyncio.wait_for(
+            pool.fetch(
+                f"""SELECT published_at, source, title, url, denomination, siren,
+                           NULL::text AS ma_signal_type, NULL::text AS sentiment,
+                           snippet AS summary, match_method, match_score, is_recent
+                    FROM silver.press_mentions_matched
+                    {where_sql}
+                    ORDER BY published_at DESC NULLS LAST
+                    LIMIT {int(limit)}""",
+                *params,
+            ),
+            timeout=4.0,
         )
         return {"articles": [_serialize(r) for r in rows]}
+    except asyncio.TimeoutError:
+        print("[press/recent] timeout 4s — silver.press_mentions_matched probablement en refresh ou lock")
+        return {"articles": [], "notice": "press_mentions_matched indisponible (timeout 4s)"}
     except Exception as e:
         # Pas de 500 utilisateur — on retourne empty + notice diagnostique
         print(f"[press/recent] failed: {type(e).__name__}: {e}")
