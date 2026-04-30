@@ -1,290 +1,266 @@
-# Signaux M&A — Scoring sur 100 points
+# Scoring M&A DEMOEMA — Approche advisor pro
 
-## Systeme de scoring : 13 dimensions, 123 signaux
-
-Chaque entreprise cible recoit un score global sur 100 points.
-Les points sont repartis sur 13 dimensions avec un plafond par dimension.
-Un score >= 65 = Action Prioritaire, >= 45 = Qualification,
->= 25 = Monitoring, < 25 = Veille Passive.
-
-La dimension 13 « Signaux propriétaires » est l'edge alpha DEMOEMA :
-20 signaux non listés dans les benchmarks publics, dérivés de cross-joins
-silver (DVF + SCI patrimoine, ICIJ + opensanctions, ratios financiers fins,
-pattern judiciaire) qui font la différence vs concurrents Pappers/Infogreffe.
-
-## Repartition des dimensions
-
-| # | Dimension | Max pts | Poids | Nb signaux |
-|---|-----------|---------|-------|------------|
-| 1 | Maturite du dirigeant | 20 | 17% | 10 |
-| 2 | Signaux patrimoniaux | 20 | 17% | 15 |
-| 3 | Dynamique financiere | 15 | 13% | 17 |
-| 4 | RH & Gouvernance | 12 | 10% | 10 |
-| 5 | Consolidation sectorielle | 10 | 9% | 9 |
-| 6 | Juridique & Reglementaire | 8 | 7% | 9 |
-| 7 | Presse & Media | 8 | 6% | 6 |
-| 8 | Innovation & PI | 6 | 5% | 5 |
-| 9 | Immobilier & Actifs | 5 | 4% | 5 |
-| 10 | ESG & Conformite | 5 | 4% | 4 |
-| 11 | International & Cross-border | 5 | 4% | 4 |
-| 12 | Marches publics & Dependance | 4 | 3% | 4 |
-| 13 | **Signaux propriétaires DEMOEMA** | **15** | **13%** | **20** |
-| | **TOTAL** | **~133 brut, plafonne a 100** | **100%** | **123** |
+> Réécrit 2026-04-30 : passage du modèle additif 13 dimensions / 123 signaux
+> à un modèle **multiplicatif 4 axes business + 1 axe risk** calibré sur la
+> pratique réelle des cabinets M&A small/mid cap (Lazard, Rothschild, EdR,
+> ESL, Argos). L'ancien barème additif produisait 50% des entreprises au-dessus
+> de 65 — statistiquement absurde. Le nouveau utilise **percentile-based
+> ranking** (top 1% / 5% / 20%) au lieu de seuils absolus.
 
 ---
 
-## DIMENSION 1 : MATURITE DIRIGEANT (max 20 pts)
+## 1. Pourquoi cette refonte
 
-| Signal | Label | Force | Points | Source |
-|--------|-------|-------|--------|--------|
-| founder_60_no_successor | Fondateur > 60 ans sans successeur | FORT | 7 | INPI RNE |
-| founder_over_65 | Dirigeant de plus de 65 ans | FORT | 6 | INPI RNE |
-| director_withdrawal | Retrait progressif du fondateur | FORT | 5 | LinkedIn, Presse |
-| spouse_director_departure | Depart du conjoint co-dirigeant | FORT | 5 | BODACC, INPI |
-| founder_age_55_65 | Dirigeant dans la tranche 55-65 ans | FAIBLE | 3 | INPI RNE |
-| director_mandate_20plus | Mandat du dirigeant > 20 ans | FAIBLE | 2 | INPI RNE |
-| dirigeant_multi_mandats | Mandats dans plusieurs societes | MOYEN | 3 | INPI RNE |
-| director_new_ventures | Dirigeant implique dans nouveaux projets | FAIBLE | 2 | INPI, LinkedIn |
-| director_speaker | Dirigeant intervenant / conferences | FAIBLE | 2 | Google News |
-| director_health_proxy | Reduction d'activite professionnelle | FAIBLE | 1 | LinkedIn |
+Le barème précédent additionnait 13 dimensions de bonus avec une **baseline
+50** (« tout le monde commence à 50/100 »). Conséquence :
+- Une boîte avec juste un bilan récent + 1 SCI + dirigeant 60 ans = **70/100**
+- 208 520 cibles `score >= 65` sur 411 303 (≈ 51%) = pas pertinent
 
-## DIMENSION 2 : SIGNAUX PATRIMONIAUX (max 20 pts)
+**Un advisor M&A pense en 4 axes business multiplicatifs** + **un multiplicateur
+risk**. Si UN axe est faible, le score composite est faible (effet entonnoir).
 
-| Signal | Label | Force | Points | Source |
-|--------|-------|-------|--------|--------|
-| holding_creation | Creation de holding patrimoniale | FORT | 7 | BODACC, Infogreffe |
-| bodacc_cession | BODACC : cession de fonds / parts | FORT | 7 | API BODACC |
-| apport_cession_structure | Apport-cession Art. 150-0 B ter | FORT | 6 | Infogreffe |
-| share_sale_by_director | Cession de parts par un dirigeant | FORT | 6 | BODACC |
-| beneficiaire_effectif_change | Changement de beneficiaire effectif | FORT | 5 | INPI RNE |
-| bodacc_capital_change | BODACC : modification de capital | FORT | 5 | API BODACC |
-| legal_form_change | Transformation SARL vers SAS | MOYEN | 4 | BODACC, Infogreffe |
-| big4_audit | Nomination Big 4 en audit | MOYEN | 4 | Presse |
-| infogreffe_capital_change | Modification capital (Infogreffe) | FORT | 4 | Infogreffe |
-| sci_creation_linked | Creation SCI liee (separation immo) | MOYEN | 3 | INPI, Infogreffe |
-| bodacc_dissolution | BODACC : dissolution / liquidation | FORT | 3 | API BODACC |
-| donation_partage | Donation-partage de titres | MOYEN | 3 | Detection indirecte |
-| pacte_dutreil | Mise en place Pacte Dutreil | MOYEN | 2 | Presse, notaires |
-| auditor_change | Changement de commissaire aux comptes | FAIBLE | 2 | INPI |
-| hq_relocation | Demenagement du siege social | FAIBLE | 1 | BODACC |
+## 2. Les 4 axes business
 
-## DIMENSION 3 : DYNAMIQUE FINANCIERE (max 15 pts)
+| # | Axe | Signal n°1 | Pourquoi |
+|---|---|---|---|
+| **1** | **TRANSMISSION** | Âge dirigeant + patrimoine optimisé | 60% des cessions small cap viennent de la sortie du fondateur |
+| **2** | **ATTRACTIVITY** | Marge proxy_EBITDA + multiple sectoriel | C'est ce qui détermine le prix réel |
+| **3** | **SCALE** | CA absolu | Coûts de transaction fixes ~200k€ → barrière à 5M€ CA |
+| **4** | **STRUCTURE** | Forme juridique + multi-mandats | SAS/SA + holding propre = transmission rapide |
 
-| Signal | Label | Force | Points | Source |
-|--------|-------|-------|--------|--------|
-| procedure_collective | Procedure collective en cours | FORT | 6 | BODACC, URSSAF |
-| lbo_4_years | LBO en cours depuis > 4 ans | FORT | 5 | CFNews, Presse |
-| revenue_decline_2years | Baisse CA > 10% sur 2 exercices | MOYEN | 4 | INPI comptes |
-| ebitda_margin_compression | Compression marge EBITDA > 3 pts | MOYEN | 4 | INPI comptes |
-| pret_garanti_etat | PGE important en cours | MOYEN | 3 | INPI bilans |
-| debt_ratio_deterioration | Ratio endettement > 4x EBITDA | MOYEN | 3 | INPI bilans |
-| exceptional_dividend | Distribution exceptionnelle dividendes | MOYEN | 3 | INPI bilans |
-| ca_growth_2years | Croissance CA > 15% sur 2 ans | MOYEN | 3 | INPI comptes |
-| score_defaillance_interne | Score defaillance interne eleve | MOYEN | 3 | Calcul interne |
-| headcount_growth_20 | Croissance effectifs > 20% / 2 ans | MOYEN | 2 | INSEE, URSSAF |
-| late_filing | Retard depot des comptes annuels | FAIBLE | 2 | BODACC, Infogreffe |
-| working_capital_stress | Tension BFR (BFR/CA en hausse) | FAIBLE | 2 | INPI bilans |
-| capex_decline | Baisse des investissements | FAIBLE | 1 | INPI bilans |
-| new_establishment | Ouverture nouvel etablissement | FAIBLE | 1 | INSEE SIRENE |
-| bpifrance_aid | Aide BPI France / subvention | FAIBLE | 1 | Data.Subvention |
-| presse_levee_fonds | Presse : levee de fonds | MOYEN | 2 | Google News |
-| presse_difficultes | Presse : difficultes financieres | FORT | 4 | Google News |
+Chaque axe est noté **0-100** indépendamment. Le score composite est :
 
-## DIMENSION 4 : RH & GOUVERNANCE (max 12 pts)
-
-| Signal | Label | Force | Points | Source |
-|--------|-------|-------|--------|--------|
-| daf_pe_recruitment | Recrutement DAF ex-PE / Big 4 | FORT | 5 | LinkedIn, offres |
-| key_hire_manda | Recrutement directeur M&A | FORT | 5 | LinkedIn, offres |
-| interim_management | Recours a un manager de transition | FORT | 4 | LinkedIn |
-| infogreffe_nouveau_dirigeant | Nouveau dirigeant (Infogreffe) | FORT | 4 | Infogreffe |
-| management_package_setup | Management package BSPCE/AGA | MOYEN | 3 | Infogreffe |
-| cofounder_departure | Depart co-fondateur / directeur cle | MOYEN | 3 | LinkedIn, INPI |
-| board_composition_change | Modification composition conseil | MOYEN | 3 | INPI, Infogreffe |
-| mass_layoff_plan | Plan licenciement / PSE | MOYEN | 2 | Presse, DIRECCTE |
-| cse_information_consultation | Information-consultation CSE | MOYEN | 2 | Presse |
-| linkedin_turnover_spike | Pic de turnover (departs cadres) | FAIBLE | 1 | LinkedIn |
-
-## DIMENSION 5 : CONSOLIDATION SECTORIELLE (max 10 pts)
-
-| Signal | Label | Force | Points | Source |
-|--------|-------|-------|--------|--------|
-| pe_platform_in_sector | Plateforme PE active (build-up) | FORT | 4 | CFNews |
-| competitor_acquired | Concurrent direct rachete | FORT | 4 | CFNews, Presse |
-| infogreffe_fusion_absorption | Fusion / absorption deposee | FORT | 4 | Infogreffe |
-| sector_consolidation | Consolidation sectorielle active | MOYEN | 3 | Config sectorielle |
-| foreign_buyer_entry | Acquereur etranger dans le secteur | MOYEN | 2 | Presse |
-| sector_regulation_change | Changement reglementaire sectoriel | MOYEN | 2 | Journal Officiel |
-| presse_partenariat | Presse : partenariat / alliance | MOYEN | 2 | Google News |
-| ma_event | Transaction M&A dans le secteur | FAIBLE | 1 | CFNews |
-| sector_multiple_expansion | Hausse multiples valorisation | FAIBLE | 1 | Rapports sectoriels |
-
-## DIMENSION 6 : JURIDIQUE & REGLEMENTAIRE (max 8 pts)
-
-| Signal | Label | Force | Points | Source |
-|--------|-------|-------|--------|--------|
-| mandat_ad_hoc | Procedure mandat ad hoc | FORT | 4 | Detection indirecte |
-| conciliation_procedure | Procedure de conciliation | FORT | 4 | BODACC |
-| commercial_court_filing | Inscription Tribunal de Commerce | FORT | 3 | BODACC |
-| sanction_detected | Sanction (gels avoirs, AMF, ACPR) | FORT | 3 | Gels Avoirs, AMF |
-| infogreffe_transfert_siege | Transfert siege social (Infogreffe) | MOYEN | 2 | Infogreffe |
-| change_of_purpose | Modification objet social | FAIBLE | 1 | Infogreffe |
-| litigation_signal | Contentieux significatif | FAIBLE | 1 | Judilibre |
-| rgpd_sanction | Sanction CNIL / RGPD | FAIBLE | 1 | CNIL |
-| environmental_sanction | Sanction environnementale | FAIBLE | 1 | DREAL |
-
-## DIMENSION 7 : PRESSE & MEDIA (max 8 pts)
-
-| Signal | Label | Force | Points | Source |
-|--------|-------|-------|--------|--------|
-| presse_cession | Presse : cession / vente detectee | FORT | 5 | Google News |
-| press_advisor_mandate | Mandat confie a un conseil M&A | FORT | 5 | CFNews, Les Echos |
-| press_strategic_review | Annonce de revue strategique | FORT | 4 | Presse |
-| press_succession_mention | Mention succession dans la presse | MOYEN | 3 | Google News |
-| press_award_ranking | Prix / classement entreprise | FAIBLE | 1 | Presse |
-| press_regional | Couverture presse regionale | FAIBLE | 1 | JDE RSS |
-
-## DIMENSION 8 : INNOVATION & PI (max 6 pts)
-
-| Signal | Label | Force | Points | Source |
-|--------|-------|-------|--------|--------|
-| key_patent_expiry | Expiration brevets cles | MOYEN | 3 | INPI Brevets |
-| patent_portfolio_growth | Croissance portefeuille brevets | FAIBLE | 2 | INPI Brevets |
-| cir_cii_beneficiary | Beneficiaire CIR / CII | FAIBLE | 1 | MESR |
-| patent_licensing_activity | Activite de licensing brevets | FAIBLE | 1 | INPI |
-| tech_obsolescence_risk | Risque obsolescence technologique | FAIBLE | 1 | Analyse sectorielle |
-
-## DIMENSION 9 : IMMOBILIER & ACTIFS (max 5 pts)
-
-| Signal | Label | Force | Points | Source |
-|--------|-------|-------|--------|--------|
-| sale_leaseback | Operation sale and leaseback | FORT | 3 | Presse |
-| real_estate_sale | Vente immobiliere par la societe | MOYEN | 2 | DVF |
-| sci_creation_linked | Creation SCI liee | MOYEN | 2 | INPI, Infogreffe |
-| site_closure | Fermeture site / etablissement | MOYEN | 2 | INSEE SIRENE |
-| lease_expiry_approaching | Echeance bail commercial proche | FAIBLE | 1 | Detection indirecte |
-
-## DIMENSION 10 : ESG & CONFORMITE (max 5 pts)
-
-| Signal | Label | Force | Points | Source |
-|--------|-------|-------|--------|--------|
-| bilan_ges_publie | Bilan GES publie (signal taille) | FAIBLE | 2 | ADEME |
-| carbon_regulation_exposure | Exposition reglementaire carbone | FAIBLE | 1 | Taxonomie UE |
-| bcorp_certification | Certification B-Corp | FAIBLE | 1 | Registre B-Corp |
-| social_audit_failure | Echec audit social | FAIBLE | 1 | Presse |
-
-## DIMENSION 11 : INTERNATIONAL & CROSS-BORDER (max 5 pts)
-
-| Signal | Label | Force | Points | Source |
-|--------|-------|-------|--------|--------|
-| foreign_shareholder_entry | Entree actionnaire etranger | FORT | 3 | BODACC, INPI |
-| ie_foreign_investment_screening | Controle investissements etrangers | MOYEN | 2 | DG Tresor |
-| foreign_subsidiary_creation | Creation filiale a l'etranger | FAIBLE | 1 | INPI |
-| export_dependency_high | Dependance export > 50% CA | FAIBLE | 1 | INPI bilans, Douanes |
-
-## DIMENSION 12 : MARCHES PUBLICS & DEPENDANCE (max 4 pts)
-
-| Signal | Label | Force | Points | Source |
-|--------|-------|-------|--------|--------|
-| major_contract_loss | Perte contrat/client majeur | MOYEN | 2 | Presse, BOAMP |
-| public_contract_concentration | Concentration marches publics > 40% CA | FAIBLE | 1 | BOAMP, DECP |
-| major_contract_win | Gain contrat majeur | FAIBLE | 1 | BOAMP, Presse |
-| client_concentration_risk | Concentration client > 30% CA | FAIBLE | 1 | INPI bilans |
-
-## DIMENSION 13 : SIGNAUX PROPRIETAIRES DEMOEMA (max 15 pts)
-
-20 signaux derives de cross-joins silver originaux non listes dans les
-benchmarks publics. C'est l'edge alpha de DEMOEMA — la difference vs
-Pappers/Infogreffe qui n'exploitent que les signaux "evidents".
-
-### Patrimoine dirigeant cross-DVF (4 signaux)
-
-| Signal | Label | Force | Points | Source |
-|--------|-------|-------|--------|--------|
-| dirigeant_high_net_worth | Capital SCI cumulé dirigeant > 5 M€ | FORT | 3 | silver.dirigeant_sci_patrimoine |
-| dvf_dirigeant_cash_out | Achat immo dirigeant > 1 M€ < 6m apres cession parts | FORT | 3 | silver.dvf_transactions + bodacc |
-| clan_familial | >= 3 dirigeants meme nom | MOYEN | 2 | silver.inpi_dirigeants |
-| micro_empire | CA < 5 M€ mais dirigeant >= 10 mandats | MOYEN | 2 | silver.inpi_comptes + silver.inpi_dirigeants |
-
-### Bilan financier ratios fins (4 signaux)
-
-| Signal | Label | Force | Points | Source |
-|--------|-------|-------|--------|--------|
-| immo_corporelles_high | Immo corporelles > 50% total actif | FORT | 2 | silver.inpi_comptes |
-| treasury_excess | Capitaux propres > 70% passif (excess cash) | MOYEN | 2 | silver.inpi_comptes |
-| ca_export_high | ca_export > 30% ca_net | MOYEN | 1 | silver.inpi_comptes |
-| capex_underinvest | Immo corporelles N < N-3 sur 3 ans | FAIBLE | 1 | silver.inpi_comptes |
-
-### Presence digitale paradoxale (2 signaux)
-
-| Signal | Label | Force | Points | Source |
-|--------|-------|-------|--------|--------|
-| digital_powerhouse | LinkedIn > 100 employes + GitHub org | MOYEN | 2 | silver.osint_companies_enriched |
-| low_profile_target | Pas de domain ni LinkedIn malgre CA > 5 M€ (fortune cachee) | FORT | 3 | silver.osint_companies_enriched |
-
-### Internationalisation & influence (3 signaux)
-
-| Signal | Label | Force | Points | Source |
-|--------|-------|-------|--------|--------|
-| has_lei_code | Code LEI international actif | FAIBLE | 1 | silver.gleif_lei |
-| active_lobbying_recent | Inscrit HATVP < 24 mois | MOYEN | 1 | silver.hatvp_lobbying |
-| high_lobbying_budget | Budget lobbying > 200 k€/an | FORT | 2 | silver.hatvp_lobbying |
-
-### Compliance & DD red flags avances (2 signaux)
-
-| Signal | Label | Force | Points | Source |
-|--------|-------|-------|--------|--------|
-| dirigeant_pep | Dirigeant PEP (Politically Exposed Person) | FORT | 3 | silver.opensanctions topics=pep |
-| offshore_link | Match ICIJ Panama/Paradise/Pandora Papers | FORT | 4 | silver.icij_offshore_match |
-
-### Patterns judiciaires & BODACC (3 signaux)
-
-| Signal | Label | Force | Points | Source |
-|--------|-------|-------|--------|--------|
-| litigation_pattern | >= 3 decisions cassation/CA en 5 ans | MOYEN | 2 | silver.judilibre_decisions |
-| radiation_proche | Annonce radiation BODACC < 3 mois | FORT | 3 | silver.bodacc_annonces |
-| avis_de_tiers | Avis de tiers (creancier qui s'oppose) | MOYEN | 1 | silver.bodacc_annonces |
-
-### Composites originaux (2 signaux)
-
-| Signal | Label | Force | Points | Source |
-|--------|-------|-------|--------|--------|
-| phantom_holding | Creation holding 24m + CA cible decroit (preparation cession silencieuse) | FORT | 3 | bodacc + silver.inpi_comptes |
-| geographic_expansion | Nouveaux etablissements dans >= 3 dept en 12m | MOYEN | 1 | silver.insee_etablissements |
-
----
-
-## SIGNAUX COMPOSITES (multiplicateurs de confiance)
-
-Ces combinaisons de signaux augmentent drastiquement la confiance :
-
-| Signal | Label | Composition | Effet |
-|--------|-------|-------------|-------|
-| triple_signal_patrimoine | Holding + SCI + Big4 | holding_creation + sci_creation + big4_audit (< 18 mois) | Score x1.5 |
-| exit_preparation_cluster | Cluster preparation sortie | daf_pe_recruitment + legal_form_change + (holding OU management_package) | Score x1.5 |
-| distressed_cluster | Cluster detresse | revenue_decline + ebitda_compression + (late_filing OU score_defaillance) | Score x1.3 |
-| succession_urgency | Urgence successorale | founder_over_65 + spouse_departure + pas de pacte_dutreil | Score x1.5 |
-| sector_wave_target | Cible vague consolidation | pe_platform + competitor_acquired + ca_growth | Score x1.3 |
-
----
-
-## Algorithme de scoring
-
-```python
-score_total = 0
-for dimension in dimensions:
-    raw = sum(signal.points for signal in company.signals if signal.dimension == dimension)
-    capped = min(raw, dimension.max_points)
-    score_total += capped
-
-# Appliquer les multiplicateurs composites
-for composite in composites:
-    if all(s in company.signals for s in composite.required_signals):
-        score_total = min(100, score_total * composite.multiplier)
-
-# Classification
-if score_total >= 65: priority = "Action Prioritaire"
-elif score_total >= 45: priority = "Qualification"
-elif score_total >= 25: priority = "Monitoring"
-else: priority = "Veille Passive"
 ```
+deal_score = (transmission × attractivity × scale)^(1/3) × risk_multiplier
+```
+
+→ Moyenne géométrique : un 0 sur un axe = 0 composite. Pas de cibles bidons
+qui « passent » par accumulation de bonus mineurs.
+
+## 3. Détail axe par axe
+
+### Axe 1 — TRANSMISSION (probabilité de cession)
+
+Probabilité que le dirigeant veuille céder dans les 24 prochains mois.
+
+| Signal | Points | Logique |
+|---|---|---|
+| Âge dirigeant max — courbe sigmoïde | 0 → 90 | 55→0pt, 60→22pt, 65→45pt, 70→67pt, 75+→90pt. Linéaire 4.5pt/an au-dessus de 55. |
+| `n_sci ≥ 2 AND total_capital_sci > 500k€` | +30 | Patrimoine déjà optimisé fiscalement = signal ULTRA fort |
+| `n_sci ≥ 2` (sans condition capital) | +20 | Holding patrimoniale active |
+| `n_sci = 1` | +8 | Premier réflexe |
+| `has_late_filing` | +12 | Lassitude opérationnelle (sortie mentale) |
+| Dirigeant unique ET âge ≥ 60 | +8 | Homme-clé sans relève |
+
+Cap à 100. Plus l'axe TRANSMISSION est fort, plus la cible est *prête à
+être travaillée*.
+
+### Axe 2 — ATTRACTIVITY (la valeur réelle de la cible)
+
+Capacité à dégager du cash. Combine **marge** et **multiples sectoriels
+implicites**.
+
+```
+proxy_ebitda = resultat_net + (capital_social × 0.05)
+proxy_margin = proxy_ebitda / ca_latest
+```
+
+| Signal | Points |
+|---|---|
+| `proxy_margin ≥ 20%` | +50 |
+| `proxy_margin ∈ [15%, 20%[` | +40 |
+| `proxy_margin ∈ [10%, 15%[` | +30 |
+| `proxy_margin ∈ [5%, 10%[` | +15 |
+| `proxy_margin ∈ [0%, 5%[` | +5 |
+| Stable (≥3 exercices déposés ET age ≥ 5 ans) | +15 |
+| Sectoriel premium (NAF 62, 63, 86, 71, 70, 30, 58) | +15 |
+| Géographie premium (75, 92, 78, 94, 93, 77, 95, 91, 69, 13, 06, 33, 31, 35, 59, 67, 44, 38) | +10 |
+| Capitaux propres > 2× capital social | +10 |
+| Capitaux propres > 0 | +5 |
+
+### Axe 3 — SCALE (barrière transactionnelle)
+
+Plus la boîte est petite, moins elle intéresse un cabinet (frais de transaction
+fixes). Seuils calibrés sur la pratique :
+
+| CA | Points | Catégorie |
+|---|---|---|
+| `≥ 100 M€` | 100 | Large cap |
+| `≥ 50 M€` | 85 | Mid cap haut |
+| `≥ 20 M€` | 70 | Mid cap |
+| `≥ 10 M€` | 55 | Small cap haut |
+| `≥ 5 M€` | 35 | Small cap (notre cœur) |
+| `≥ 2 M€` | 15 | Micro cap |
+| `< 2 M€` | 0 | Pas éligible advisor |
+
+Bonus :
+- Multi-établissements (effectif ≥ 11) : +5
+- LEI présent (consolidé international) : +5
+
+### Axe 4 — STRUCTURE (suitability)
+
+| Signal | Points |
+|---|---|
+| Forme juridique propre (SAS/SA codes 5710-5599) | +40 (sinon +10) |
+| `has_pro_ma` (dirigeant a déjà fait du M&A — n_mandats ≥ 5) | +25 |
+| `n_mandats_dirigeant_max ≥ 5` | +15 |
+| `has_holding_patrimoniale` | +20 |
+
+## 4. Multiplicateur RISK
+
+Pas additif — multiplicatif. Donc cumulatif (un risque haircut, plusieurs
+risques empilent).
+
+| Risque | Action |
+|---|---|
+| Sanction OFAC/UE/UK (`silver.opensanctions`) | × **0** → ELIMINATED |
+| Radiation INSEE (`etat_administratif = 'F'`) | × **0** → ELIMINATED |
+| Procédure collective < 24 mois (`silver.bodacc_annonces`) | × **0** → ELIMINATED |
+| Sanction CNIL | × 0.75 |
+| Sanction DGCCRF | × 0.80 |
+| ≥ 3 contentieux récents (`silver.judilibre_decisions`) | × 0.70 |
+| 1-2 contentieux récents | × 0.85 |
+| `has_late_filing` | × 0.90 |
+| Déficit (résultat net < 0) | × 0.90 |
+
+Les 3 cas × 0 sont matérialisés en tier `Z_ELIM` mais gardés dans la table
+pour traçabilité (un user qui interroge un siren radié doit voir « Éliminé :
+radiation 2017 », pas « 0 résultats »).
+
+## 5. Multiples sectoriels implicites (Argos Mid-Market 2024)
+
+Utilisés pour calculer `ev_estimated_eur = proxy_ebitda × multiple × scale_premium`.
+
+| Secteur (NAF) | Multiple | Justification |
+|---|---|---|
+| Tech / SaaS (62.xx, 63.xx) | 8.5× | Recurring revenue, scalable |
+| Santé / MedTech (86.xx) | 9.5× | Demande structurelle |
+| Industrie premium aéro/médical (30.xx, 32.50) | 7.0× | Barrières techniques |
+| Édition / médias (58.xx) | 7.5× | IP / contenu |
+| Services B2B (70.xx, 71.xx) | 6.0× | Récurrence |
+| Industrie générale (25.xx, 28.xx) | 5.5× | |
+| Finance / assurance (64-66) | 5.0× | |
+| Construction / BTP (41-43) | 4.5× | Cyclique |
+| Logistique (52-53) | 4.0× | Marges fines |
+| Retail / Resto (47, 56) | 3.5× | Capex lourd |
+| Default | 5.0× | |
+
+`scale_premium` = +20% si CA ∈ [10M€, 50M€[, +40% si CA ≥ 50M€.
+
+## 6. Tier basé PERCENTILE (vraie approche pro)
+
+Calculé via `ntile(100) OVER (ORDER BY deal_score DESC)`.
+
+| Tier | Percentile | Volume estimé sur 411k cibles | Action |
+|---|---|---|---|
+| **A_HOT** | ≤ 1% | ~4 100 boîtes | Pitch immédiat, dossier prio |
+| **B_WARM** | 1-5% | ~16 500 boîtes | Approche commerciale ciblée |
+| **C_PIPELINE** | 5-20% | ~62 000 boîtes | Veille active, qualification |
+| **D_WATCH** | 20-50% | ~125 000 boîtes | Base données, pas d'action |
+| **E_REJECT** | > 50% | reste | Hors-radar |
+| **Z_ELIM** | n/a | sanctionnés/radiés | Éliminés (gardés en archive) |
+
+L'avantage du percentile : si demain on injecte 1M de cibles supplémentaires,
+le ranking se réajuste automatiquement, A_HOT reste le top 1%.
+
+## 7. Fiche entreprise — affichage utilisateur
+
+```
+DUFOUR SISTERON (979598943)
+└─ DEAL SCORE : 60 / 100 (percentile 12 → C_PIPELINE)
+
+Détail des 4 axes :
+├─ TRANSMISSION  : 78  ← dirigeant 67 ans, holding patrimoniale
+├─ ATTRACTIVITY  : 42  ← CA 18 M€, marge 4.2%, secteur ×4
+├─ SCALE         : 65  ← CA 18 M€ = small cap haut
+└─ STRUCTURE     : 70  ← SAS, holding, multi-mandats
+
+Risk : -30% (-1 contentieux récent, late filing)
+EV estimée : 9.2 M€ (proxy EBITDA 0.76M × 4 × 1.0)
+
+Pourquoi C_PIPELINE et pas A_HOT :
+- Score TRANSMISSION fort mais ATTRACTIVITY faible
+- Marge sectorielle insuffisante pour multiple premium
+```
+
+L'utilisateur voit immédiatement **l'axe fort**, **l'axe faible**, et la
+**fourchette EV**. C'est ce qui rend l'outil exploitable par un vrai dealer.
+
+## 8. Schema gold.scoring_ma
+
+Colonnes principales (champs business) :
+
+```sql
+siren                 char(9)
+denomination          text
+code_ape              varchar(16)
+adresse_dept          text
+
+-- Proxies financiers
+proxy_ebitda          numeric
+proxy_margin          numeric    -- ratio 0-1
+sector_multiple       numeric    -- ex 8.5
+ev_estimated_eur      numeric    -- valorisation indicative
+
+-- 4 axes business 0-100
+transmission_score    int
+attractivity_score    int
+scale_score           int
+structure_score       int
+
+-- Risk
+has_sanction_ofac_eu      boolean
+has_sanction_cnil         boolean
+has_sanction_dgccrf       boolean
+has_proc_collective_recent boolean
+has_cession_recent         boolean
+n_contentieux_recent       int
+risk_multiplier           numeric(4,3)  -- 0..1
+
+-- Composite
+deal_score_raw        int       -- 0-100, le score affiché
+deal_percentile       int       -- 1-100, ntile DESC
+tier                  varchar   -- A_HOT, B_WARM, C_PIPELINE, D_WATCH, E_REJECT, Z_ELIM
+
+materialized_at       timestamptz
+```
+
+Indexes :
+- `siren`, `tier`, `deal_score_raw DESC`, `deal_percentile`
+- `transmission_score DESC`, `attractivity_score DESC`, `scale_score DESC`
+- `ev_estimated_eur DESC NULLS LAST`
+- `code_ape`, `adresse_dept`
+
+## 9. Sources de signaux
+
+| Signal | Source silver |
+|---|---|
+| Identité, financier, dirigeant | `silver.entreprises_signals` (via `gold.entreprises_master`) |
+| Sanctions internationales | `silver.opensanctions` |
+| Sanctions CNIL | `silver.cnil_sanctions` |
+| Sanctions DGCCRF | `silver.dgccrf_sanctions` |
+| Procédures collectives, modifications | `silver.bodacc_annonces` |
+| Cessions détectées | `silver.cession_events` |
+| Contentieux | `silver.judilibre_decisions` (proxy par dénomination) |
+| LEI international | `silver.gleif_lei` |
+
+À ajouter (non encore exploités dans v3) :
+- `silver.press_mentions_matched` → presse négative récente (sentiment)
+- `silver.osint_companies_enriched` → digital footprint
+- `silver.transparence_sante_dirigeants` → KOL pharma signal
+- `silver.icij_offshore_match` → offshore link compliance
+
+## 10. Évolutions prévues
+
+- **Croissance CA 3Y** dès qu'on a la time-series multi-bilan dans
+  `silver.inpi_comptes` (actuellement on n'a que latest).
+- **EBITDA réel** (pas proxy) si on parse les comptes annuels détaillés.
+- **Sentiment presse** automatique sur `press_mentions_matched`.
+- **Multiples sectoriels** : passer en table dédiée `gold.sector_multiples`
+  rafraîchie trimestriellement avec source Argos / France Invest.
+- **Filiation / actionnariat** via `silver.inpi_personnes_morales` pour
+  détecter les filiales déjà vendables vs holding mère.
+
+---
+
+**Référence d'implémentation** : voir `infrastructure/agents/scripts/gold/scoring_ma_v3_pro.sql`
