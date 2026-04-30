@@ -213,9 +213,73 @@ async def fiche_entreprise(req: Request, siren: str):
     fiche = None
     gouv = None
     if await _table_exists(pool, "gold", "entreprises_master"):
-        fiche = await pool.fetchrow(
+        fiche_row = await pool.fetchrow(
             "SELECT * FROM gold.entreprises_master WHERE siren = $1", siren
         )
+        if fiche_row:
+            # Schema gold v3 PRO : ca_latest / effectif_moyen_latest / resultat_net_latest /
+            # insee_tranche_effectifs etc. Le frontend lit les noms LEGACY (ca_dernier,
+            # effectif_exact, ebitda_dernier, tranche_effectifs, n_bodacc). Sans alias,
+            # les cards CA/EBITDA/Effectif s'affichent vides sur les sirens en gold.
+            # Voir _cibles_from_gold qui fait la même chose en sortie.
+            fiche = dict(fiche_row)
+            fiche.setdefault("ca_dernier", fiche.get("ca_latest"))
+            fiche.setdefault("ebitda_dernier", fiche.get("resultat_net_latest"))
+            fiche.setdefault("resultat_net", fiche.get("resultat_net_latest"))
+            fiche.setdefault("effectif_exact", fiche.get("effectif_moyen_latest") or fiche.get("effectif_salarie"))
+            fiche.setdefault("effectif_moyen", fiche.get("effectif_moyen_latest"))
+            fiche.setdefault("capitaux_propres", fiche.get("capitaux_propres_latest"))
+            fiche.setdefault("tranche_effectifs", fiche.get("insee_tranche_effectifs"))
+            fiche.setdefault("forme_juridique", fiche.get("insee_categorie_juridique"))
+            fiche.setdefault("naf", fiche.get("code_ape"))
+            fiche.setdefault("dept", fiche.get("adresse_dept"))
+            fiche.setdefault("ville", fiche.get("adresse_commune"))
+            fiche.setdefault("date_creation", fiche.get("date_immatriculation"))
+            fiche.setdefault("annee_creation", (
+                int(str(fiche["date_immatriculation"])[:4])
+                if fiche.get("date_immatriculation")
+                else None
+            ))
+            fiche.setdefault("statut", "actif" if fiche.get("insee_etat_administratif") != "F" else "cesse")
+            fiche.setdefault("etat_administratif", fiche.get("insee_etat_administratif"))
+            # marge_pct calculé pour cohérence avec le silver path
+            ca_v = fiche.get("ca_latest")
+            rn_v = fiche.get("resultat_net_latest")
+            if ca_v and rn_v is not None:
+                try:
+                    fiche["marge_pct"] = round((float(rn_v) / float(ca_v)) * 100, 1)
+                except (TypeError, ZeroDivisionError):
+                    fiche["marge_pct"] = None
+
+            # CA history (5 derniers exercices) — manque dans gold, requis par le
+            # graphe d'évolution finance côté frontend.
+            ca_hist = await _safe(pool.fetch(
+                """SELECT date_cloture, ca_net::float8 AS ca
+                   FROM (SELECT DISTINCT ON (date_cloture) date_cloture, ca_net
+                         FROM silver.inpi_comptes
+                         WHERE siren = $1 ORDER BY date_cloture DESC LIMIT 5) h
+                   WHERE ca_net IS NOT NULL ORDER BY date_cloture""",
+                siren,
+            ), default=[])
+            fiche["ca_history"] = [r["ca"] for r in (ca_hist or [])]
+            fiche["exercices"] = [r["date_cloture"].isoformat() for r in (ca_hist or [])]
+
+            # Counts agrégés (n_dirigeants/n_bodacc/n_sanctions) — gold a
+            # n_bodacc_annonces_24m mais pas le total ni les dirigeants/sanctions.
+            # Sans ces 3 compteurs, les cards "DIRIGEANTS / BODACC / RED FLAGS"
+            # de l'overview affichent 0 alors que les tabs pleins. Cf. DUFOUR.
+            fiche["n_dirigeants"] = await _safe(pool.fetchval(
+                "SELECT COUNT(*)::int FROM silver.inpi_dirigeants WHERE $1::char(9) = ANY(sirens_mandats)",
+                siren,
+            ), default=0) or fiche.get("n_dirigeants") or 0
+            fiche["n_bodacc"] = await _safe(pool.fetchval(
+                "SELECT COUNT(*)::int FROM silver.bodacc_annonces WHERE siren = $1",
+                siren,
+            ), default=0) or 0
+            fiche["n_sanctions"] = await _safe(pool.fetchval(
+                "SELECT COUNT(*)::int FROM silver.opensanctions WHERE $1 = ANY(sirens_fr)",
+                siren,
+            ), default=0) or 0
     if not fiche:
         # Multi-query approach : chaque source séparée avec timeout court.
         # Si une table est lente/locked, on remplit avec NULL au lieu de tout
@@ -948,7 +1012,7 @@ async def _dirigeant_full(
            FROM silver.inpi_dirigeants
            WHERE UPPER(unaccent(nom)) = UPPER(unaccent($1))
              AND UPPER(unaccent(prenom)) = UPPER(unaccent($2))
-             AND ($3::text IS NULL OR date_naissance = $3)""",
+             AND ($3::text IS NULL OR date_naissance LIKE $3 || '%')""",
         nom_u, prenom_u, date_n,
     ))
     if not inpi or not inpi.get("nom"):
@@ -966,7 +1030,7 @@ async def _dirigeant_full(
            FROM silver.dirigeant_sci_patrimoine
            WHERE UPPER(unaccent(nom)) = UPPER(unaccent($1))
              AND UPPER(unaccent(prenom)) = UPPER(unaccent($2))
-             AND ($3::text IS NULL OR date_naissance = $3)""",
+             AND ($3::text IS NULL OR date_naissance LIKE $3 || '%')""",
         nom_u, prenom_u, date_n,
     ))
 
@@ -1019,7 +1083,7 @@ async def _dirigeant_full(
                    SELECT 1 FROM unnest(prenoms) p
                    WHERE UPPER(unaccent(p)) = UPPER(unaccent($2))
              )
-             AND ($3::text IS NULL OR date_naissance = $3)
+             AND ($3::text IS NULL OR date_naissance LIKE $3 || '%')
            ORDER BY n_total_social DESC NULLS LAST
            LIMIT 1""",
         nom_u, prenom_u, date_n,
@@ -1042,7 +1106,7 @@ async def _dirigeant_full(
                    SELECT 1 FROM unnest(prenoms) p
                    WHERE UPPER(unaccent(p)) = UPPER(unaccent($2))
              )
-             AND ($3::text IS NULL OR date_naissance = $3)
+             AND ($3::text IS NULL OR date_naissance LIKE $3 || '%')
            ORDER BY last_scanned_at DESC NULLS LAST
            LIMIT 1""",
         nom_u, prenom_u, date_n,
@@ -1164,7 +1228,15 @@ async def scoring_detail(req: Request, siren: str):
             "capitaux_propres_latest": float(data["capitaux_propres_latest"]) if data.get("capitaux_propres_latest") else None,
             "resultat_net_latest": float(data["resultat_net_latest"]) if data.get("resultat_net_latest") else None,
             "proxy_ebitda": float(data["proxy_ebitda"]) if data.get("proxy_ebitda") else None,
-            "proxy_margin": float(data["proxy_margin"]) if data.get("proxy_margin") else None,
+            # proxy_margin = (resultat_net + 5% capital) / ca_latest. Sur les
+            # holdings avec gros capital social (Equans : 2,2 Md€) et faible
+            # CA opérationnel, le 5% capital dépasse le CA → marge >100% qui
+            # n'a aucun sens M&A. Cap [-100, 100] côté API pour ne pas afficher
+            # "Marge proxy 114,6%" dans la fiche.
+            "proxy_margin": (
+                max(-1.0, min(1.0, float(data["proxy_margin"])))
+                if data.get("proxy_margin") is not None else None
+            ),
             "sector_multiple": float(data["sector_multiple"]) if data.get("sector_multiple") else None,
             "ev_estimated_eur": float(data["ev_estimated_eur"]) if data.get("ev_estimated_eur") else None,
         },
