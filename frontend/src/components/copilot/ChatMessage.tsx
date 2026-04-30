@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { Sparkles, User } from "lucide-react";
 import { TargetCard } from "./TargetCard";
+import { MarkdownRenderer } from "@/components/dem/MarkdownRenderer";
 import type { ChatMessage as Msg, Cible } from "@/lib/types/dem";
 import { cn } from "@/lib/utils";
 
@@ -56,7 +57,11 @@ export function ChatMessage({ message, onCardView, onCardSave, onCardCompare, on
               : "bg-zinc-900/40 text-zinc-200 backdrop-blur-xl ring-1 ring-white/[0.06]"
           )}
         >
-          {message.content}
+          {isUser ? (
+            message.content
+          ) : (
+            <MarkdownRenderer content={message.content} fontSize={14} />
+          )}
           {message.streaming && (
             <span className="ml-1 inline-block h-3.5 w-0.5 animate-pulse bg-purple-300" />
           )}

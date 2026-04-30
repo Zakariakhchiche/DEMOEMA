@@ -8,6 +8,7 @@ import { TargetCard } from "./TargetCard";
 import { PersonCard } from "./PersonCard";
 import { ScoreBadge } from "./ScoreBadge";
 import { UserMessage, AiMessage } from "./ChatBubbles";
+import { MarkdownRenderer } from "./MarkdownRenderer";
 import { SUGGESTIONS_INITIAL } from "@/lib/dem/data";
 import { fetchTargets, fetchPersons } from "@/lib/dem/adapter";
 import { streamCopilot } from "@/lib/api";
@@ -392,7 +393,7 @@ export function ChatPanel({ density, onOpenTarget, onPitch, showSidebar }: Props
     <AiMessage key={i} header={m.header} streaming={false}>
       {m.kind === "proactive" && (
         <div className="fade-up">
-          <div style={{ fontSize: 14, color: "var(--text-primary)", lineHeight: 1.55, marginBottom: 14 }}>{m.content}</div>
+          <div style={{ marginBottom: 14 }}><MarkdownRenderer content={m.content} /></div>
           {m.cards && m.cards.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {m.cards.map((c) => (
@@ -519,7 +520,7 @@ export function ChatPanel({ density, onOpenTarget, onPitch, showSidebar }: Props
 
       {m.kind === "compare" && m.compare && (
         <div className="fade-up">
-          <div style={{ fontSize: 14, color: "var(--text-primary)", lineHeight: 1.55, marginBottom: 12 }}>{m.content}</div>
+          <div style={{ marginBottom: 12 }}><MarkdownRenderer content={m.content} /></div>
           <CompareTable a={m.compare.a} b={m.compare.b} />
           {m.verdict && (
             <div style={{
@@ -536,7 +537,7 @@ export function ChatPanel({ density, onOpenTarget, onPitch, showSidebar }: Props
 
       {m.kind === "siren" && m.cards && (
         <div className="fade-up">
-          <div style={{ fontSize: 14, color: "var(--text-primary)", lineHeight: 1.55, marginBottom: 10 }}>{m.content}</div>
+          <div style={{ marginBottom: 10 }}><MarkdownRenderer content={m.content} /></div>
           {m.cards.map((c) => (
             <TargetCard
               key={c.siren}
@@ -560,7 +561,7 @@ export function ChatPanel({ density, onOpenTarget, onPitch, showSidebar }: Props
 
       {m.kind === "persons" && m.persons && (
         <div className="fade-up">
-          <div style={{ fontSize: 14, color: "var(--text-primary)", lineHeight: 1.55, marginBottom: 12 }}>{m.content}</div>
+          <div style={{ marginBottom: 12 }}><MarkdownRenderer content={m.content} /></div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {m.persons.map((p) => <PersonCard key={p.id} person={p} />)}
           </div>
@@ -569,13 +570,13 @@ export function ChatPanel({ density, onOpenTarget, onPitch, showSidebar }: Props
 
       {m.kind === "dd" && m.dd && (
         <div className="fade-up">
-          <div style={{ fontSize: 14, color: "var(--text-primary)", lineHeight: 1.55, marginBottom: 6 }}>{m.content}</div>
+          <div style={{ marginBottom: 6 }}><MarkdownRenderer content={m.content} /></div>
           <DDBlock target={m.dd} />
         </div>
       )}
 
       {m.kind === "plain" && (
-        <div style={{ fontSize: 14, color: "var(--text-primary)", lineHeight: 1.55 }}>{m.content}</div>
+        <MarkdownRenderer content={m.content} />
       )}
     </AiMessage>
   );
