@@ -134,26 +134,52 @@ async def lifespan(app):
                        LIMIT 200"""
                 )
                 if rows:
-                    # Mappe vers le format enriched_target legacy
+                    # Mappe vers le format enriched_target legacy. Doit fournir
+                    # name/sector/city/globalScore/priorityLevel/analysis pour ne
+                    # pas casser le templating /api/copilot/query (ligne 1511).
+                    def _tier_to_priority(t: str | None) -> str:
+                        return {
+                            "A_HOT": "Haute", "B_WARM": "Moyenne", "C_PIPELINE": "Veille",
+                            "D_WATCH": "Basse", "E_REJECT": "Rejet", "Z_ELIM": "Éliminé",
+                        }.get(t or "", "Veille")
+
                     fetched = []
+                    enriched = []
                     for r in rows:
-                        siren = r["siren"]
+                        siren = str(r["siren"]).strip()
                         deno = r.get("denomination") or siren
+                        ville = r.get("adresse_commune") or ""
+                        dept = r.get("adresse_dept") or ""
+                        ape = r.get("code_ape") or ""
+                        score = int(r.get("deal_score_raw") or 0)
+                        tier = r.get("tier")
+                        # Format raw (cache JSON Supabase)
                         fetched.append({
-                            "siren": str(siren).strip(),
+                            "siren": siren,
                             "nom_entreprise": deno,
                             "name": deno,
-                            "siege": {
-                                "ville": r.get("adresse_commune") or "",
-                                "departement": r.get("adresse_dept") or "",
-                            },
-                            "code_naf": r.get("code_ape") or "",
+                            "siege": {"ville": ville, "departement": dept},
+                            "code_naf": ape,
                             "ca_dernier": r.get("ca_latest"),
-                            "score_ma": r.get("deal_score_raw") or 0,
-                            "tier": r.get("tier"),
+                            "score_ma": score,
+                            "tier": tier,
+                        })
+                        # Format enriched (consommé par /copilot/query, ne ré-passe
+                        # pas par enrich_target qui ne sait pas faire ces fields).
+                        enriched.append({
+                            "siren": siren,
+                            "name": deno,
+                            "sector": ape or "—",
+                            "city": ville or dept or "—",
+                            "globalScore": score,
+                            "priorityLevel": _tier_to_priority(tier),
+                            "analysis": {
+                                "type": tier or "C_PIPELINE",
+                                "window": "scoring v3 PRO",
+                            },
                         })
                     raw_targets = fetched
-                    enriched_targets = [enrich_target(c) for c in fetched]
+                    enriched_targets = enriched
                     print(f"[EdRCF] Hydrated {len(enriched_targets)} targets from gold.cibles_ma_top")
         except Exception as _e:
             print(f"[EdRCF] gold.cibles_ma_top hydrate failed: {_e}")
