@@ -176,7 +176,85 @@ COPILOT_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_scoring_detail",
-            "description": "Détail du score M&A 123 signaux × 13 dimensions pour un siren (Action Prioritaire / Qualification / Monitoring / Veille).",
+            "description": (
+                "Scoring M&A v3 PRO d'une cible — 4 axes business + tier + EV. "
+                "Retourne deal_score (0-100), tier (A_HOT/B_WARM/C_PIPELINE/D_WATCH/E_REJECT), "
+                "axes {transmission, attractivity, scale, structure} chacun 0-100, "
+                "risk multiplier, financials (proxy_ebitda, marge, sector_multiple), "
+                "ev_estimated_eur. Utilise pour répondre 'pourquoi cette boîte est-elle "
+                "intéressante / pas intéressante en M&A ?'"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "siren": {"type": "string", "description": "SIREN 9 chiffres"},
+                },
+                "required": ["siren"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "top_cibles_by_axe",
+            "description": (
+                "Top N cibles M&A classées par UN axe spécifique du scoring v3 PRO. "
+                "Permet de répondre 'top 10 cibles transmission' (dirigeants seniors prêts "
+                "à céder), 'top 10 attractivity' (vraie valeur cash), 'top 10 scale' "
+                "(taille mid/large cap). Filtre par dept/code_ape/tier optionnel."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "axe": {
+                        "type": "string",
+                        "enum": ["transmission", "attractivity", "scale", "structure", "deal_score"],
+                        "description": "Axe à utiliser pour le tri DESC",
+                    },
+                    "limit": {"type": "integer", "description": "Default 10, max 50"},
+                    "dept": {"type": "string", "description": "Code dept (75, 92, 69, etc.)"},
+                    "code_ape": {"type": "string", "description": "Préfixe NAF (62., 71., etc.)"},
+                    "tier_min": {
+                        "type": "string",
+                        "enum": ["A_HOT", "B_WARM", "C_PIPELINE"],
+                        "description": "Seuil minimum tier",
+                    },
+                },
+                "required": ["axe"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compare_scoring",
+            "description": (
+                "Compare 2 à 5 cibles M&A sur les 4 axes business + EV + tier. "
+                "Renvoie une table comparative pour répondre 'compare X vs Y' du point "
+                "de vue scoring M&A. Utile pour DD pré-pitch."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sirens": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Liste de 2 à 5 SIRENs à comparer",
+                    },
+                },
+                "required": ["sirens"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "score_breakdown",
+            "description": (
+                "Décomposition pédagogique du deal_score d'un siren — pourquoi tel score, "
+                "axe par axe, avec contexte (âge dirigeant, n_sci, marge, secteur). "
+                "Utilisé pour expliquer le résultat à un user qui demande 'pourquoi 65/100 ?'"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -458,6 +536,148 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
                 if r.status_code == 200:
                     return r.json()
                 return {"error": f"HTTP {r.status_code} (gold.scoring_ma pas matérialisée)"}
+
+        elif name == "top_cibles_by_axe":
+            axe = args.get("axe", "deal_score")
+            if axe not in ("transmission", "attractivity", "scale", "structure", "deal_score"):
+                return {"error": "axe invalide"}
+            limit = max(1, min(int(args.get("limit", 10)), 50))
+            params = {"limit": limit, "sort": "score_ma"}
+            if args.get("dept"):
+                params["dept"] = args["dept"]
+            if args.get("code_ape"):
+                params["naf"] = args["code_ape"]
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(f"{datalake_base}/api/datalake/cibles", params=params)
+                if r.status_code != 200:
+                    return {"error": f"HTTP {r.status_code}", "cibles": []}
+                data = r.json()
+                cibles = data.get("cibles", [])
+                # Tri client-side par axe (le backend trie par score_ma global)
+                axe_col = {"deal_score": "score_ma", "transmission": "transmission_score", "attractivity": "attractivity_score", "scale": "scale_score", "structure": "structure_score"}[axe]
+                tier_min = args.get("tier_min")
+                if tier_min:
+                    tier_order = {"A_HOT": 1, "B_WARM": 2, "C_PIPELINE": 3, "D_WATCH": 4, "E_REJECT": 5}
+                    cap = tier_order.get(tier_min, 5)
+                    cibles = [c for c in cibles if tier_order.get(c.get("tier") or "E_REJECT", 9) <= cap]
+                cibles_sorted = sorted(cibles, key=lambda c: c.get(axe_col) or 0, reverse=True)[:limit]
+                return {
+                    "axe": axe,
+                    "n": len(cibles_sorted),
+                    "cibles": [
+                        {
+                            "siren": c.get("siren"),
+                            "denomination": c.get("denomination"),
+                            "tier": c.get("tier"),
+                            "deal_score": c.get("score_ma"),
+                            "transmission": c.get("transmission_score"),
+                            "attractivity": c.get("attractivity_score"),
+                            "scale": c.get("scale_score"),
+                            "structure": c.get("structure_score"),
+                            "ev_estimated_eur": c.get("ev_estimated_eur"),
+                            "ca_latest": c.get("ca_latest") or c.get("ca_dernier"),
+                            "code_ape": c.get("code_ape") or c.get("naf"),
+                            "adresse_dept": c.get("adresse_dept") or c.get("siege_dept"),
+                        }
+                        for c in cibles_sorted
+                    ],
+                }
+
+        elif name == "compare_scoring":
+            sirens = args.get("sirens") or []
+            if not isinstance(sirens, list) or len(sirens) < 2 or len(sirens) > 5:
+                return {"error": "sirens doit être une liste de 2 à 5 éléments"}
+            for s in sirens:
+                if not isinstance(s, str) or not s.isdigit() or len(s) != 9:
+                    return {"error": f"siren invalide : {s}"}
+            results = []
+            async with httpx.AsyncClient(timeout=15) as client:
+                for siren in sirens:
+                    r = await client.get(f"{datalake_base}/api/datalake/scoring/{siren}")
+                    if r.status_code == 200:
+                        d = r.json()
+                        results.append({
+                            "siren": siren,
+                            "denomination": d.get("denomination"),
+                            "tier": d.get("tier"),
+                            "deal_score": d.get("deal_score"),
+                            "axes": d.get("axes"),
+                            "ev_estimated_eur": d.get("financials", {}).get("ev_estimated_eur"),
+                            "ca_latest": d.get("financials", {}).get("ca_latest"),
+                            "proxy_margin": d.get("financials", {}).get("proxy_margin"),
+                            "risk_multiplier": d.get("risk", {}).get("multiplier"),
+                        })
+                    else:
+                        results.append({"siren": siren, "error": f"HTTP {r.status_code}"})
+            return {"comparison": results}
+
+        elif name == "score_breakdown":
+            siren = args.get("siren", "")
+            if not siren.isdigit() or len(siren) != 9:
+                return {"error": "siren invalide"}
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(f"{datalake_base}/api/datalake/scoring/{siren}")
+                if r.status_code != 200:
+                    return {"error": f"HTTP {r.status_code}"}
+                d = r.json()
+                axes = d.get("axes") or {}
+                ctx = d.get("context") or {}
+                fin = d.get("financials") or {}
+                risk = d.get("risk") or {}
+                # Reasoning pédagogique
+                reasoning = []
+                # Transmission
+                t = axes.get("transmission") or 0
+                age = ctx.get("age_dirigeant_max")
+                n_sci = ctx.get("n_sci_dirigeants") or 0
+                if t >= 70:
+                    reasoning.append(f"TRANSMISSION FORTE ({t}/100) : dirigeant {age} ans + {n_sci} SCI patrimoniales = transmission imminente probable.")
+                elif t >= 40:
+                    reasoning.append(f"TRANSMISSION MOYEN ({t}/100) : dirigeant {age} ans, signal de cession modéré.")
+                else:
+                    reasoning.append(f"TRANSMISSION FAIBLE ({t}/100) : dirigeant trop jeune ou pas de signaux patrimoniaux.")
+                # Attractivity
+                a = axes.get("attractivity") or 0
+                margin = fin.get("proxy_margin")
+                ape = ctx.get("code_ape") or "?"
+                if a >= 60:
+                    reasoning.append(f"ATTRACTIVITY FORTE ({a}/100) : marge proxy {round((margin or 0)*100, 1)}% sur secteur {ape} (multiple {fin.get('sector_multiple')}×).")
+                else:
+                    reasoning.append(f"ATTRACTIVITY FAIBLE ({a}/100) : marge proxy {round((margin or 0)*100, 1)}%, pas assez profitable pour un acquéreur.")
+                # Scale
+                s = axes.get("scale") or 0
+                ca = fin.get("ca_latest")
+                if s >= 70:
+                    reasoning.append(f"SCALE FORTE ({s}/100) : CA {round((ca or 0)/1e6, 1)}M€ — mid/large cap, intéresse advisors.")
+                elif s >= 35:
+                    reasoning.append(f"SCALE MOYEN ({s}/100) : CA {round((ca or 0)/1e6, 1)}M€ — small cap, faisable mais ROI advisor limité.")
+                else:
+                    reasoning.append(f"SCALE FAIBLE ({s}/100) : CA {round((ca or 0)/1e6, 1)}M€ — sous le seuil 5M€, pas éligible advisor classique.")
+                # Risk
+                if risk.get("multiplier", 1.0) < 1.0:
+                    pen = round((1 - risk.get("multiplier", 1.0)) * 100)
+                    reasoning.append(f"RISK -{pen}% : sanctions={risk.get('has_sanction_cnil') or risk.get('has_sanction_dgccrf')} contentieux={risk.get('n_contentieux_recent', 0)} late_filing={risk.get('has_late_filing')}.")
+                # EV
+                ev = fin.get("ev_estimated_eur")
+                if ev:
+                    reasoning.append(f"VALORISATION INDICATIVE : {round(ev/1e6, 1)}M€ EUR (proxy_ebitda × multiple sectoriel × scale_premium).")
+                return {
+                    "siren": siren,
+                    "denomination": d.get("denomination"),
+                    "tier": d.get("tier"),
+                    "deal_score": d.get("deal_score"),
+                    "deal_percentile": d.get("deal_percentile"),
+                    "axes": axes,
+                    "context_summary": {
+                        "age_dirigeant_max": age,
+                        "n_sci_dirigeants": n_sci,
+                        "ca_latest_eur": ca,
+                        "code_ape": ape,
+                        "sector_multiple": fin.get("sector_multiple"),
+                        "ev_estimated_eur": ev,
+                    },
+                    "reasoning": reasoning,
+                }
 
         elif name == "search_sanctions":
             params = {"limit": args.get("limit", 10)}

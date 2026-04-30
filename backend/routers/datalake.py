@@ -1749,6 +1749,57 @@ async def pitch_pdf(req: Request, siren: str):
     return Response(content=html, media_type="text/html; charset=utf-8")
 
 
+@router.get("/pitch/{siren}.pdf")
+async def pitch_pdf_real(req: Request, siren: str):
+    """Génère un VRAI PDF côté serveur (Bug S rapport QA — avant : window.print
+    en HTML). Utilise WeasyPrint pour rendre le HTML pitch en PDF.
+
+    Si WeasyPrint n'est pas disponible (libs natives cairo/pango manquantes),
+    fallback gracieux vers le HTML print-friendly + Content-Disposition
+    inline pour que le navigateur l'affiche sans déclencher /print.
+    """
+    if not siren.isdigit() or len(siren) != 9:
+        raise HTTPException(status_code=400, detail="SIREN invalide")
+
+    # Récupère le HTML existant via la route /pitch
+    html_response = await pitch_pdf(req, siren)
+    html_content = html_response.body.decode("utf-8") if isinstance(html_response.body, bytes) else str(html_response.body)
+
+    # Tente WeasyPrint
+    try:
+        from weasyprint import HTML  # type: ignore
+        pdf_bytes = HTML(string=html_content, base_url=str(req.base_url)).write_pdf()
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="pitch_{siren}.pdf"',
+                "Cache-Control": "no-store",
+            },
+        )
+    except ImportError:
+        # WeasyPrint pas installé : fallback HTML imprimable
+        return Response(
+            content=html_content,
+            media_type="text/html; charset=utf-8",
+            headers={
+                "Content-Disposition": f'inline; filename="pitch_{siren}.html"',
+                "X-PDF-Notice": "WeasyPrint not available — HTML returned. Use browser print → Save as PDF.",
+            },
+        )
+    except Exception as e:
+        # Erreur rendu (ex: CSS non supporté) : log + fallback HTML
+        print(f"[pitch_pdf_real] WeasyPrint failed for {siren}: {type(e).__name__}: {e}")
+        return Response(
+            content=html_content,
+            media_type="text/html; charset=utf-8",
+            headers={
+                "Content-Disposition": f'inline; filename="pitch_{siren}.html"',
+                "X-PDF-Notice": f"WeasyPrint error: {type(e).__name__}",
+            },
+        )
+
+
 @router.get("/dashboard")
 async def dashboard(req: Request):
     """KPIs + heatmap dept + top cibles + alertes 24h, calculés live sur le
@@ -1924,6 +1975,158 @@ async def audit_log(req: Request, limit: int = Query(50, ge=1, le=200)):
            LIMIT {int(limit)}"""
     )
     return {"entries": [_serialize(r) for r in rows]}
+
+
+@router.get("/graph/{siren}")
+async def graph_for_siren(req: Request, siren: str, depth: int = Query(1, ge=1, le=2)):
+    """Graphe réseau autour d'un siren cible — UTILISE EXACTEMENT la même
+    logique que /fiche/{siren}.network pour garantir cohérence (Bug M
+    rapport QA : Graphe affichait 1 nœud quand Fiche en montrait 6).
+
+    Format : { nodes: [{id, name, type, role, color, score?, ...}],
+               links: [{source, target, label, value}] }
+    """
+    if not siren.isdigit() or len(siren) != 9:
+        raise HTTPException(status_code=400, detail="SIREN invalide")
+    pool = _pool(req)
+
+    # Centre = la cible
+    center_row = await _safe(pool.fetchrow(
+        """SELECT siren, denomination,
+                  COALESCE(em.code_ape, '') AS code_ape,
+                  COALESCE(em.adresse_dept, '') AS dept,
+                  em.ca_latest, sm.deal_score_raw, sm.tier
+           FROM gold.entreprises_master em
+           LEFT JOIN gold.scoring_ma sm ON sm.siren = em.siren
+           WHERE em.siren = $1::char(9)
+           LIMIT 1""",
+        siren,
+    ), default=None)
+    if not center_row:
+        # Fallback bronze
+        center_row = await _safe(pool.fetchrow(
+            """SELECT siren, denomination, code_ape, NULL::numeric AS ca_latest,
+                      NULL::int AS deal_score_raw, NULL::text AS tier
+               FROM bronze.inpi_formalites_entreprises
+               WHERE siren = $1::char(9) LIMIT 1""",
+            siren,
+        ), default=None)
+    if not center_row:
+        raise HTTPException(status_code=404, detail=f"siren {siren} introuvable")
+
+    # Co-mandats — même query que /fiche.network
+    network_rows = await _safe(pool.fetch(
+        """WITH top_dirig AS (
+              SELECT nom, prenom, sirens_mandats, denominations,
+                     n_mandats_actifs
+              FROM silver.inpi_dirigeants
+              WHERE $1::char(9) = ANY(sirens_mandats)
+              ORDER BY n_mandats_actifs DESC NULLS LAST
+              LIMIT 5
+           ),
+           expanded AS (
+              SELECT d.nom, d.prenom, d.n_mandats_actifs,
+                     unnest(d.sirens_mandats) AS other_siren,
+                     unnest(d.denominations) AS other_deno
+              FROM top_dirig d
+           )
+           SELECT other_siren AS siren,
+                  max(other_deno) AS denomination,
+                  string_agg(DISTINCT prenom || ' ' || nom, ', ') AS via_dirigeants,
+                  count(DISTINCT prenom || ' ' || nom) AS n_dirig_communs
+           FROM expanded
+           WHERE other_siren != $1::char(9) AND other_siren IS NOT NULL
+           GROUP BY other_siren
+           ORDER BY n_dirig_communs DESC
+           LIMIT 30""",
+        siren,
+    ), default=[])
+
+    # Construction graphe
+    center_id = f"target-{siren}"
+    nodes = [
+        {
+            "id": center_id,
+            "name": center_row.get("denomination") or siren,
+            "type": "target",
+            "role": "Cible",
+            "color": "#a78bfa",
+            "siren": siren,
+            "score": center_row.get("deal_score_raw"),
+            "priority": center_row.get("tier"),
+            "sector": center_row.get("code_ape") or None,
+            "city": center_row.get("dept") or None,
+        }
+    ]
+    links = []
+    seen = {center_id}
+    for r in network_rows:
+        sib_id = f"company-{r['siren']}"
+        if sib_id in seen:
+            continue
+        seen.add(sib_id)
+        nodes.append({
+            "id": sib_id,
+            "name": r.get("denomination") or str(r.get("siren") or "?"),
+            "type": "company",
+            "role": "Co-mandat",
+            "color": "#60a5fa",
+            "siren": str(r.get("siren") or ""),
+        })
+        links.append({
+            "source": center_id,
+            "target": sib_id,
+            "label": r.get("via_dirigeants") or "co-mandat",
+            "value": int(r.get("n_dirig_communs") or 1),
+        })
+
+    return {
+        "data": {
+            "nodes": nodes,
+            "links": links,
+            "center_siren": siren,
+        }
+    }
+
+
+@router.get("/graph")
+async def graph_global(req: Request, limit: int = Query(50, ge=10, le=200)):
+    """Graphe global top cibles M&A — réseau condensé top deal_score
+    avec leurs co-mandats principaux. Source : gold.cibles_ma_top.
+
+    Bug M rapport QA : ce endpoint utilise la même structure que
+    /graph/{siren} pour garantir cohérence Graph view ↔ Fiche.network.
+    """
+    pool = _pool(req)
+    if not await _table_exists(pool, "gold", "cibles_ma_top"):
+        return {"data": {"nodes": [], "links": []}, "notice": "gold.cibles_ma_top pas matérialisée"}
+
+    rows = await _safe(pool.fetch(
+        """SELECT siren, denomination, code_ape, adresse_dept,
+                  ca_latest, deal_score_raw, tier
+           FROM gold.cibles_ma_top
+           WHERE tier IN ('A_HOT', 'B_WARM')
+           ORDER BY deal_score_raw DESC NULLS LAST
+           LIMIT $1""",
+        limit,
+    ), default=[])
+
+    nodes = [
+        {
+            "id": f"target-{r['siren']}",
+            "name": r.get("denomination") or str(r['siren']),
+            "type": "target",
+            "role": "Cible top M&A",
+            "color": "#a78bfa" if r.get("tier") == "A_HOT" else "#60a5fa",
+            "siren": str(r['siren']),
+            "score": r.get("deal_score_raw"),
+            "priority": r.get("tier"),
+            "sector": r.get("code_ape"),
+            "city": r.get("adresse_dept"),
+        }
+        for r in rows
+    ]
+    return {"data": {"nodes": nodes, "links": [], "n_targets": len(nodes)}}
 
 
 @router.post("/agent-retry/{source_id}")

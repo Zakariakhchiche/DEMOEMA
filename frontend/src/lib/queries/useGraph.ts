@@ -40,7 +40,9 @@ export function useGraph() {
   return useQuery<GraphData>({
     queryKey: ["graph"],
     queryFn: async () => {
-      const res = await fetch("/api/graph");
+      // Bug M rapport QA — pointe sur le datalake unifié (mêmes données que
+      // /api/datalake/fiche/{siren}.network) pour cohérence Graph ↔ Fiche.
+      const res = await fetch("/api/datalake/graph");
       if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       return res.json();
     },

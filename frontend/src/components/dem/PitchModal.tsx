@@ -83,13 +83,12 @@ export function PitchModal({ target, onClose }: { target: Target; onClose: () =>
               <button
                 className="dem-btn dem-btn-primary"
                 onClick={() => {
-                  // Ouvre le pitch HTML dans un nouvel onglet — la page
-                  // déclenche window.print() automatiquement, l'utilisateur
-                  // fait "Save as PDF" depuis le dialog d'impression.
-                  const url = `/api/datalake/pitch/${target.siren}`;
+                  // Bug S rapport QA — préfère /pitch/{siren}.pdf qui retourne
+                  // un VRAI PDF (WeasyPrint). Si WeasyPrint indispo backend,
+                  // l'endpoint fallback en HTML qu'on charge en nouvel onglet.
+                  const url = `/api/datalake/pitch/${target.siren}.pdf`;
                   const w = window.open(url, "_blank", "noopener,noreferrer");
                   if (!w) {
-                    // Popup bloqué : on tombe sur navigation directe
                     window.location.href = url;
                   }
                 }}
