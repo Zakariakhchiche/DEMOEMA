@@ -40,14 +40,14 @@ jobs:
         # garanti pointer vers le VPS prod (autres environnements possibles).
         # IONOS_VPS_HOST_IP est paramétrable côté secrets pour la migration.
         env:
-          VPS_HOST_IP: ${{ secrets.IONOS_VPS_HOST_IP || '82.165.242.205' }}
+          VPS_HOST_IP: ${{ secrets.IONOS_VPS_HOST_IP || '82.165.57.191' }}
         run: |
           mkdir -p ~/.ssh
           ssh-keyscan -H "$VPS_HOST_IP" >> ~/.ssh/known_hosts
 
       - name: Deploy
         env:
-          VPS_HOST: ${{ secrets.IONOS_VPS_USER_HOST || 'root@82.165.242.205' }}
+          VPS_HOST: ${{ secrets.IONOS_VPS_USER_HOST || 'root@82.165.57.191' }}
           COMPONENT: ${{ github.event.inputs.component || 'all' }}
         run: |
           chmod +x infrastructure/scripts/deploy.sh
@@ -57,7 +57,7 @@ jobs:
         # Le smoke test interroge api.demoema.fr quand le DNS est configuré ;
         # sinon on tape directement la healthz côté agents-platform via le VPS.
         env:
-          VPS_HOST_IP: ${{ secrets.IONOS_VPS_HOST_IP || '82.165.242.205' }}
+          VPS_HOST_IP: ${{ secrets.IONOS_VPS_HOST_IP || '82.165.57.191' }}
         run: |
           if curl -fsSL --max-time 10 https://api.demoema.fr/healthz >/dev/null 2>&1; then
             echo "✅ api.demoema.fr healthz OK"
