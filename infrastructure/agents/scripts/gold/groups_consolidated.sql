@@ -36,48 +36,51 @@ lei_parent_map AS (
     WHERE l.siren_fr IS NOT NULL
 ),
 
--- ───── Méthode 2 : dirigeants communs (confidence 0.7)
--- 2 sirens partagent ≥ 2 dirigeants ET sont dans le même secteur (NAF 2 chars).
--- On limite aux entreprises avec CA ≥ 1M€ (filtre les SCI/holdings tiny).
+-- ───── Méthode 2 : dirigeants communs via silver.inpi_dirigeants
+-- Filter strict pour éviter explosion :
+--   - is_multi_mandat = true (dirigeant a >= 2 mandats actifs)
+--   - n_mandats_actifs in [2, 20] (exclut concentrateurs CAC type avocat)
+--   - array_length(sirens_mandats) >= 2
+-- → 60-100k personnes max (pas 8M)
+multi_dir AS (
+    SELECT
+        nom, prenom, date_naissance,
+        sirens_mandats,
+        n_mandats_actifs,
+        md5(coalesce(nom,'')||'|'||coalesce(prenom,'')||'|'||coalesce(date_naissance,'')) AS person_uid
+    FROM silver.inpi_dirigeants
+    WHERE is_multi_mandat = true
+      AND n_mandats_actifs BETWEEN 2 AND 20
+      AND sirens_mandats IS NOT NULL
+      AND array_length(sirens_mandats, 1) BETWEEN 2 AND 20
+),
+-- Paire (siren_a, siren_b) si ≥ 2 dirigeants partagés
 dirig_pairs AS (
     SELECT
         a.siren AS siren_a,
         b.siren AS siren_b,
-        count(*) AS n_dirig_communs
-    FROM silver.dirigeant_sci_patrimoine d
-    CROSS JOIN LATERAL unnest(d.all_sirens_mandats) AS a(siren)
-    CROSS JOIN LATERAL unnest(d.all_sirens_mandats) AS b(siren)
-    WHERE a.siren < b.siren  -- évite doublons (a, b) et (b, a)
-      AND d.n_total_mandats >= 2
+        count(DISTINCT m.person_uid) AS n_dirig_communs
+    FROM multi_dir m
+    CROSS JOIN LATERAL unnest(m.sirens_mandats) AS a(siren)
+    CROSS JOIN LATERAL unnest(m.sirens_mandats) AS b(siren)
+    WHERE a.siren < b.siren
     GROUP BY a.siren, b.siren
-    HAVING count(*) >= 2
+    HAVING count(DISTINCT m.person_uid) >= 2
 ),
-
--- Construit composantes connexes via union-find approximatif (1 hop seulement)
--- Pour faire vraiment connexe il faudrait recursive CTE — MVP : 1 hop suffit
--- pour repérer les groupes immédiats (mère + filiales niveau 1).
+-- Composantes connexes simplifiées (1 hop) — racine = min siren du cluster
 dirig_groups_raw AS (
-    SELECT
-        siren_a AS member_siren,
-        -- Le siren de plus petit ID dans le cluster sert de "racine" temporaire
-        LEAST(siren_a, siren_b) AS group_root,
-        n_dirig_communs
-    FROM dirig_pairs
+    SELECT siren_a AS member_siren, LEAST(siren_a, siren_b) AS group_root, n_dirig_communs FROM dirig_pairs
     UNION ALL
-    SELECT
-        siren_b,
-        LEAST(siren_a, siren_b),
-        n_dirig_communs
-    FROM dirig_pairs
+    SELECT siren_b, LEAST(siren_a, siren_b), n_dirig_communs FROM dirig_pairs
 ),
-
 dirig_groups AS (
-    SELECT DISTINCT
-        member_siren,
-        'dirig:' || group_root AS group_lei,  -- Pseudo-lei pour distinguer
-        'dirigeants_communs' AS detection_method,
-        LEAST(0.85, 0.5 + (n_dirig_communs * 0.05))::numeric AS confidence
+    SELECT
+        member_siren::text,
+        ('dirig:' || group_root) AS group_lei,
+        'dirigeants_communs'::text AS detection_method,
+        LEAST(0.85, 0.5 + (max(n_dirig_communs) * 0.05))::numeric AS confidence
     FROM dirig_groups_raw
+    GROUP BY member_siren, group_root
 ),
 
 -- ───── Union des méthodes (priorité LEI sur dirigeants)
