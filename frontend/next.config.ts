@@ -11,6 +11,10 @@ const nextConfig: NextConfig = {
   // "standalone" produit un bundle minimal pour Docker (VPS).
   // Sur Cloudflare Workers (OpenNext), on laisse la sortie Next par défaut.
   ...(process.env.BUILD_TARGET === "docker" && { output: "standalone" as const }),
+  // Bug v6/1.3 — supprime X-Powered-By: Next.js (information disclosure).
+  // Caddyfile ne peut pas strip un header émis par l'upstream proxy en aval ;
+  // Next.js fournit un flag dédié pour ne pas l'émettre du tout.
+  poweredByHeader: false,
   eslint: {
     // eslint-config-next v15 uses legacy format incompatible with flat config.
     // Type checking is handled by TypeScript during build.
