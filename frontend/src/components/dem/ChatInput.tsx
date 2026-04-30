@@ -225,7 +225,11 @@ export function ChatInput({ onSubmit, suggestions, isStreaming }: Props) {
         <input
           ref={ref}
           value={val}
-          onChange={(e) => setVal(e.target.value)}
+          // Bug v6/1.6 — cap input à 2000 chars pour éviter l'abus coût LLM
+          // (10k chars ≈ 2500 tokens × $0.27/M = $0.0007/req, exploitable en
+          // combinaison avec le rate limit faible).
+          maxLength={2000}
+          onChange={(e) => setVal(e.target.value.slice(0, 2000))}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
           placeholder="Pose ta question ou tape / pour les commandes…"
           style={{
@@ -233,6 +237,12 @@ export function ChatInput({ onSubmit, suggestions, isStreaming }: Props) {
             color: "var(--text-primary)", fontSize: 14, fontFamily: "inherit",
           }}
         />
+        {val.length >= 1500 && (
+          <span style={{
+            fontSize: 11, color: val.length >= 1900 ? "#f87171" : "var(--text-tertiary)",
+            fontVariantNumeric: "tabular-nums", marginRight: 4,
+          }}>{val.length}/2000</span>
+        )}
         <input
           ref={fileRef}
           type="file"
