@@ -511,13 +511,16 @@ async def generate_silver_sql(
               "Quand ok=true, alors retourne le SQL final entre ```sql ... ```."
         )
         try:
-            with psycopg.connect(settings.database_url) as tools_conn:
+            # autocommit=True : critique. Si un tool fail (UndefinedColumn,
+            # MV not populated, etc.), une conn non-autocommit passe en
+            # InFailedSqlTransaction et tous les tools suivants bloquent.
+            with psycopg.connect(settings.database_url, autocommit=True) as tools_conn:
                 response = await llm_chat_with_tools(
                     deepseek_client=ds_client,
                     system=tools_system,
                     user=prompt,
                     conn=tools_conn,
-                    max_iterations=6,
+                    max_iterations=8,
                     temperature=agent.temperature,
                     max_tokens=settings.deepseek_max_tokens,
                 )

@@ -357,13 +357,15 @@ async def generate_gold_sql(
               "balises ```sql ... ```."
         )
         try:
-            with psycopg.connect(settings.database_url) as tools_conn:
+            # autocommit=True : un tool fail ne doit pas tuer la conn entière
+            # (sinon InFailedSqlTransaction sur tous les tools suivants).
+            with psycopg.connect(settings.database_url, autocommit=True) as tools_conn:
                 response = await llm_chat_with_tools(
                     deepseek_client=ds_client,
                     system=tools_system,
                     user=prompt,
                     conn=tools_conn,
-                    max_iterations=6,
+                    max_iterations=8,
                     temperature=agent.temperature,
                     max_tokens=settings.deepseek_max_tokens,
                 )

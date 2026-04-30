@@ -288,7 +288,7 @@ def _tool_introspect_table(conn: "psycopg.Connection", args: dict) -> dict:
     _check_schema(schema)
     _check_ident("table", table)
     with conn.cursor() as cur:
-        cur.execute("SET LOCAL statement_timeout = 5000")
+        cur.execute("SET statement_timeout = 5000")
         cur.execute(
             """
             SELECT a.attname,
@@ -331,7 +331,7 @@ def _tool_sample_jsonb_keys(conn: "psycopg.Connection", args: dict) -> dict:
     _check_ident("column", column)
     # Vérifie d'abord que la colonne existe ET qu'elle est jsonb / jsonb-compatible
     with conn.cursor() as cur:
-        cur.execute("SET LOCAL statement_timeout = 5000")
+        cur.execute("SET statement_timeout = 5000")
         cur.execute(
             """
             SELECT format_type(a.atttypid, a.atttypmod)
@@ -360,7 +360,7 @@ def _tool_sample_jsonb_keys(conn: "psycopg.Connection", args: dict) -> dict:
         f"ORDER BY n DESC LIMIT 40"
     )
     with conn.cursor() as cur:
-        cur.execute("SET LOCAL statement_timeout = 5000")
+        cur.execute("SET statement_timeout = 5000")
         try:
             cur.execute(qry, (sample_rows,))
             rows = cur.fetchall()
@@ -408,7 +408,7 @@ def _tool_count_rows_estimate(conn: "psycopg.Connection", args: dict) -> dict:
     _check_schema(schema)
     _check_ident("table", table)
     with conn.cursor() as cur:
-        cur.execute("SET LOCAL statement_timeout = 5000")
+        cur.execute("SET statement_timeout = 5000")
         try:
             cur.execute(
                 "SELECT reltuples::bigint, relkind FROM pg_class c "
@@ -482,7 +482,7 @@ def _tool_find_column(conn: "psycopg.Connection", args: dict) -> dict:
         if s not in _ALLOWED_SCHEMAS:
             return {"error": f"schema interdit: {s}"}
     with conn.cursor() as cur:
-        cur.execute("SET LOCAL statement_timeout = 5000")
+        cur.execute("SET statement_timeout = 5000")
         cur.execute(
             """
             SELECT n.nspname, c.relname,
@@ -543,7 +543,7 @@ def _tool_peek_sample_rows(conn: "psycopg.Connection", args: dict) -> dict:
             return {"error": f"{schema}.{table} introuvable"}
     qry = f"SELECT to_jsonb(t.*) FROM {schema}.{table} t LIMIT %s"
     with conn.cursor() as cur:
-        cur.execute("SET LOCAL statement_timeout = 5000")
+        cur.execute("SET statement_timeout = 5000")
         try:
             cur.execute(qry, (n,))
             rows = cur.fetchall()
@@ -568,7 +568,7 @@ def _tool_look_at_existing_silver(conn: "psycopg.Connection", args: dict) -> dic
     if not re.match(r"^(silver|gold|mart)\.[a-z_][a-z0-9_]{0,62}$", silver_name):
         return {"error": "format attendu: silver.<name> ou gold.<name>"}
     with conn.cursor() as cur:
-        cur.execute("SET LOCAL statement_timeout = 5000")
+        cur.execute("SET statement_timeout = 5000")
         try:
             cur.execute(
                 """
