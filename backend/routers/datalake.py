@@ -216,14 +216,10 @@ async def fiche_entreprise(req: Request, siren: str):
         # Multi-query approach : chaque source séparée avec timeout court.
         # Si une table est lente/locked, on remplit avec NULL au lieu de tout
         # bloquer. Plus robuste qu'un mega-CTE.
-        import asyncio as _asyncio
-
-        async def _safe(coro, timeout_s: float = 4.0, default=None):
-            try:
-                return await _asyncio.wait_for(coro, timeout=timeout_s)
-            except (_asyncio.TimeoutError, Exception) as e:
-                print(f"[fiche] sub-query failed: {type(e).__name__}: {str(e)[:80]}")
-                return default
+        # Note: _safe est défini au module-level (ligne 37). Pas de re-def
+        # locale (sinon UnboundLocalError quand `fiche` truthy => Python
+        # marque _safe comme local mais la def dans le if n'est jamais
+        # exécutée, et hatvp ligne 865 plante).
 
         # 1. INPI comptes — agrégats sur tous les exercices pour ne pas perdre
         # les valeurs présentes dans des exercices antérieurs (effectif/capital
