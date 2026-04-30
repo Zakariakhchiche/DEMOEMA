@@ -217,14 +217,27 @@ app = FastAPI(
 # - 15 req/min/IP sur /api/copilot/* (LLM coûteux)
 try:
     from slowapi import Limiter, _rate_limit_exceeded_handler
-    from slowapi.util import get_remote_address
     from slowapi.errors import RateLimitExceeded
     from slowapi.middleware import SlowAPIMiddleware
+
+    # Custom key_func qui lit X-Forwarded-For (derrière Caddy reverse proxy)
+    # avec fallback sur scope client. Sans ça slowapi plante (request.client None).
+    def _client_ip(request) -> str:
+        try:
+            xff = request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip")
+            if xff:
+                return xff.split(",")[0].strip()
+            client = getattr(request, "client", None)
+            if client and client.host:
+                return client.host
+        except Exception:
+            pass
+        return "unknown"
 
     # Désactivation possible via env (CI/tests local)
     _rate_disabled = os.getenv("DISABLE_RATE_LIMIT", "").lower() in ("1", "true", "yes")
     limiter = Limiter(
-        key_func=get_remote_address,
+        key_func=_client_ip,
         default_limits=[] if _rate_disabled else ["120/minute"],
         storage_uri="memory://",
     )
