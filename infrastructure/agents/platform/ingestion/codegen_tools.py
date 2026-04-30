@@ -56,10 +56,11 @@ CODEGEN_TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "introspect_table",
             "description": (
-                "Liste les colonnes + types Postgres réels d'une table ou MV. "
-                "Utilise CECI AVANT d'écrire un SELECT/JOIN pour vérifier qu'une "
-                "colonne existe. Évite les hallucinations type `d.person_uid` "
-                "alors que la table n'a que (nom, prenom, date_naissance)."
+                "Liste les colonnes + types Postgres réels d'une OU plusieurs "
+                "tables/MV. Utilise CECI AVANT d'écrire un SELECT/JOIN pour "
+                "vérifier qu'une colonne existe. ⭐ PRÉFÈRE le mode multi-tables "
+                "(passer `tables`: ['silver.x','silver.y','bronze.z']) — 1 seul "
+                "tool call au lieu de N → tu épargnes des itérations."
             ),
             "parameters": {
                 "type": "object",
@@ -67,10 +68,23 @@ CODEGEN_TOOLS: list[dict[str, Any]] = [
                     "schema": {
                         "type": "string",
                         "enum": ["bronze", "silver", "gold", "audit", "mart"],
+                        "description": "Mode mono-table : ignore si `tables` fourni.",
                     },
-                    "table": {"type": "string"},
+                    "table": {
+                        "type": "string",
+                        "description": "Mode mono-table : ignore si `tables` fourni.",
+                    },
+                    "tables": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "⭐ Mode multi-tables : liste de FQN comme "
+                            "['silver.inpi_dirigeants','bronze.osint_persons']. "
+                            "Recommandé quand tu as besoin de >1 table — "
+                            "évite N tool calls."
+                        ),
+                    },
                 },
-                "required": ["schema", "table"],
                 "additionalProperties": False,
             },
         },
@@ -283,10 +297,39 @@ _FORBIDDEN_TOKENS = re.compile(
 
 
 def _tool_introspect_table(conn: "psycopg.Connection", args: dict) -> dict:
-    schema = args["schema"]
-    table = args["table"]
+    """Mode mono-table (schema+table) ou multi-tables (tables: [fqn,...])."""
+    tables_list = args.get("tables")
+    if tables_list:
+        if not isinstance(tables_list, list) or not tables_list:
+            return {"error": "tables doit être une liste non-vide"}
+        if len(tables_list) > 12:
+            return {"error": "max 12 tables par appel — fais plusieurs appels"}
+        out = {}
+        for fqn in tables_list:
+            if not isinstance(fqn, str) or "." not in fqn:
+                out[str(fqn)] = {"error": f"format attendu schema.table : {fqn!r}"}
+                continue
+            s, t = fqn.split(".", 1)
+            try:
+                _check_schema(s)
+                _check_ident("table", t)
+            except ValueError as e:
+                out[fqn] = {"error": str(e)}
+                continue
+            single = _introspect_one(conn, s, t)
+            out[fqn] = single
+        return {"mode": "multi", "tables": out}
+    # Mode mono
+    schema = args.get("schema")
+    table = args.get("table")
+    if not schema or not table:
+        return {"error": "fournir (schema, table) OU tables: [fqn,...]"}
     _check_schema(schema)
     _check_ident("table", table)
+    return _introspect_one(conn, schema, table)
+
+
+def _introspect_one(conn: "psycopg.Connection", schema: str, table: str) -> dict:
     with conn.cursor() as cur:
         cur.execute("SET statement_timeout = 5000")
         cur.execute(
