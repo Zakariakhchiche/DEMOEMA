@@ -173,7 +173,8 @@ transformations: |
   FROM aggregated;
 
 indexes:
-  - "person_uid UNIQUE"
+  # Unique index : utiliser la syntaxe `CREATE UNIQUE INDEX ON t (col)` — PAS `(col UNIQUE)`
+  - "UNIQUE (person_uid)"
   - "resolution_confidence"
   - "has_wikidata WHERE has_wikidata = true"
   - "has_orcid WHERE has_orcid = true"

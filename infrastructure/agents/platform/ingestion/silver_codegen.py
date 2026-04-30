@@ -660,6 +660,14 @@ def _autofix_sql(sql: str) -> str:
         r"CREATE INDEX IF NOT EXISTS \1 ON \2 (\3)",
         sql,
     )
+    # Fix 3 : `CREATE INDEX ... ON t (col UNIQUE)` → `CREATE UNIQUE INDEX ... ON t (col)`
+    # Le LLM interprète parfois "person_uid UNIQUE" du yaml comme expression de colonne.
+    sql = re.sub(
+        r"CREATE INDEX(\s+IF NOT EXISTS\s+\w+)?\s+ON (\S+)\s+\(([^()]+?)\s+UNIQUE\)",
+        r"CREATE UNIQUE INDEX\1 ON \2 (\3)",
+        sql,
+        flags=re.IGNORECASE,
+    )
     return sql
 
 

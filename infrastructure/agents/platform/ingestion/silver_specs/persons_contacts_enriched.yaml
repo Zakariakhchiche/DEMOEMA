@@ -32,6 +32,12 @@ business_logic: |
     n_mandats_actifs, roles (text[]), age_2026.
   ⚠️ PAS DE COLONNE person_uid → CALCULER via md5(coalesce(nom,'')||'|'||coalesce(prenom,'')||'|'||coalesce(date_naissance,''))
   ⚠️ Le bronze.osint_persons n'a PAS de colonne person_uid non plus — joindre par lower(nom) + lower(prenom).
+  ⚠️ bronze.github_repos_raw n'a PAS de colonne `name` ou `email_public` directe :
+      tout est dans payload (jsonb). Utiliser `g.payload->>'name'`,
+      `g.payload->>'email'`, `g.payload->>'company'`, etc.
+  ⚠️ bronze.rdap_whois_raw idem : `r.payload->>'registrant_name'`,
+      `r.payload->>'registrant_email'`, `r.payload->>'registrant_phone'`,
+      `r.payload->>'registrant_organization'`, `r.payload->>'domain'`.
 
   Pour chaque dirigeant INPI, agréger TOUS les emails + phones trouvés :
 
@@ -181,7 +187,8 @@ transformations: |
   WHERE jsonb_array_length(emails) > 0 OR jsonb_array_length(phones) > 0;
 
 indexes:
-  - "person_uid UNIQUE"
+  # Unique index : utiliser la syntaxe `CREATE UNIQUE INDEX ON t (col)` — PAS `(col UNIQUE)`
+  - "UNIQUE (person_uid)"
   - "has_email WHERE has_email = true"
   - "has_phone WHERE has_phone = true"
   - "emails USING gin"
