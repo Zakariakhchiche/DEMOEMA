@@ -12,7 +12,7 @@ set -euo pipefail
 
 COMPONENT="${1:-all}"
 COMMIT_SHA="${2:-unknown}"
-VPS_HOST="${VPS_HOST:-root@82.165.242.205}"
+VPS_HOST="${VPS_HOST:-root@82.165.57.191}"
 REPO_DIR="${REPO_DIR:-/root/DEMOEMA}"
 PUBLIC_API_URL="${PUBLIC_API_URL:-https://api.demoema.fr/healthz}"
 PUBLIC_WEB_URL="${PUBLIC_WEB_URL:-https://demoema.fr/}"

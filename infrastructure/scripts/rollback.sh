@@ -8,7 +8,7 @@
 set -euo pipefail
 
 TARGET_SHA="${1:-}"
-VPS_HOST="${VPS_HOST:-root@82.165.242.205}"
+VPS_HOST="${VPS_HOST:-root@82.165.57.191}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/demoema_ionos_ed25519}"
 REPO_DIR="${REPO_DIR:-/root/DEMOEMA}"
 
