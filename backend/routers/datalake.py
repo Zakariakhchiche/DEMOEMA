@@ -235,6 +235,31 @@ def _fiche_cache_set(siren: str, payload: dict) -> None:
     _FICHE_CACHE[siren] = (_time.time(), payload)
 
 
+# Cache générique pour /cibles, /graph et /scoring (bug v6/1.4 perf p95>3s).
+# Clé = string custom, valeur = (timestamp, payload). TTL 60s pour /cibles
+# (filtres dynamiques, on ne veut pas servir une liste périmée trop longtemps),
+# 300s pour /graph (couplé à un siren, change rarement).
+_GENERIC_CACHE: dict[str, tuple[float, Any]] = {}
+
+
+def _gen_cache_get(key: str, ttl_s: float) -> Any | None:
+    item = _GENERIC_CACHE.get(key)
+    if not item:
+        return None
+    ts, payload = item
+    if _time.time() - ts > ttl_s:
+        _GENERIC_CACHE.pop(key, None)
+        return None
+    return payload
+
+
+def _gen_cache_set(key: str, payload: Any) -> None:
+    if len(_GENERIC_CACHE) >= 1000:
+        oldest = min(_GENERIC_CACHE.items(), key=lambda kv: kv[1][0])[0]
+        _GENERIC_CACHE.pop(oldest, None)
+    _GENERIC_CACHE[key] = (_time.time(), payload)
+
+
 @router.get("/fiche/{siren}")
 async def fiche_entreprise(req: Request, siren: str):
     """Fiche complète — gold.entreprises_master si dispo, fallback sur
@@ -2180,9 +2205,15 @@ async def graph_for_siren(req: Request, siren: str, depth: int = Query(1, ge=1, 
 
     Format : { nodes: [{id, name, type, role, color, score?, ...}],
                links: [{source, target, label, value}] }
+
+    Cache TTL 5 min — bug v6/1.4 (graph p95 4,6s).
     """
     if not siren.isdigit() or len(siren) != 9:
         raise HTTPException(status_code=400, detail="SIREN invalide")
+    cache_key = f"graph:{siren}:{depth}"
+    cached = _gen_cache_get(cache_key, 300.0)
+    if cached is not None:
+        return cached
     pool = _pool(req)
 
     # Centre = la cible
@@ -2270,13 +2301,15 @@ async def graph_for_siren(req: Request, siren: str, depth: int = Query(1, ge=1, 
             "value": int(r.get("n_dirig_communs") or 1),
         })
 
-    return {
+    result = {
         "data": {
             "nodes": nodes,
             "links": links,
             "center_siren": siren,
         }
     }
+    _gen_cache_set(cache_key, result)
+    return result
 
 
 @router.get("/graph")
@@ -2286,7 +2319,13 @@ async def graph_global(req: Request, limit: int = Query(50, ge=10, le=200)):
 
     Bug M rapport QA : ce endpoint utilise la même structure que
     /graph/{siren} pour garantir cohérence Graph view ↔ Fiche.network.
+
+    Cache TTL 5 min — bug v6/1.4 perf.
     """
+    cache_key = f"graph_global:{limit}"
+    cached = _gen_cache_get(cache_key, 300.0)
+    if cached is not None:
+        return cached
     pool = _pool(req)
     if not await _table_exists(pool, "gold", "cibles_ma_top"):
         return {"data": {"nodes": [], "links": []}, "notice": "gold.cibles_ma_top pas matérialisée"}
@@ -2316,7 +2355,9 @@ async def graph_global(req: Request, limit: int = Query(50, ge=10, le=200)):
         }
         for r in rows
     ]
-    return {"data": {"nodes": nodes, "links": [], "n_targets": len(nodes)}}
+    result = {"data": {"nodes": nodes, "links": [], "n_targets": len(nodes)}}
+    _gen_cache_set(cache_key, result)
+    return result
 
 
 @router.post("/agent-retry/{source_id}")
@@ -2369,9 +2410,16 @@ async def audit_freshness(req: Request):
 @router.get("/co-mandats/{siren}")
 async def network_for_siren(req: Request, siren: str):
     """Réseau autour d'un siren : nœuds (entreprise centrale, dirigeants top 5,
-    autres entreprises co-mandatées, SCI patrimoine) + liens."""
+    autres entreprises co-mandatées, SCI patrimoine) + liens.
+
+    Cache TTL 5 min — bug v6/1.4 (graph p95 = 4.6s).
+    """
     if not siren.isdigit() or len(siren) != 9:
         raise HTTPException(status_code=400, detail="SIREN invalide")
+    cache_key = f"network:{siren}"
+    cached = _gen_cache_get(cache_key, 300.0)
+    if cached is not None:
+        return cached
     pool = _pool(req)
 
     if not await _table_exists(pool, "silver", "inpi_dirigeants"):
@@ -2457,7 +2505,9 @@ async def network_for_siren(req: Request, siren: str):
                     })
                     links.append({"source": person_id, "target": sci_id, "kind": "sci"})
 
-    return {"nodes": nodes, "links": links}
+    result = {"nodes": nodes, "links": links}
+    _gen_cache_set(cache_key, result)
+    return result
 
 
 @router.get("/press/recent")
@@ -2533,17 +2583,33 @@ async def cibles_search(
     """Recherche cibles M&A — privilégie gold.entreprises_master, fallback sur
     JOIN silver.insee_unites_legales + silver.inpi_comptes si la couche gold
     n'est pas encore matérialisée. Renvoie row_to_json brut, frontend mappe
-    vers Cible avec rowToCible (résilient aux variations)."""
+    vers Cible avec rowToCible (résilient aux variations).
+
+    Cache TTL 60s — bug v6/1.4 (p95 = 5,6s sur listings).
+    """
+    # Hash compact des params pour clé de cache
+    cache_key = (
+        f"cibles:{q}|{dept}|{naf}|{min_score}|{is_pro_ma}|"
+        f"{is_asset_rich}|{has_red_flags}|{sort}|{limit}|{offset}"
+    )
+    cached = _gen_cache_get(cache_key, 60.0)
+    if cached is not None:
+        return cached
+
     pool = _pool(req)
 
     if await _table_exists(pool, "gold", "entreprises_master"):
         try:
-            return await _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_rich, has_red_flags, sort, limit, offset)
+            result = await _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_rich, has_red_flags, sort, limit, offset)
+            _gen_cache_set(cache_key, result)
+            return result
         except Exception as e:
             # Si la branche gold pète (colonne manquante après migration partielle, etc),
             # on retombe gracieusement sur silver au lieu de propager 500 au front.
             print(f"[cibles gold] erreur, fallback silver: {type(e).__name__}: {e}")
-    return await _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset)
+    result = await _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset)
+    _gen_cache_set(cache_key, result)
+    return result
 
 
 async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_rich, has_red_flags, sort, limit, offset):
