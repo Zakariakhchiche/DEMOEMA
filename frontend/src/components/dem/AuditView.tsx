@@ -59,7 +59,7 @@ export function AuditView() {
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", position: "relative", zIndex: 1 }}>
       <div style={{ padding: "16px 22px 12px", borderBottom: "1px solid var(--border-subtle)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-0.01em" }}>Audit · agents datalake</div>
+          <h1 style={{ margin: 0, fontSize: 16, fontWeight: 700, letterSpacing: "-0.01em" }}>Audit · agents datalake</h1>
           <span className="dem-mono" style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
             · {entries.length} actions live · audit.agent_actions
           </span>

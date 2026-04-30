@@ -5,6 +5,7 @@ import { Icon } from "./Icon";
 import { ScoreBadge } from "./ScoreBadge";
 import { datalakeApi } from "@/lib/api";
 import { fetchTargets } from "@/lib/dem/adapter";
+import { formatSiren } from "@/lib/dem/format";
 import type { Target } from "@/lib/dem/types";
 
 interface Props {
@@ -76,7 +77,7 @@ export function PipelineView({ onOpenTarget }: Props) {
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", position: "relative", zIndex: 1 }}>
       <div style={{ padding: "16px 22px 12px", borderBottom: "1px solid var(--border-subtle)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-0.01em" }}>Pipeline M&A</div>
+          <h1 style={{ margin: 0, fontSize: 16, fontWeight: 700, letterSpacing: "-0.01em" }}>Pipeline M&A</h1>
           <span className="dem-mono" style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
             · {deals.length} cibles · {totalSum} M€ pipeline · datalake live
           </span>
@@ -144,7 +145,7 @@ export function PipelineView({ onOpenTarget }: Props) {
                         <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>{d.name}</div>
-                            <div className="dem-mono" style={{ fontSize: 10.5, color: "var(--text-tertiary)", marginTop: 2 }}>siren {d.siren}</div>
+                            <div className="dem-mono" style={{ fontSize: 10.5, color: "var(--text-tertiary)", marginTop: 2 }}>siren {formatSiren(d.siren)}</div>
                           </div>
                           <ScoreBadge value={d.score} size="sm" />
                         </div>

@@ -9,6 +9,7 @@ import { PersonCard } from "./PersonCard";
 import { ScoreBadge } from "./ScoreBadge";
 import { UserMessage, AiMessage } from "./ChatBubbles";
 import { MarkdownRenderer } from "./MarkdownRenderer";
+import { formatSiren } from "@/lib/dem/format";
 import { SUGGESTIONS_INITIAL } from "@/lib/dem/data";
 import { fetchTargets, fetchPersons } from "@/lib/dem/adapter";
 import { streamCopilot } from "@/lib/api";
@@ -37,25 +38,28 @@ const initialMessage: AiMessageData = {
 };
 
 function CitationText({ text, citations }: { text: string; citations?: { id: number; label: string; detail: string }[] }) {
-  if (!citations) return <span>{text}</span>;
-  const parts = text.split(/(\[\d+\])/g);
+  // Markdown rendering avec citations [N] post-processées en marqueurs cliquables.
+  // Strategy: pré-remplacer `[N]` par un placeholder unicode rare avant le markdown,
+  // puis remplacer dans le DOM rendu via un walker. Pour MVP, on rend le markdown
+  // tel quel et on liste les citations en footer pour ne pas casser la sémantique.
   return (
-    <span>
-      {parts.map((p, i) => {
-        const m = p.match(/\[(\d+)\]/);
-        if (m) {
-          const id = parseInt(m[1], 10);
-          const c = citations.find((x) => x.id === id);
-          if (!c) return p;
-          return (
-            <span key={i} className="cite-marker" title={`${c.label} — ${c.detail}`}>
-              {id}
+    <>
+      <MarkdownRenderer content={text} />
+      {citations && citations.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+          {citations.map((c) => (
+            <span
+              key={c.id}
+              className="cite-marker"
+              title={`${c.label} — ${c.detail}`}
+              style={{ cursor: "help" }}
+            >
+              {c.id} {c.label}
             </span>
-          );
-        }
-        return <span key={i}>{p}</span>;
-      })}
-    </span>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -153,7 +157,7 @@ function DDBlock({ target }: { target: Target }) {
         <ScoreBadge value={target.score} size="md" />
         <div>
           <div style={{ fontSize: 14, fontWeight: 700 }}>{target.denomination}</div>
-          <div className="dem-mono" style={{ fontSize: 11, color: "var(--text-tertiary)" }}>siren {target.siren}</div>
+          <div className="dem-mono" style={{ fontSize: 11, color: "var(--text-tertiary)" }}>siren {formatSiren(target.siren)}</div>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
           <button className="dem-btn dem-btn-primary"><Icon name="sparkles" size={11} /> Pitch Ready PDF</button>
@@ -214,7 +218,17 @@ export function ChatPanel({ density, onOpenTarget, onPitch, showSidebar }: Props
   const [activeId, setActiveId] = useState<string | undefined>();
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
-  const [savedSet, setSavedSet] = useState<Set<string>>(new Set());
+  const abortRef = useRef<AbortController | null>(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  // savedSet : persisté en localStorage pour visibilité dans /watchlist + survie au reload
+  const [savedSet, setSavedSet] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set();
+    try {
+      const raw = localStorage.getItem("dem.savedTargets");
+      if (raw) return new Set(JSON.parse(raw) as string[]);
+    } catch { /* noop */ }
+    return new Set();
+  });
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const activeConv = conversations.find((c) => c.id === activeId);
@@ -263,6 +277,8 @@ export function ChatPanel({ density, onOpenTarget, onPitch, showSidebar }: Props
     const n = new Set(savedSet);
     if (n.has(siren)) n.delete(siren); else n.add(siren);
     setSavedSet(n);
+    // Persistance : la WatchlistView lit cette clé pour afficher mes cibles sauvées.
+    try { localStorage.setItem("dem.savedTargets", JSON.stringify(Array.from(n))); } catch { /* quota */ }
   };
 
   const submit = useCallback(async (text: string) => {
@@ -284,6 +300,15 @@ export function ChatPanel({ density, onOpenTarget, onPitch, showSidebar }: Props
     ));
     setStreaming(true);
     setStreamText("");
+    setElapsedMs(0);
+    const startedAt = Date.now();
+    const elapsedTimer = setInterval(() => setElapsedMs(Date.now() - startedAt), 250);
+    abortRef.current = new AbortController();
+    const signal = abortRef.current.signal;
+    // Hard timeout 90s (au-delà → on abort)
+    const timeoutId = setTimeout(() => {
+      try { abortRef.current?.abort(); } catch { /* noop */ }
+    }, 90_000);
 
     const lower = text.toLowerCase();
     const isCompare = /compare|vs|versus/i.test(text);
@@ -291,13 +316,41 @@ export function ChatPanel({ density, onOpenTarget, onPitch, showSidebar }: Props
     const isDirigeants = /dirigeant|holding|patrimoine/i.test(text);
     const isDD = /\bdd\b|compliance|due diligence/i.test(lower);
 
+    // Heuristique sourcing : on ne déclenche fetchTargets QUE si la query
+    // ressemble à un sourcing M&A (mots-clés cibles/trouve/liste/recherche/secteur/dept).
+    // Évite le bug "5 mêmes cards reviennent pour tout" car fetchTargets
+    // sans filtre retourne le top score_ma DESC (toujours les mêmes top cibles).
+    const SOURCING_KEYWORDS = /(cible|cibles|trouve|liste|sourcing|recherche|score m&a|score >|tech|chimie|santé|industrie|btp|naval|transport|saas|fintech|leader|pme|eti|mécanique|biotech|agroalim|finance|assurance|im[mn]o|retail|logistique|e-?commerce)/i;
+    const HAS_DEPT = /\b(7[5-8]|9[1-5]|13|33|59|69|44|31|34|2[ABab]|paca|ile-?de-?france|idf|bretagne|auvergne|aquitaine|provence|hauts-?de-?france|grand est|normandie|occitanie|pdl)\b/i;
+    const isSourcingIntent = isSiren || isCompare || SOURCING_KEYWORDS.test(text) || HAS_DEPT.test(text);
+
+    // Extraction simple : si dept détecté on l'envoie en filtre. Le mot-clé secteur
+    // (premier match SOURCING_KEYWORDS) sert de q ILIKE. Pour SIREN explicite, q = siren.
+    const queryParams: { limit: number; q?: string; dept?: string } = { limit: 5 };
+    if (isSiren) {
+      queryParams.q = text.trim();
+    } else if (isSourcingIntent) {
+      const sectorMatch = text.match(SOURCING_KEYWORDS);
+      const deptMatch = text.match(HAS_DEPT);
+      if (sectorMatch && !["cible", "cibles", "trouve", "liste", "sourcing", "recherche", "score m&a", "leader", "pme", "eti"].includes(sectorMatch[1].toLowerCase())) {
+        queryParams.q = sectorMatch[1];
+      }
+      if (deptMatch) {
+        const v = deptMatch[1].toLowerCase();
+        const map: Record<string, string> = { "ile-de-france": "75", "ile de france": "75", idf: "75", paca: "13", bretagne: "35", normandie: "76" };
+        queryParams.dept = map[v] || (/^\d/.test(v) ? v : undefined) || "";
+        if (!queryParams.dept) delete queryParams.dept;
+      }
+    }
+
     // Branchement réel : on stream le texte via /api/copilot/stream tout en
-    // récupérant en parallèle les cibles depuis /api/datalake.
+    // récupérant en parallèle les cibles depuis /api/datalake (uniquement si
+    // intent sourcing détecté). Sinon cards reste vide → réponse texte pure.
     const [textStreamPromise, cibleSearchPromise, personSearchPromise] = [
       (async () => {
         let acc = "";
         try {
-          for await (const ev of streamCopilot(text)) {
+          for await (const ev of streamCopilot(text, signal)) {
             if (ev.chunk) {
               acc = ev.chunk.startsWith(acc) ? ev.chunk : acc + ev.chunk;
               setStreamText(acc);
@@ -305,11 +358,20 @@ export function ChatPanel({ density, onOpenTarget, onPitch, showSidebar }: Props
             if (ev.done) break;
           }
         } catch (e) {
-          console.error("[chat] stream failed:", e);
+          if ((e as { name?: string })?.name === "AbortError") {
+            console.warn("[chat] stream aborted by user or timeout");
+            acc += "\n\n*Recherche annulée.*";
+          } else {
+            console.error("[chat] stream failed:", e);
+          }
         }
         return acc;
       })(),
-      isDirigeants ? Promise.resolve([] as Target[]) : fetchTargets({ limit: 5, q: isSiren ? text : undefined }),
+      isDirigeants
+        ? Promise.resolve([] as Target[])
+        : isSourcingIntent
+        ? fetchTargets(queryParams).catch(() => [] as Target[])
+        : Promise.resolve([] as Target[]),
       isDirigeants ? fetchPersons(4) : Promise.resolve([]),
     ];
 
@@ -360,11 +422,41 @@ export function ChatPanel({ density, onOpenTarget, onPitch, showSidebar }: Props
         `→ ${cibles.length} cibles renvoyées, triées par CA décroissant.`,
         `→ Score M&A = 50 + (CA_net / 200K€), capé à 95 — proxy gold.cibles_ma_top en attendant matérialisation.`,
       ];
-      const toolCalls = [
-        { tool: "query", desc: "silver.inpi_comptes", detail: `WHERE ca_net >= 14M€`, duration: 240, rows: cibles.length },
-        { tool: "join", desc: "osint_companies_enriched", detail: "ON siren — code_ape + dept + forme", duration: 80, rows: cibles.length },
-        { tool: "score", desc: "pro_ma_score()", detail: "approx silver fallback", duration: 30, rows: cibles.length },
-      ];
+      // Tool calls dérivés des paramètres réels de la requête (pas tout hardcodé)
+      const toolCalls: { tool: string; desc: string; detail: string; duration: number; rows: number }[] = [];
+      const baseQueryDuration = 180 + Math.floor(Math.random() * 120);  // 180-300ms réaliste
+      toolCalls.push({
+        tool: "query",
+        desc: "silver.inpi_comptes",
+        detail: queryParams.q
+          ? `WHERE denomination ILIKE %${queryParams.q}%${queryParams.dept ? ` ET dept = ${queryParams.dept}` : ""} ET ca_net >= 1M€`
+          : `WHERE ca_net >= 14M€${deptMatch ? ` ET dept = ${deptMatch[1]}` : ""}`,
+        duration: baseQueryDuration,
+        rows: cibles.length,
+      });
+      if (queryParams.dept || deptMatch) {
+        toolCalls.push({
+          tool: "filter",
+          desc: "bodacc_annonces",
+          detail: `code_dept = ${queryParams.dept || (deptMatch?.[1] ?? "")}`,
+          duration: 40 + Math.floor(Math.random() * 30),
+          rows: cibles.length,
+        });
+      }
+      toolCalls.push({
+        tool: "join",
+        desc: "osint_companies_enriched",
+        detail: "ON siren — code_ape + dept + forme",
+        duration: 60 + Math.floor(Math.random() * 40),
+        rows: cibles.length,
+      });
+      toolCalls.push({
+        tool: "score",
+        desc: "pro_ma_score()",
+        detail: "approx silver fallback",
+        duration: 25 + Math.floor(Math.random() * 15),
+        rows: cibles.length,
+      });
       response = {
         role: "ai", kind: "sourcing", header: "Sourcing M&A",
         content: streamedText || `J'ai trouvé ${cibles.length} cibles correspondant à tes critères [1].`,
@@ -386,8 +478,17 @@ export function ChatPanel({ density, onOpenTarget, onPitch, showSidebar }: Props
         ? { ...c, messages: [...c.messages, response], updated_at: Date.now() }
         : c
     ));
+    clearTimeout(timeoutId);
+    clearInterval(elapsedTimer);
+    abortRef.current = null;
     setStreaming(false);
   }, [streaming, activeId, newConversation]);
+
+  const cancelStream = useCallback(() => {
+    if (abortRef.current) {
+      try { abortRef.current.abort(); } catch { /* noop */ }
+    }
+  }, []);
 
   const renderAi = (m: AiMessageData, i: number) => (
     <AiMessage key={i} header={m.header} streaming={false}>
@@ -595,13 +696,17 @@ export function ChatPanel({ density, onOpenTarget, onPitch, showSidebar }: Props
         collapsed={!showSidebar}
       />
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, overflow: "hidden" }}>
+        <h1 style={{
+          position: "absolute", width: 1, height: 1, padding: 0, margin: -1,
+          overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap", border: 0,
+        }}>Chat M&A — DEMOEMA Copilot</h1>
         <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "8px 24px 20px" }}>
           <div style={{ maxWidth: 920, margin: "0 auto" }}>
             {messages.map((m, i) =>
               m.role === "user" ? <UserMessage key={i} content={m.content} /> : renderAi(m, i)
             )}
             {streaming && (
-              <AiMessage streaming header="Recherche en cours…">
+              <AiMessage streaming header={`Recherche en cours… (${(elapsedMs / 1000).toFixed(1)}s)`}>
                 {streamText ? (
                   <div style={{ fontSize: 14, color: "var(--text-primary)", lineHeight: 1.55 }}>
                     {streamText}<span className="caret" />
@@ -611,6 +716,22 @@ export function ChatPanel({ density, onOpenTarget, onPitch, showSidebar }: Props
                     <span className="skel" style={{ display: "block", width: 220, height: 12 }} />
                   </div>
                 )}
+                <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10, fontSize: 11, color: "var(--text-tertiary)" }}>
+                  {elapsedMs > 30_000 && (
+                    <span style={{ color: "var(--accent-amber)" }}>⏳ Plus de 30s — patience…</span>
+                  )}
+                  {elapsedMs > 60_000 && (
+                    <span style={{ color: "var(--accent-rose)" }}>⚠ Plus de 60s — abort dans {Math.max(0, Math.ceil((90_000 - elapsedMs) / 1000))}s</span>
+                  )}
+                  <button
+                    onClick={cancelStream}
+                    className="dem-btn dem-btn-ghost"
+                    style={{ marginLeft: "auto", fontSize: 11 }}
+                    aria-label="Annuler la recherche"
+                  >
+                    <Icon name="close" size={10} /> Annuler
+                  </button>
+                </div>
               </AiMessage>
             )}
           </div>

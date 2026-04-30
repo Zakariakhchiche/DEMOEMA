@@ -3,6 +3,7 @@
 import { Icon } from "./Icon";
 import { ScoreBadge } from "./ScoreBadge";
 import { Sparkline } from "./Sparkline";
+import { formatSiren } from "@/lib/dem/format";
 import type { Target, Density } from "@/lib/dem/types";
 
 interface Props {
@@ -63,7 +64,7 @@ export function TargetCard({ target, density = "comfortable", selected, onSelect
           <div style={{ fontWeight: 600, fontSize: compact ? 13.5 : 15, color: "var(--text-primary)", letterSpacing: "-0.01em" }}>
             {target.denomination}
           </div>
-          <span className="dem-mono" style={{ fontSize: 11, color: "var(--text-tertiary)" }}>siren {target.siren}</span>
+          <span className="dem-mono" style={{ fontSize: 11, color: "var(--text-tertiary)" }}>siren {formatSiren(target.siren)}</span>
           {hasFlag && (
             <span style={{
               display: "inline-flex", alignItems: "center", gap: 4,

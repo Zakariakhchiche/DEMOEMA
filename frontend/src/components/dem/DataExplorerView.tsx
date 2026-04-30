@@ -180,8 +180,8 @@ export function DataExplorerView({ onOpenTarget }: Props) {
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
         <div style={{ padding: "14px 22px 10px", borderBottom: "1px solid var(--border-subtle)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-0.01em" }}>
-              {active && (
+            <h1 style={{ margin: 0, fontSize: 16, fontWeight: 700, letterSpacing: "-0.01em" }}>
+              {active ? (
                 <>
                   <span style={{
                     color: active.startsWith("gold.") ? "var(--accent-amber)" :
@@ -191,8 +191,8 @@ export function DataExplorerView({ onOpenTarget }: Props) {
                   </span>
                   {active.split(".")[1]}
                 </>
-              )}
-            </div>
+              ) : "Explorer datalake"}
+            </h1>
             {data && (
               <span className="dem-mono" style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
                 · {data.rows.length} rows{data.hasMore ? "+" : ""}

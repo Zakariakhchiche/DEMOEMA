@@ -258,7 +258,7 @@ export function CompareView() {
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--bg-base)" }}>
       <div style={{ padding: "16px 22px 12px", borderBottom: "1px solid var(--border-subtle)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-0.01em" }}>Comparateur multi-cibles</div>
+          <h1 style={{ margin: 0, fontSize: 16, fontWeight: 700, letterSpacing: "-0.01em" }}>Comparateur multi-cibles</h1>
           <span className="dem-mono" style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
             · {targets.length}/5 cibles{anchor && ` · ancre ${anchor.denomination}`}
           </span>

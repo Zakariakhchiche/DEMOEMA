@@ -15,15 +15,27 @@ export function PitchModal({ target, onClose }: { target: Target; onClose: () =>
     return () => clearInterval(id);
   }, []);
 
+  // a11y : ESC ferme la modale
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
     <>
       <div className="sheet-backdrop" onClick={onClose} />
-      <div style={{ position: "fixed", top: "30%", left: "50%", transform: "translateX(-50%)", width: 520, zIndex: 100 }}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="pitch-modal-title"
+        style={{ position: "fixed", top: "30%", left: "50%", transform: "translateX(-50%)", width: 520, zIndex: 100 }}
+      >
         <div className="dem-glass-2" style={{ borderRadius: 14, padding: 24 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <Icon name="sparkles" size={18} color="var(--accent-purple)" />
-            <div style={{ fontSize: 15, fontWeight: 700 }}>Pitch Ready — {target.denomination}</div>
-            <button className="dem-btn dem-btn-ghost dem-btn-icon" onClick={onClose} style={{ marginLeft: "auto" }}>×</button>
+            <div id="pitch-modal-title" style={{ fontSize: 15, fontWeight: 700 }}>Pitch Ready — {target.denomination}</div>
+            <button className="dem-btn dem-btn-ghost dem-btn-icon" onClick={onClose} aria-label="Fermer (Esc)" style={{ marginLeft: "auto" }}>×</button>
           </div>
           <div style={{ marginTop: 16, height: 6, borderRadius: 999, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
             <div style={{

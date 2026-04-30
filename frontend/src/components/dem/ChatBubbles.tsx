@@ -7,6 +7,8 @@ export function UserMessage({ content }: { content: string }) {
     <div className="fade-up" style={{ display: "flex", justifyContent: "flex-end", margin: "20px 0" }}>
       <div style={{
         maxWidth: "70%",
+        maxHeight: 280,
+        overflowY: "auto",
         padding: "10px 16px",
         borderRadius: 16,
         borderTopRightRadius: 4,
@@ -17,6 +19,7 @@ export function UserMessage({ content }: { content: string }) {
         lineHeight: 1.5,
         wordBreak: "break-word",
         overflowWrap: "anywhere",
+        whiteSpace: "pre-wrap",
       }}>
         {content}
       </div>

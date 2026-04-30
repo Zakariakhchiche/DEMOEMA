@@ -66,9 +66,9 @@ export function DashboardView({ onMode, onOpenTarget }: Props) {
   return (
     <div style={{ flex: 1, overflowY: "auto", position: "relative", zIndex: 1 }}>
       <div style={{ maxWidth: 1280, margin: "0 auto", padding: "28px 32px" }}>
-        <div style={{ marginBottom: 6, fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em" }}>
+        <h1 style={{ margin: "0 0 6px 0", fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em" }}>
           Bonjour Anne ☕
-        </div>
+        </h1>
         <div style={{ fontSize: 13, color: "var(--text-tertiary)" }}>
           {data?.kpis.n_signals_7d != null
             ? `${fmtNum(data.kpis.n_signals_7d)} signaux BODACC sur 7 jours · datalake live`

@@ -701,7 +701,8 @@ async def copilot_ai_query_stream_with_tools(
         {"role": "user", "content": query},
     ]
 
-    MAX_ITERATIONS = 5
+    MAX_ITERATIONS = 12  # bumpé de 5 → 12 pour permettre orchestration multi-tools (DD complète, sourcing complexe)
+    tool_results_collected: list[dict] = []  # checkpoint : retient les tools réussis pour fallback en synthèse
     for iteration in range(MAX_ITERATIONS):
         try:
             async with httpx.AsyncClient(timeout=60) as client:
@@ -710,7 +711,7 @@ async def copilot_ai_query_stream_with_tools(
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={
                         "model": model,
-                        "max_tokens": 1024,
+                        "max_tokens": 1536,  # élargi pour réponses M&A structurées (tableaux, listes)
                         "temperature": 0.3,
                         "messages": messages,
                         "tools": COPILOT_TOOLS,
@@ -736,6 +737,9 @@ async def copilot_ai_query_stream_with_tools(
                         result = await _execute_tool(fn_name, fn_args, datalake_base)
                         # Cap résultat à 8000 chars pour ne pas exploser le context
                         result_str = json.dumps(result, ensure_ascii=False)[:8000]
+                        # Checkpoint : garde une trace pour fallback si on hit max_iter
+                        if not result.get("error"):
+                            tool_results_collected.append({"tool": fn_name, "args": fn_args, "result_preview": result_str[:500]})
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc["id"],
@@ -755,4 +759,40 @@ async def copilot_ai_query_stream_with_tools(
             yield f"\nErreur tool-calling : {type(e).__name__}: {str(e)[:200]}"
             return
 
-    yield "\n(Max iterations atteint — résultat partiel)"
+    # Max iterations atteint : au lieu de juste signaler l'échec, on demande au LLM
+    # une synthèse forcée des résultats déjà obtenus (sans pouvoir lancer de nouveaux tools).
+    if tool_results_collected:
+        yield "\n\n*Plafond d'itérations atteint — synthèse des résultats partiels :*\n\n"
+        try:
+            messages.append({
+                "role": "user",
+                "content": (
+                    "Tu as utilisé tous tes appels d'outils. Sur la base des résultats déjà obtenus dans cette conversation, "
+                    "produis MAINTENANT une synthèse Markdown structurée pour répondre à la question initiale, sans appeler "
+                    "aucun nouvel outil. Sois concret avec les chiffres disponibles."
+                ),
+            })
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(
+                    base_url,
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json={
+                        "model": model,
+                        "max_tokens": 1024,
+                        "temperature": 0.3,
+                        "messages": messages,
+                        # Pas de tools cette fois — on force une réponse texte
+                    },
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    final_msg = data["choices"][0]["message"].get("content") or ""
+                    chunk_size = 40
+                    for i in range(0, len(final_msg), chunk_size):
+                        yield final_msg[i:i + chunk_size]
+                    return
+        except Exception as e:
+            yield f"\n*Erreur synthèse : {type(e).__name__}*"
+            return
+
+    yield "\n(Plafond d'itérations atteint — aucun résultat exploitable. Reformule ta question avec plus de précision : secteur, dépt, tranche CA.)"

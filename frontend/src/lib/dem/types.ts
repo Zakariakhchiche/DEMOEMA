@@ -38,6 +38,7 @@ export interface Target {
   score_breakdown: { label: string; value: number }[];
   ca_history: number[];
   spark?: number[];
+  statut?: string; // 'actif' | 'cesse' | 'cessée' | 'C' | 'RADIE' — exposé par /api/datalake/cibles
 }
 
 export interface Person {

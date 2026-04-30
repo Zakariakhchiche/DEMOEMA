@@ -712,6 +712,54 @@ async def fiche_entreprise(req: Request, siren: str):
         ), default=[])
         red_flags = [dict(r) for r in red_flags_rows]
 
+    # Statut radiation : red flag immédiat si etat_administratif = C ou date_fermeture
+    try:
+        is_cesse = isinstance(fiche, dict) and (
+            fiche.get("statut") in ("cesse", "cessée", "C", "RADIE")
+            or fiche.get("etat_administratif") == "C"
+            or bool(fiche.get("date_fermeture"))
+        )
+        if is_cesse:
+            date_cessation = (fiche or {}).get("date_fermeture") or (fiche or {}).get("date_cessation") or "—"
+            red_flags.insert(0, {
+                "entity_id": f"status-{siren}",
+                "caption": f"Société CESSÉE le {date_cessation}",
+                "schema": "STATUS_RADIATION",
+                "_source": "INSEE",
+                "_match_type": "siren_match",
+                "severity": "critical",
+                "first_seen": str(date_cessation),
+                "last_seen": str(date_cessation),
+                "topics": ["cessation"],
+                "countries": ["FR"],
+                "sanctions_programs": ["RADIATION"],
+            })
+    except Exception as e:
+        print(f"[red_flags] status enrichment skipped: {e}")
+
+    # Procédures collectives via signaux BODACC déjà fetchés
+    try:
+        for s in signaux:
+            d = dict(s) if not isinstance(s, dict) else s
+            famille = (d.get("familleavis_lib") or d.get("famille") or "").lower()
+            type_av = (d.get("typeavis_lib") or d.get("typeavis") or "").lower()
+            if "procédure" in famille or "procedure collective" in famille or "redressement" in famille or "liquidation" in type_av or "radiation" in type_av:
+                red_flags.append({
+                    "entity_id": f"bodacc-{d.get('annonce_id', d.get('id', siren))}",
+                    "caption": f"Signal BODACC : {d.get('typeavis_lib') or d.get('familleavis_lib') or 'BODACC'}",
+                    "schema": "BODACC_PROCEDURE",
+                    "_source": "BODACC",
+                    "_match_type": "siren_match",
+                    "severity": "high",
+                    "first_seen": str(d.get("date_parution") or "—"),
+                    "last_seen": str(d.get("date_parution") or "—"),
+                    "topics": ["procedure_collective"],
+                    "countries": ["FR"],
+                    "sanctions_programs": [d.get("typeavis_lib") or "Procédure collective"],
+                })
+    except Exception as e:
+        print(f"[red_flags] BODACC procedures enrichment skipped: {e}")
+
     # Réseau — co-mandats : silver.inpi_dirigeants (top 3 dirigeants → autres
     # sirens). Fallback : dirigeants gouv API qui ont un siren (personnes morales).
     network: list = []
@@ -782,6 +830,35 @@ async def fiche_entreprise(req: Request, siren: str):
                         })
         except Exception as e:
             print(f"[fiche] Google News RSS failed: {type(e).__name__}: {str(e)[:80]}")
+
+    # Presse négative — enrichissement red flags après que `presse` soit construite
+    try:
+        NEG_KEYWORDS = (
+            "fraude", "scandale", "condamné", "condamnée", "épingl",
+            "tromp", "contrefa", "blanch", "corruption", "amende",
+            "sanction", "perquisition", "garde à vue", "abus de bien",
+            "redressement fiscal", "défaut", "défaillance",
+        )
+        for p in presse:
+            d = dict(p) if not isinstance(p, dict) else p
+            t = (d.get("title") or "").lower()
+            if any(kw in t for kw in NEG_KEYWORDS):
+                red_flags.append({
+                    "entity_id": f"press-{abs(hash(d.get('title','') or ''))% 10**9}",
+                    "caption": f"Presse négative : {d.get('title', '')[:120]}",
+                    "schema": "PRESS_NEGATIVE",
+                    "_source": d.get("source") or "Presse",
+                    "_match_type": "name_match",
+                    "severity": "medium",
+                    "first_seen": str(d.get("published_at") or "—"),
+                    "last_seen": str(d.get("published_at") or "—"),
+                    "topics": ["presse_negative"],
+                    "countries": ["FR"],
+                    "sanctions_programs": ["PRESSE"],
+                    "url": d.get("url"),
+                })
+    except Exception as e:
+        print(f"[red_flags] press enrichment skipped: {e}")
 
     # HATVP — registre des représentants d'intérêts (lobbying). Source silver
     # uniquement (backend interdiction de toucher bronze).
@@ -1707,6 +1784,9 @@ async def pipeline(req: Request):
 
     deals = []
     for i, c in enumerate(cibles["cibles"]):
+        # Filtre les sociétés cessées : pas de M&A possible sur radiation/dissolution.
+        if c.get("statut") in ("cesse", "cessée", "C", "RADIE"):
+            continue
         ca = float(c.get("ca_dernier", 0) or 0)
         stage = stage_for(ca)
         deals.append({
@@ -1928,7 +2008,12 @@ async def cibles_search(
     pool = _pool(req)
 
     if await _table_exists(pool, "gold", "entreprises_master"):
-        return await _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_rich, has_red_flags, sort, limit, offset)
+        try:
+            return await _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_rich, has_red_flags, sort, limit, offset)
+        except Exception as e:
+            # Si la branche gold pète (colonne manquante après migration partielle, etc),
+            # on retombe gracieusement sur silver au lieu de propager 500 au front.
+            print(f"[cibles gold] erreur, fallback silver: {type(e).__name__}: {e}")
     return await _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset)
 
 
@@ -2097,10 +2182,10 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
                LEAST(95, 50 + (COALESCE(ca_net, 0) / 200000)::int) AS score_ma,
                (COALESCE(ca_net, 0) >= 14000000) AS is_pro_ma,
                false AS is_asset_rich,
-               EXISTS(
-                 SELECT 1 FROM silver.opensanctions os
-                 WHERE siren = ANY(os.sirens_fr)
-               ) AS has_compliance_red_flag,
+               -- has_compliance_red_flag : on évalue côté Python pour éviter les
+               -- erreurs SQL si la colonne sirens_fr n'existe pas en silver.opensanctions
+               -- ou si le type ne match pas. Default false ici, override en post-traitement.
+               false AS has_compliance_red_flag,
                false AS is_listed,
                -- top_dirigeant_* exposes via /fiche/SIREN (drill-down rapide)
                NULL::text AS top_dirigeant_nom,
@@ -2117,9 +2202,35 @@ async def _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset
     try:
         rows = await pool.fetch(sql, *params)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Cibles silver fallback error: {type(e).__name__}: {e}")
+        # Au lieu de 500, on retourne une liste vide avec un flag d'erreur. Le front
+        # affiche un état "no results" propre au lieu d'un crash. Trace gardée serveur.
+        print(f"[cibles silver fallback] erreur SQL: {type(e).__name__}: {e}")
+        return {
+            "cibles": [],
+            "limit": limit,
+            "offset": offset,
+            "has_more": False,
+            "source": "silver_fallback_error",
+            "error": f"{type(e).__name__}: {str(e)[:200]}",
+        }
 
     cibles = [_serialize(r) for r in rows]
+
+    # Enrichissement compliance red flag en best-effort (ne casse pas si la table absente)
+    try:
+        sirens = [c.get("siren") for c in cibles if c.get("siren")]
+        if sirens:
+            sanc_rows = await pool.fetch(
+                "SELECT DISTINCT siren FROM silver.sanctions WHERE siren = ANY($1::text[])",
+                sirens,
+            )
+            flagged = {r["siren"] for r in sanc_rows}
+            for c in cibles:
+                if c.get("siren") in flagged:
+                    c["has_compliance_red_flag"] = True
+    except Exception as e:
+        print(f"[cibles] compliance enrichment skipped: {e}")
+
     return {"cibles": cibles, "limit": limit, "offset": offset, "has_more": len(cibles) == limit, "source": "silver_fallback"}
 
 

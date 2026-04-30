@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect, useRef } from "react";
 import { Icon } from "./Icon";
 import type { Mode } from "@/lib/dem/types";
 
@@ -20,7 +21,95 @@ interface Props {
   onCmdK: () => void;
 }
 
+type Notif = { id: string; type: string; label: string; href: string; ts: string };
+
+function formatRelTime(ts: string): string {
+  try {
+    const d = new Date(ts).getTime();
+    const diff = (Date.now() - d) / 1000;
+    if (diff < 60) return "à l'instant";
+    if (diff < 3600) return `il y a ${Math.floor(diff / 60)} min`;
+    if (diff < 86400) return `il y a ${Math.floor(diff / 3600)} h`;
+    return `il y a ${Math.floor(diff / 86400)} j`;
+  } catch { return ""; }
+}
+
+function NotifPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [items, setItems] = useState<Notif[]>([]);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setLoading(true);
+    fetch("/api/datalake/dashboard")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d) { setLoading(false); return; }
+        const out: Notif[] = [];
+        // Top targets — 3 dernières
+        (d.top_targets || []).slice(0, 3).forEach((t: { siren: string; denomination: string }, i: number) => {
+          out.push({ id: `tt-${t.siren}`, type: "cible", label: t.denomination, href: `#chat`, ts: new Date(Date.now() - i * 7200_000).toISOString() });
+        });
+        // Signaux récents
+        (d.signaux_recents || []).slice(0, 5).forEach((s: { siren: string; type?: string; ts?: string; label?: string }) => {
+          out.push({ id: `sig-${s.siren}-${s.ts}`, type: s.type || "signal", label: s.label || `Signal ${s.siren}`, href: `#chat`, ts: s.ts || new Date().toISOString() });
+        });
+        setItems(out);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+    return () => { cancelled = true; };
+  }, [open]);
+  if (!open) return null;
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 90 }} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Notifications"
+        className="dem-glass-2"
+        style={{
+          position: "fixed", top: 56, right: 12, width: 360, maxHeight: "70vh", overflowY: "auto",
+          zIndex: 100, borderRadius: 12, padding: 14,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+          <Icon name="bell" size={14} color="var(--accent-purple)" />
+          <div style={{ fontSize: 13, fontWeight: 700 }}>Notifications</div>
+          <button className="dem-btn dem-btn-ghost dem-btn-icon" onClick={onClose} aria-label="Fermer" style={{ marginLeft: "auto" }}>×</button>
+        </div>
+        {loading && <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>Chargement…</div>}
+        {!loading && items.length === 0 && <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>Aucune notification.</div>}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {items.map((n) => (
+            <a
+              key={n.id}
+              href={n.href}
+              style={{
+                padding: "10px 12px", borderRadius: 8,
+                border: "1px solid var(--border-subtle)",
+                background: "rgba(255,255,255,0.02)",
+                fontSize: 12.5, color: "var(--text-secondary)",
+                textDecoration: "none", display: "flex", flexDirection: "column", gap: 4,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span className="dem-mono" style={{ fontSize: 10, color: "var(--accent-purple)", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>{n.type}</span>
+                <span style={{ marginLeft: "auto", fontSize: 10.5, color: "var(--text-tertiary)" }}>{formatRelTime(n.ts)}</span>
+              </div>
+              <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>{n.label}</span>
+            </a>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
 export function TopHeader({ mode, setMode, onCmdK }: Props) {
+  const [notifOpen, setNotifOpen] = useState(false);
+  const bellRef = useRef<HTMLButtonElement | null>(null);
   return (
     <div style={{
       height: 52,
@@ -94,7 +183,15 @@ export function TopHeader({ mode, setMode, onCmdK }: Props) {
       </button>
 
       <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
-        <button className="dem-btn dem-btn-ghost dem-btn-icon" title="Notifications" style={{ position: "relative" }}>
+        <button
+          ref={bellRef}
+          className="dem-btn dem-btn-ghost dem-btn-icon"
+          title="Notifications"
+          aria-label="Ouvrir les notifications"
+          aria-expanded={notifOpen}
+          onClick={() => setNotifOpen((v) => !v)}
+          style={{ position: "relative" }}
+        >
           <Icon name="bell" size={14} />
           <span style={{
             position: "absolute", top: 4, right: 4,
@@ -103,6 +200,7 @@ export function TopHeader({ mode, setMode, onCmdK }: Props) {
             boxShadow: "0 0 8px var(--accent-rose)",
           }} />
         </button>
+        <NotifPanel open={notifOpen} onClose={() => setNotifOpen(false)} />
         <div style={{
           display: "flex", alignItems: "center", gap: 8,
           padding: "3px 10px 3px 4px", borderRadius: 999,

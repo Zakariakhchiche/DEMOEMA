@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Icon } from "./Icon";
 import { datalakeApi } from "@/lib/api";
 import { fetchTargets } from "@/lib/dem/adapter";
+import { formatSiren } from "@/lib/dem/format";
 import type { Target } from "@/lib/dem/types";
 
 interface Props {
@@ -53,12 +54,14 @@ function severityFor(family: unknown): "high" | "med" | "low" {
 }
 
 export function WatchlistView({ onOpenTarget }: Props) {
-  const [tab, setTab] = useState<"alerts" | "rules">("alerts");
+  const [tab, setTab] = useState<"alerts" | "saved" | "rules">("saved");
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const [rules, setRules] = useState<Rule[]>(() => loadRules());
   const [showRuleForm, setShowRuleForm] = useState(false);
   const [draft, setDraft] = useState<Partial<Rule>>({ with_red_flags: false, pro_ma_only: false });
+  const [savedTargets, setSavedTargets] = useState<Target[]>([]);
+  const [savedLoading, setSavedLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
@@ -89,11 +92,45 @@ export function WatchlistView({ onOpenTarget }: Props) {
     if (targets[0]) onOpenTarget(targets[0]);
   };
 
+  // Charger les cibles sauvegardées depuis localStorage (cf. ChatPanel handleSave)
+  useEffect(() => {
+    setSavedLoading(true);
+    let sirens: string[] = [];
+    try {
+      const raw = localStorage.getItem("dem.savedTargets");
+      if (raw) sirens = JSON.parse(raw) as string[];
+    } catch { /* noop */ }
+    if (sirens.length === 0) {
+      setSavedTargets([]);
+      setSavedLoading(false);
+      return;
+    }
+    // On fetch les fiches une par une pour avoir les details complets.
+    Promise.all(
+      sirens.slice(0, 50).map((siren) =>
+        fetchTargets({ q: siren, limit: 1 }).then((t) => t[0]).catch(() => null)
+      )
+    ).then((results) => {
+      setSavedTargets(results.filter((t): t is Target => Boolean(t)));
+      setSavedLoading(false);
+    });
+  }, []);
+
+  const removeSaved = (siren: string) => {
+    setSavedTargets((prev) => prev.filter((t) => t.siren !== siren));
+    try {
+      const raw = localStorage.getItem("dem.savedTargets");
+      const arr = raw ? (JSON.parse(raw) as string[]) : [];
+      const next = arr.filter((s) => s !== siren);
+      localStorage.setItem("dem.savedTargets", JSON.stringify(next));
+    } catch { /* noop */ }
+  };
+
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", position: "relative", zIndex: 1 }}>
       <div style={{ padding: "16px 22px 0", borderBottom: "1px solid var(--border-subtle)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-0.01em" }}>Watchlist &amp; Alertes</div>
+          <h1 style={{ margin: 0, fontSize: 16, fontWeight: 700, letterSpacing: "-0.01em" }}>Watchlist &amp; Alertes</h1>
           <span className="dem-mono" style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
             · {alerts.length} alertes BODACC 14j · datalake live
           </span>
@@ -108,8 +145,9 @@ export function WatchlistView({ onOpenTarget }: Props) {
         </div>
         <div style={{ display: "flex", gap: 4, marginTop: 14 }}>
           {[
+            { id: "saved" as const, label: "Mes cibles", count: savedTargets.length },
             { id: "alerts" as const, label: "Alertes BODACC", count: alerts.length },
-            { id: "rules" as const, label: "Règles", count: 0 },
+            { id: "rules" as const, label: "Règles", count: rules.length },
           ].map((t) => (
             <button
               key={t.id}
@@ -129,6 +167,49 @@ export function WatchlistView({ onOpenTarget }: Props) {
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: 22 }}>
+        {tab === "saved" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 920, margin: "0 auto" }}>
+            {savedLoading && <div style={{ padding: 12, fontSize: 12, color: "var(--text-tertiary)" }}>Chargement…</div>}
+            {!savedLoading && savedTargets.length === 0 && (
+              <div style={{ padding: 24, textAlign: "center", color: "var(--text-tertiary)" }}>
+                Aucune cible sauvegardée. Clique sur le bouton « Sauver » d&apos;une fiche cible pour l&apos;ajouter ici.
+              </div>
+            )}
+            {savedTargets.map((t) => (
+              <div
+                key={t.siren}
+                className="dem-glass card-lift fade-up"
+                style={{ borderRadius: 10, padding: 14, display: "flex", gap: 14, alignItems: "center", cursor: "pointer" }}
+                onClick={() => onOpenTarget(t)}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 600 }}>{t.denomination}</span>
+                    <span className="dem-mono" style={{ fontSize: 10.5, color: "var(--text-muted)" }}>siren {formatSiren(t.siren)}</span>
+                    {t.statut && t.statut !== "actif" && (
+                      <span style={{ padding: "1px 6px", borderRadius: 4, background: "rgba(251,113,133,0.10)", border: "1px solid rgba(251,113,133,0.30)", color: "var(--accent-rose)", fontSize: 10, fontWeight: 600 }}>
+                        {String(t.statut).toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--text-tertiary)", display: "flex", gap: 14, flexWrap: "wrap" }}>
+                    <span>CA <strong style={{ color: "var(--text-primary)" }}>{t.ca_str || "—"}</strong></span>
+                    <span>EBITDA <strong style={{ color: "var(--text-primary)" }}>{t.ebitda_str || "—"}</strong></span>
+                    {t.naf && <span>NAF <span className="dem-mono">{t.naf}</span></span>}
+                    {t.dept && <span>Dept <span className="dem-mono">{t.dept}</span></span>}
+                  </div>
+                </div>
+                <button
+                  className="dem-btn dem-btn-ghost"
+                  title="Retirer de la watchlist"
+                  onClick={(e) => { e.stopPropagation(); removeSaved(t.siren); }}
+                >
+                  <Icon name="close" size={11} /> Retirer
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         {tab === "alerts" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 920, margin: "0 auto" }}>
             {loading && <div style={{ padding: 12, fontSize: 12, color: "var(--text-tertiary)" }}>Chargement…</div>}
@@ -148,7 +229,7 @@ export function WatchlistView({ onOpenTarget }: Props) {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <span style={{ fontSize: 13.5, fontWeight: 600 }}>{a.denomination}</span>
-                    <span className="dem-mono" style={{ fontSize: 10.5, color: "var(--text-muted)" }}>siren {a.siren}</span>
+                    <span className="dem-mono" style={{ fontSize: 10.5, color: "var(--text-muted)" }}>siren {formatSiren(a.siren)}</span>
                   </div>
                   <div style={{ marginTop: 4, fontSize: 12.5, color: a.severity === "high" ? "var(--accent-rose)" : "var(--text-secondary)" }}>
                     {a.title}

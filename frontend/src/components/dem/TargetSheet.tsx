@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Icon } from "./Icon";
 import { ScoreBadge } from "./ScoreBadge";
 import { datalakeApi } from "@/lib/api";
+import { formatSiren } from "@/lib/dem/format";
 import type { Target } from "@/lib/dem/types";
 
 interface Props {
@@ -344,14 +345,14 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
   return (
     <>
       <div className="sheet-backdrop" onClick={onClose} />
-      <div className="sheet-panel">
+      <div className="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="target-sheet-title">
         <div style={{
           padding: "20px 28px 18px", borderBottom: "1px solid var(--border-subtle)",
           display: "flex", alignItems: "flex-start", gap: 18,
         }}>
           <ScoreBadge value={target.score} size="lg" breakdown={target.score_breakdown} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{
+            <div id="target-sheet-title" style={{
               fontSize: 11, color: "var(--text-tertiary)",
               textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600,
             }}>
@@ -380,7 +381,7 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
               display: "flex", gap: 14, marginTop: 6, fontSize: 12,
               color: "var(--text-secondary)", flexWrap: "wrap", alignItems: "center",
             }}>
-              <span className="dem-mono">siren {target.siren}</span>
+              <span className="dem-mono">siren {formatSiren(target.siren)}</span>
               {forme && <span title={`code ${formeRaw}`}>{forme}</span>}
               {annee && annee !== "—" && <span>Créée en {annee}</span>}
               {ville && <span>{ville}{cp ? ` · ${cp}` : ""}{dept ? ` (${dept})` : ""}</span>}
@@ -672,7 +673,7 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
                           )}
                           {Boolean(d.siren_dirigeant) && (
                             <span className="dem-mono" style={{ fontSize: 10.5, color: "var(--text-tertiary)" }}>
-                              siren {String(d.siren_dirigeant)}
+                              siren {formatSiren(String(d.siren_dirigeant))}
                             </span>
                           )}
                           {isProMa && (
