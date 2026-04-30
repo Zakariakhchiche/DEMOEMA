@@ -452,12 +452,22 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
             padding: "12px 8px", display: "flex", flexDirection: "column", gap: 2,
           }}>
             {TABS.map((t) => {
+              // Préférer le total fiche.n_* (count global) au length de l'array
+              // (qui est borné par les LIMIT côté backend — 20 max sur signaux/
+              // network/presse). Évite la divergence "Signaux BODACC 20" tab vs
+              // "ANNONCES BODACC 25" overview.
+              const f = (data?.fiche ?? {}) as Record<string, unknown>;
+              const fallbackLen = (arr?: unknown[]) => arr?.length ?? 0;
+              const totalOrLen = (key: string, arr?: unknown[]) => {
+                const v = f[key];
+                return typeof v === "number" ? v : fallbackLen(arr);
+              };
               const count =
-                t.k === "dirigeants" ? data?.dirigeants.length :
-                t.k === "signaux" ? data?.signaux.length :
-                t.k === "compliance" ? data?.red_flags.length :
-                t.k === "reseau" ? data?.network.length :
-                t.k === "presse" ? data?.presse.length : null;
+                t.k === "dirigeants" ? totalOrLen("n_dirigeants", data?.dirigeants) :
+                t.k === "signaux" ? totalOrLen("n_bodacc", data?.signaux) :
+                t.k === "compliance" ? totalOrLen("n_sanctions", data?.red_flags) :
+                t.k === "reseau" ? totalOrLen("n_network", data?.network) :
+                t.k === "presse" ? totalOrLen("n_presse", data?.presse) : null;
               return (
                 <button
                   key={t.k}
