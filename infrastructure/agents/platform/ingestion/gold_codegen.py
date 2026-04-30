@@ -515,9 +515,18 @@ async def bootstrap_missing_golds(force_empty: bool = True) -> dict:
     - Topo levels (gold-of-gold doit attendre ses deps gold)
     - asyncio.gather + Semaphore(silver_codegen_parallelism, default 4) par level
     - Advisory lock distinct (_GOLD_BOOTSTRAP_LOCK_ID)
+
+    Defensive : auto-charge le registry agents si vide (cas d'un appel hors
+    FastAPI lifespan, ex: docker exec script standalone, fresh worker).
     """
     if not settings.database_url:
         return {"error": "no database_url"}
+
+    # Defensive : si registry vide (lifespan FastAPI pas exécuté), force-load
+    from loader import list_agents, load_agents
+    if not list_agents():
+        log.info("[gold_bootstrap] agent registry vide → load_agents() auto")
+        load_agents()
 
     lock_conn = psycopg.connect(settings.database_url, autocommit=True)
     try:

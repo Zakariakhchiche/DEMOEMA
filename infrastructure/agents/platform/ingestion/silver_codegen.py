@@ -1022,9 +1022,18 @@ async def bootstrap_missing_silvers(force_empty: bool = True) -> dict:
     pour que `introspect_schema` voie leurs colonnes.
 
     Returns a per-spec report.
+
+    Defensive : auto-charge le registry agents si vide (cas d'un appel hors
+    FastAPI lifespan, ex: docker exec script standalone, fresh worker).
     """
     if not settings.database_url:
         return {"error": "no database_url"}
+
+    # Defensive : si registry vide (lifespan FastAPI pas exécuté), force-load
+    from loader import list_agents, load_agents
+    if not list_agents():
+        log.info("[silver_bootstrap] agent registry vide → load_agents() auto")
+        load_agents()
 
     # Hold the lock for the whole bootstrap. Closing this connection
     # auto-releases (Postgres rule for advisory locks).
