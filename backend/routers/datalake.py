@@ -322,6 +322,39 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
             # n_bodacc_annonces_24m mais pas le total ni les dirigeants/sanctions.
             # Sans ces 3 compteurs, les cards "DIRIGEANTS / BODACC / RED FLAGS"
             # de l'overview affichent 0 alors que les tabs pleins. Cf. DUFOUR.
+            # Bug v5/3.7 — fiches grands groupes (Renault, EDF, L'Oréal…)
+            # affichaient 1/11 champs car les holdings cotées ne déposent pas
+            # leur bilan à l'INPI (URD AMF à la place). Pour les champs simples
+            # qui peuvent venir de l'API gouv recherche-entreprises (NAF lib,
+            # tranche effectifs, ville détaillée), on enrichit le gold path
+            # quand ils sont NULL en complément.
+            needs_gouv_enrich = (
+                not fiche.get("insee_tranche_effectifs")
+                or not fiche.get("adresse_commune")
+                or not fiche.get("nom_commercial")
+            )
+            if needs_gouv_enrich:
+                try:
+                    import httpx as _httpx_g
+                    async with _httpx_g.AsyncClient(timeout=4.0) as client_g:
+                        resp_g = await client_g.get(
+                            f"https://recherche-entreprises.api.gouv.fr/search?q={siren}&per_page=1"
+                        )
+                        if resp_g.status_code == 200:
+                            data_g = resp_g.json()
+                            if data_g.get("results"):
+                                r_g = data_g["results"][0]
+                                siege_g = r_g.get("siege") or {}
+                                fiche.setdefault("naf_libelle", siege_g.get("libelle_activite_principale") or r_g.get("libelle_activite_principale"))
+                                fiche.setdefault("tranche_effectifs", r_g.get("tranche_effectif_salarie") or siege_g.get("tranche_effectif_salarie"))
+                                fiche.setdefault("nom_commercial", r_g.get("nom_complet"))
+                                fiche.setdefault("ville", siege_g.get("libelle_commune"))
+                                fiche.setdefault("adresse", siege_g.get("adresse"))
+                                fiche.setdefault("n_etablissements", r_g.get("nombre_etablissements"))
+                                fiche.setdefault("n_etablissements_ouverts", r_g.get("nombre_etablissements_ouverts"))
+                except Exception as _e:
+                    print(f"[fiche gold] gouv enrich failed: {type(_e).__name__}")
+
             fiche["n_dirigeants"] = await _safe(pool.fetchval(
                 "SELECT COUNT(*)::int FROM silver.inpi_dirigeants WHERE $1::char(9) = ANY(sirens_mandats)",
                 siren,
@@ -376,8 +409,18 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
                FROM latest, latest_non_null""",
             siren,
         )
+        # Bug v5/3.7 — siren absent de silver.inpi_comptes (typique des
+        # holdings cotés ou TPE non-soumises à dépôt) renvoyait 404. Au lieu
+        # de bloquer, on fabrique un compte "vide" et on enrichit côté gouv
+        # API + INSEE plus bas. Le frontend gère gracefully ca_net=NULL.
         if not compte:
-            raise HTTPException(status_code=404, detail=f"SIREN {siren} introuvable dans silver.inpi_comptes")
+            compte = {
+                "siren": siren,
+                "denomination": None, "ca_net": None, "resultat_net": None,
+                "capital_social": None, "capitaux_propres": None,
+                "effectif_exact": None, "total_actif": None,
+                "emprunts_dettes": None, "date_cloture": None,
+            }
 
         # 2. CA history (5 derniers exercices)
         history = await _safe(pool.fetch(
@@ -546,6 +589,11 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
     # Si fiche est un dict (multi-query path) on skip le check ci-dessous.
     if not fiche:
         raise HTTPException(status_code=404, detail=f"SIREN {siren} introuvable")
+    # Bug v5/3.7 — guard final : si tous les fallbacks (silver + gouv) ont
+    # échoué, denomination reste NULL → fiche inutilisable. On ne renvoie
+    # pas une fiche vide qui simulerait un succès, on renvoie 404.
+    if isinstance(fiche, dict) and not fiche.get("denomination"):
+        raise HTTPException(status_code=404, detail=f"SIREN {siren} introuvable (silver + gouv vides)")
 
     # Dirigeants détaillés — top 10 par mandats actifs, joint avec patrimoine SCI.
     # On essaie d'abord en silver (8M dirigeants), fallback sur l'API gouv si vide.
