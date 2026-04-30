@@ -327,13 +327,31 @@ export function ChatPanel({ density, onOpenTarget, onPitch, showSidebar }: Props
     // sans filtre retourne le top score_ma DESC (toujours les mêmes top cibles).
     const SOURCING_KEYWORDS = /(cible|cibles|trouve|liste|sourcing|recherche|score m&a|score >|tech|chimie|santé|industrie|btp|naval|transport|saas|fintech|leader|pme|eti|mécanique|biotech|agroalim|finance|assurance|im[mn]o|retail|logistique|e-?commerce)/i;
     const HAS_DEPT = /\b(7[5-8]|9[1-5]|13|33|59|69|44|31|34|2[ABab]|paca|ile-?de-?france|idf|bretagne|auvergne|aquitaine|provence|hauts-?de-?france|grand est|normandie|occitanie|pdl)\b/i;
-    const isSourcingIntent = isSiren || isCompare || SOURCING_KEYWORDS.test(text) || HAS_DEPT.test(text);
+
+    // Détection nom d'entreprise : query courte (≤4 mots) sans mot-clé d'action
+    // ni question, contenant au moins un token capitalisé ou tout-caps de ≥3 chars.
+    // Exemples qui matchent : "Capgemini", "TotalEnergies", "Carrefour SA", "L'OREAL",
+    // "infos Renault", "Société Générale". Ne matche PAS : "trouve des cibles tech",
+    // "compare Capgemini vs Sopra" (déjà géré par isCompare).
+    const ACTION_WORDS = /\b(compare|vs|versus|trouve|liste|cible|cibles|recherche|sourcing|score|combien|pourquoi|quoi|qui|quand|comment|aide|help|dirigeant|patrimoine|dd|compliance|diligence)\b/i;
+    const wordCount = text.trim().split(/\s+/).length;
+    const hasCapName = /\b[A-ZÀ-ÖØ-Ý][A-Za-zÀ-ÖØ-öø-ÿ'’\-]{2,}/.test(text);
+    const isCompanyLookup = !isSiren && !isCompare && !isDirigeants && !isDD &&
+      wordCount <= 5 && hasCapName && !ACTION_WORDS.test(text) &&
+      !SOURCING_KEYWORDS.test(text);
+
+    const isSourcingIntent = isSiren || isCompare || isCompanyLookup ||
+      SOURCING_KEYWORDS.test(text) || HAS_DEPT.test(text);
 
     // Extraction simple : si dept détecté on l'envoie en filtre. Le mot-clé secteur
     // (premier match SOURCING_KEYWORDS) sert de q ILIKE. Pour SIREN explicite, q = siren.
+    // Pour un lookup d'entreprise (Capgemini, Carrefour…), on envoie le nom complet trim.
     const queryParams: { limit: number; q?: string; dept?: string } = { limit: 5 };
     if (isSiren) {
       queryParams.q = text.trim();
+    } else if (isCompanyLookup) {
+      queryParams.q = text.trim();
+      queryParams.limit = 1;
     } else if (isSourcingIntent) {
       const sectorMatch = text.match(SOURCING_KEYWORDS);
       const deptMatch = text.match(HAS_DEPT);
@@ -398,10 +416,14 @@ export function ChatPanel({ density, onOpenTarget, onPitch, showSidebar }: Props
           { id: 1, label: "gold.cibles_ma_top / silver fallback", detail: "Live datalake" },
         ],
       };
-    } else if (isSiren && cibles.length > 0) {
+    } else if ((isSiren || isCompanyLookup) && cibles.length > 0) {
+      const headerLabel = isSiren ? "Recherche SIREN" : "Fiche entreprise";
+      const fallback = isSiren
+        ? `${cibles[0].denomination} détectée — siren ${cibles[0].siren}.`
+        : `${cibles[0].denomination} — siren ${cibles[0].siren}. Clique sur la carte pour la fiche complète.`;
       response = {
-        role: "ai", kind: "siren", header: "Recherche SIREN",
-        content: streamedText || `${cibles[0].denomination} détectée — siren ${cibles[0].siren}.`,
+        role: "ai", kind: "siren", header: headerLabel,
+        content: streamedText || fallback,
         cards: [cibles[0]],
         followups: ["Fiche complète", "Dirigeants", "DD Compliance", "Évolution finance", "Réseau"],
       };
