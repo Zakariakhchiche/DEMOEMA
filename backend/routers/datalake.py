@@ -345,13 +345,18 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
                             if data_g.get("results"):
                                 r_g = data_g["results"][0]
                                 siege_g = r_g.get("siege") or {}
-                                fiche.setdefault("naf_libelle", siege_g.get("libelle_activite_principale") or r_g.get("libelle_activite_principale"))
-                                fiche.setdefault("tranche_effectifs", r_g.get("tranche_effectif_salarie") or siege_g.get("tranche_effectif_salarie"))
-                                fiche.setdefault("nom_commercial", r_g.get("nom_complet"))
-                                fiche.setdefault("ville", siege_g.get("libelle_commune"))
-                                fiche.setdefault("adresse", siege_g.get("adresse"))
-                                fiche.setdefault("n_etablissements", r_g.get("nombre_etablissements"))
-                                fiche.setdefault("n_etablissements_ouverts", r_g.get("nombre_etablissements_ouverts"))
+                                # setdefault n'écrase pas une clé existant à NULL : on doit
+                                # faire un OR explicit pour les champs gold pré-existants.
+                                def _fill(key, val):
+                                    if val and not fiche.get(key):
+                                        fiche[key] = val
+                                _fill("naf_libelle", siege_g.get("libelle_activite_principale") or r_g.get("libelle_activite_principale"))
+                                _fill("tranche_effectifs", r_g.get("tranche_effectif_salarie") or siege_g.get("tranche_effectif_salarie"))
+                                _fill("nom_commercial", r_g.get("nom_complet"))
+                                _fill("ville", siege_g.get("libelle_commune"))
+                                _fill("adresse", siege_g.get("adresse"))
+                                _fill("n_etablissements", r_g.get("nombre_etablissements"))
+                                _fill("n_etablissements_ouverts", r_g.get("nombre_etablissements_ouverts"))
                 except Exception as _e:
                     print(f"[fiche gold] gouv enrich failed: {type(_e).__name__}")
 
