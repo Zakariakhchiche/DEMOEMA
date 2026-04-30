@@ -92,6 +92,9 @@ export function ChatSidebar({ active, conversations, onSelect, onNew, collapsed 
                     background: active === c.id ? "rgba(255,255,255,0.05)" : "transparent",
                     color: active === c.id ? "var(--text-primary)" : "var(--text-secondary)",
                     cursor: "pointer", fontSize: 12.5, textAlign: "left",
+                    // Bug W rapport QA — hauteur fixe pour éviter que le label
+                    // truncated soit dans une bulle de 60px à cause de line-height auto
+                    height: 34, lineHeight: 1.2,
                     transition: "background .1s ease",
                   }}
                   onMouseEnter={(e) => {

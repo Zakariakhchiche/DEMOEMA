@@ -63,14 +63,19 @@ function CitationText({ text, citations }: { text: string; citations?: { id: num
   );
 }
 
-function ReasoningTrace({ steps }: { steps: string[] }) {
+function ReasoningTrace({ steps, toolCount = 0 }: { steps: string[]; toolCount?: number }) {
   const [open, setOpen] = useState(false);
+  // Bug H rapport QA — compteur dynamique : reasoning steps + outils réels
+  const total = steps.length + toolCount;
+  const label = toolCount > 0
+    ? `${steps.length} étapes · ${toolCount} outil${toolCount > 1 ? "s" : ""}`
+    : `${total} étape${total > 1 ? "s" : ""}`;
   return (
     <div style={{ marginBottom: 12 }}>
       <button className="dem-btn dem-btn-ghost" onClick={() => setOpen(!open)} style={{ fontSize: 11.5 }}>
         <Icon name={open ? "chevron-down" : "chevron-right"} size={11} />
         <Icon name="cpu" size={11} color="var(--accent-purple)" />
-        Voir le raisonnement ({steps.length} étapes)
+        Voir le raisonnement ({label})
       </button>
       {open && (
         <div className="reasoning-trace fade-up">
@@ -563,7 +568,7 @@ export function ChatPanel({ density, onOpenTarget, onPitch, showSidebar }: Props
               </div>
             </details>
           )}
-          {m.reasoning && <ReasoningTrace steps={m.reasoning} />}
+          {m.reasoning && <ReasoningTrace steps={m.reasoning} toolCount={m.toolCalls?.length ?? 0} />}
           <div style={{ fontSize: 14, color: "var(--text-primary)", lineHeight: 1.55, marginBottom: 12 }}>
             <CitationText text={m.content} citations={m.citations} />
           </div>

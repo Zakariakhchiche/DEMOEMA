@@ -85,7 +85,11 @@ async def introspect(req: Request, schema: str | None = None, table: str | None 
         """
         SELECT n.nspname AS schema,
                c.relname AS table,
-               c.reltuples::bigint AS rows_approx
+               -- Bug Y rapport QA : reltuples = -1 quand pas encore ANALYZE.
+               -- On exposait des -1 trompeurs dans l'Explorer. Désormais on
+               -- normalise à 0 (tableau vide ou pas analysé) — l'opérateur
+               -- doit lancer ANALYZE pour avoir le count statistique.
+               GREATEST(0, c.reltuples::bigint) AS rows_approx
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE c.relkind IN ('r','m','p')
@@ -2143,7 +2147,8 @@ async def agent_retry(req: Request, source_id: str):
     if not source_id or len(source_id) > 80 or not source_id.replace("_", "").replace("-", "").isalnum():
         raise HTTPException(status_code=400, detail="source_id invalide")
     import httpx
-    agents_url = os.environ.get("AGENTS_PLATFORM_URL", "http://agents-platform:8100")
+    import os as _os
+    agents_url = _os.environ.get("AGENTS_PLATFORM_URL", "http://agents-platform:8100")
     try:
         async with httpx.AsyncClient(timeout=20.0) as c:
             r = await c.post(f"{agents_url}/ingestion/run/{source_id}")
