@@ -2114,7 +2114,13 @@ async def dashboard(req: Request):
         d["denomination"] = deno_map.get(r["siren"], r["siren"])
         alerts.append(d)
 
-    top_targets = await _cibles_from_silver(pool, None, None, None, None, "score_ma", 5, 0)
+    # Bug v6/1.11 — /dashboard utilisait _cibles_from_silver qui retourne
+    # toujours score 95 (proxy LEAST(95, 50+CA/200000)). /api/datalake/cibles
+    # utilise la logique gold avec axes Transmission/Attractivity/Scale/
+    # Structure et scores réels [78-91]. Du coup même session = 2 scorings
+    # contradictoires (top_targets toujours 95, /cibles 78-91).
+    # Fix : router via gold quand dispo, exactement comme cibles_search.
+    top_targets = await _cibles_with_routing(pool, "score_ma", 5, 0)
 
     return {
         "kpis": _serialize(kpis) if kpis else {},
@@ -2131,9 +2137,13 @@ async def dashboard(req: Request):
 async def pipeline(req: Request):
     """Pipeline M&A — top cibles classées artificiellement par CA (sans
     workflow CRM en place). Stages dérivés : sourcing (CA 1-10M), approche
-    (10-50M), dd (50-100M), loi (100-500M), closing (>500M)."""
+    (10-50M), dd (50-100M), loi (100-500M), closing (>500M).
+
+    Bug v6/1.11 — utilise _cibles_with_routing pour aller chercher en gold
+    quand dispo (axes scoring v3) au lieu du proxy capé 95 du silver path.
+    """
     pool = _pool(req)
-    cibles = await _cibles_from_silver(pool, None, None, None, None, "score_ma", 50, 0)
+    cibles = await _cibles_with_routing(pool, "score_ma", 50, 0)
 
     def stage_for(ca: float) -> str:
         if ca >= 500_000_000: return "closing"
@@ -2610,6 +2620,25 @@ async def cibles_search(
     result = await _cibles_from_silver(pool, q, dept, naf, min_score, sort, limit, offset)
     _gen_cache_set(cache_key, result)
     return result
+
+
+async def _cibles_with_routing(pool, sort: str, limit: int, offset: int):
+    """Helper bug v6/1.11 — appelé par /dashboard et /pipeline qui n'ont pas
+    besoin des filtres q/dept/naf/etc, juste du top N par score_ma.
+    Route automatiquement vers gold (axes v3) si dispo, sinon silver fallback.
+
+    Évite que dashboard/pipeline servent des scores capés à 95 alors que
+    /cibles sert des scores 78-91 issus de gold.scoring_ma.
+    """
+    if await _table_exists(pool, "gold", "entreprises_master"):
+        try:
+            return await _cibles_from_gold(
+                pool, None, None, None, None, None, None, None,
+                sort, limit, offset,
+            )
+        except Exception as e:
+            print(f"[cibles routing] gold a échoué, fallback silver: {type(e).__name__}: {e}")
+    return await _cibles_from_silver(pool, None, None, None, None, sort, limit, offset)
 
 
 async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_rich, has_red_flags, sort, limit, offset):
