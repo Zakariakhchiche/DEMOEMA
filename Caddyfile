@@ -9,16 +9,27 @@
         X-Content-Type-Options "nosniff"
         Referrer-Policy "strict-origin-when-cross-origin"
         Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=(), usb=()"
-        # Désactive le header serveur pour éviter le fingerprinting
+        # Désactive le header serveur pour éviter le fingerprinting (bug v6/1.3)
         -Server
+        -X-Powered-By
     }
 
+    # Bug v6/1.8 — rate limiting non effectif : Caddy ne forwarde pas l'IP
+    # cliente au backend. Sans X-Real-IP, slowapi voit 127.0.0.1 partout
+    # et le rate limit s'applique globalement (jamais déclenché ou quasi).
     handle /api/* {
-        reverse_proxy backend:8000
+        reverse_proxy backend:8000 {
+            header_up X-Real-IP {http.request.remote.host}
+            header_up X-Forwarded-For {http.request.remote.host}
+            header_up X-Forwarded-Proto {http.request.scheme}
+        }
     }
 
     handle {
-        reverse_proxy frontend:3000
+        reverse_proxy frontend:3000 {
+            header_up X-Real-IP {http.request.remote.host}
+            header_up X-Forwarded-For {http.request.remote.host}
+        }
     }
 
     log {
