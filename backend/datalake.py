@@ -69,16 +69,19 @@ GOLD_TABLES_WHITELIST: dict[str, dict[str, Any]] = {
         "label": "Entreprises (Master)",
         "category": "core",
         "pk": "siren",
-        "default_order": "score_ma DESC NULLS LAST",
-        "search_cols": ["denomination", "siren", "naf_libelle", "siege_dept"],
+        # Schema v3 PRO : colonnes legacy (score_ma/siege_dept/naf_libelle/ca_dernier/statut)
+        # ont été renommées par le codegen LLM. Sans alignement, l'Explorer renvoie
+        # 500 UndefinedColumnError.
+        "default_order": "pro_ma_score DESC NULLS LAST",
+        "search_cols": ["denomination", "siren", "code_ape", "adresse_dept"],
         "preview_cols": [
             "siren",
             "denomination",
-            "naf_libelle",
-            "siege_dept",
-            "ca_dernier",
-            "score_ma",
-            "statut",
+            "code_ape",
+            "adresse_dept",
+            "ca_latest",
+            "pro_ma_score",
+            "insee_etat_administratif",
         ],
     },
     "gold.dirigeants_master": {
@@ -101,14 +104,16 @@ GOLD_TABLES_WHITELIST: dict[str, dict[str, Any]] = {
         "label": "Top cibles M&A",
         "category": "ma",
         "pk": "siren",
-        "default_order": "score_ma DESC NULLS LAST",
-        "search_cols": ["denomination", "siren", "naf_libelle"],
+        # Schema v3 PRO — voir entreprises_master ci-dessus.
+        "default_order": "deal_score_raw DESC NULLS LAST",
+        "search_cols": ["denomination", "siren", "code_ape"],
         "preview_cols": [
             "siren",
             "denomination",
-            "naf_libelle",
-            "ca_dernier",
-            "score_ma",
+            "code_ape",
+            "adresse_dept",
+            "ca_latest",
+            "deal_score_raw",
             "tier",
         ],
     },
