@@ -203,12 +203,65 @@ async def query_table(
     }
 
 
+# Bug v6/1.4 — fiche/{siren} p95 = 5s (multiple JOINs gold + silver fallback +
+# Google News RSS + opensanctions). Cache in-memory LRU TTL=5min couvre les
+# accès répétés (l'UI rappelle /fiche à chaque tab switch — gain massif).
+# Pas de Redis : 1 seul process backend, mémoire suffit. Single-flight via
+# asyncio.Lock pour éviter la stampede sur cache miss simultanés.
+import time as _time
+
+_FICHE_CACHE: dict[str, tuple[float, dict]] = {}
+_FICHE_LOCKS: dict[str, asyncio.Lock] = {}
+_FICHE_TTL_S = 300.0  # 5 min — fiches changent rarement (refresh quotidien gold)
+_FICHE_MAX_ENTRIES = 500  # garde-fou mémoire (~10 KB/entrée → ~5 MB max)
+
+
+def _fiche_cache_get(siren: str) -> dict | None:
+    item = _FICHE_CACHE.get(siren)
+    if not item:
+        return None
+    ts, payload = item
+    if _time.time() - ts > _FICHE_TTL_S:
+        _FICHE_CACHE.pop(siren, None)
+        return None
+    return payload
+
+
+def _fiche_cache_set(siren: str, payload: dict) -> None:
+    if len(_FICHE_CACHE) >= _FICHE_MAX_ENTRIES:
+        # Évince l'entrée la plus ancienne (FIFO simple, suffisant pour ce volume)
+        oldest = min(_FICHE_CACHE.items(), key=lambda kv: kv[1][0])[0]
+        _FICHE_CACHE.pop(oldest, None)
+    _FICHE_CACHE[siren] = (_time.time(), payload)
+
+
 @router.get("/fiche/{siren}")
 async def fiche_entreprise(req: Request, siren: str):
     """Fiche complète — gold.entreprises_master si dispo, fallback sur
-    silver.insee_unites_legales + silver.inpi_comptes + silver.inpi_dirigeants."""
+    silver.insee_unites_legales + silver.inpi_comptes + silver.inpi_dirigeants.
+
+    Cache LRU TTL 5 min sur (siren) — bug v6/1.4 perf.
+    """
     if not siren.isdigit() or len(siren) != 9:
         raise HTTPException(status_code=400, detail="SIREN invalide")
+
+    cached = _fiche_cache_get(siren)
+    if cached is not None:
+        return cached
+
+    # Single-flight : si 2 requêtes pour le même siren arrivent en parallèle
+    # sur cache miss, on n'exécute qu'une seule fois la fiche full.
+    lock = _FICHE_LOCKS.setdefault(siren, asyncio.Lock())
+    async with lock:
+        cached = _fiche_cache_get(siren)
+        if cached is not None:
+            return cached
+        result = await _fiche_entreprise_uncached(req, siren)
+        _fiche_cache_set(siren, result)
+    return result
+
+
+async def _fiche_entreprise_uncached(req: Request, siren: str):
     pool = _pool(req)
 
     fiche = None
