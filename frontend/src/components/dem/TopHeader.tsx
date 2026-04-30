@@ -122,7 +122,9 @@ export function TopHeader({ mode, setMode, onCmdK }: Props) {
   }, []);
 
   return (
-    <div style={{
+    // Bug v6/1.7 — landmark <header> + <nav> requis pour axe 'region' /
+    // 'landmark-one-main'. Le header global wrappe la nav primaire.
+    <header role="banner" style={{
       height: 52,
       borderBottom: "1px solid var(--border-subtle)",
       display: "flex", alignItems: "center",
@@ -132,7 +134,7 @@ export function TopHeader({ mode, setMode, onCmdK }: Props) {
       position: "relative", zIndex: 10,
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{
+        <div aria-hidden="true" style={{
           width: 24, height: 24, borderRadius: 7,
           background: "conic-gradient(from 90deg, #60a5fa, #a78bfa, #67e8f9, #60a5fa)",
           boxShadow: "0 0 16px -2px rgba(167,139,250,0.5)",
@@ -148,7 +150,7 @@ export function TopHeader({ mode, setMode, onCmdK }: Props) {
       </div>
 
       {!isMobile && (
-        <div style={{
+        <nav aria-label="Navigation principale" style={{
           display: "flex", gap: 2, marginLeft: 16, padding: 3,
           background: "rgba(255,255,255,0.025)", borderRadius: 8,
           border: "1px solid var(--border-subtle)",
@@ -171,7 +173,7 @@ export function TopHeader({ mode, setMode, onCmdK }: Props) {
               {t.label}
             </button>
           ))}
-        </div>
+        </nav>
       )}
 
       {isMobile && (
@@ -279,6 +281,6 @@ export function TopHeader({ mode, setMode, onCmdK }: Props) {
           <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>Anne Dupont</span>
         </div>
       </div>
-    </div>
+    </header>
   );
 }
