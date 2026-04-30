@@ -1926,6 +1926,33 @@ async def audit_log(req: Request, limit: int = Query(50, ge=1, le=200)):
     return {"entries": [_serialize(r) for r in rows]}
 
 
+@router.post("/agent-retry/{source_id}")
+async def agent_retry(req: Request, source_id: str):
+    """Demande au worker agents-platform de relancer une ingestion bronze.
+
+    Source rapport QA v3 — Bug N : workers les_echos_rss / cfnews_rss en FAILED
+    sans bouton retry. Ce endpoint proxie vers agents-platform :8100/ingestion/run/{source_id}
+    qui ré-exécute le fetcher pour cette source.
+
+    Ne valide pas le source_id (laisse agents-platform gérer si la source existe).
+    Renvoie 200 avec le payload tel quel ou 502 si agents-platform indisponible.
+    """
+    if not source_id or len(source_id) > 80 or not source_id.replace("_", "").replace("-", "").isalnum():
+        raise HTTPException(status_code=400, detail="source_id invalide")
+    import httpx
+    agents_url = os.environ.get("AGENTS_PLATFORM_URL", "http://agents-platform:8100")
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as c:
+            r = await c.post(f"{agents_url}/ingestion/run/{source_id}")
+            return {
+                "source_id": source_id,
+                "status_code": r.status_code,
+                "agents_response": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text[:500],
+            }
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"agents-platform unreachable: {type(e).__name__}")
+
+
 @router.get("/source-health")
 async def audit_freshness(req: Request):
     """Statut santé des sources bronze/silver — last success, sla, completeness."""

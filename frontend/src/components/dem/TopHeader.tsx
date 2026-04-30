@@ -109,7 +109,18 @@ function NotifPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
 
 export function TopHeader({ mode, setMode, onCmdK }: Props) {
   const [notifOpen, setNotifOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const bellRef = useRef<HTMLButtonElement | null>(null);
+
+  // Bug T rapport QA — responsive : tabs nav cachée < 900px, hamburger à la place
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 900);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
   return (
     <div style={{
       height: 52,
@@ -136,53 +147,105 @@ export function TopHeader({ mode, setMode, onCmdK }: Props) {
         }}>BETA</span>
       </div>
 
-      <div style={{
-        display: "flex", gap: 2, marginLeft: 16, padding: 3,
-        background: "rgba(255,255,255,0.025)", borderRadius: 8,
-        border: "1px solid var(--border-subtle)",
-      }}>
-        {TABS.map((t) => (
-          <button
-            key={t.k}
-            onClick={() => setMode(t.k)}
+      {!isMobile && (
+        <div style={{
+          display: "flex", gap: 2, marginLeft: 16, padding: 3,
+          background: "rgba(255,255,255,0.025)", borderRadius: 8,
+          border: "1px solid var(--border-subtle)",
+        }}>
+          {TABS.map((t) => (
+            <button
+              key={t.k}
+              onClick={() => setMode(t.k)}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 6,
+                padding: "5px 11px", borderRadius: 6, border: "none",
+                background: mode === t.k ? "rgba(96,165,250,0.14)" : "transparent",
+                color: mode === t.k ? "#cfe1fb" : "var(--text-secondary)",
+                cursor: "pointer", fontSize: 12.5, fontWeight: 500,
+                boxShadow: mode === t.k ? "inset 0 0 0 1px rgba(96,165,250,0.30)" : "none",
+                transition: "all .12s ease",
+              }}
+            >
+              <Icon name={t.icon} size={13} />
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {isMobile && (
+        <button
+          aria-label="menu"
+          aria-expanded={mobileMenuOpen}
+          onClick={() => setMobileMenuOpen((v) => !v)}
+          className="dem-btn dem-btn-ghost dem-btn-icon"
+          style={{ marginLeft: "auto" }}
+        >
+          <Icon name={mobileMenuOpen ? "close" : "menu"} size={16} />
+        </button>
+      )}
+
+      {isMobile && mobileMenuOpen && (
+        <>
+          <div onClick={() => setMobileMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 90 }} />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Navigation"
+            className="dem-glass-2"
             style={{
-              display: "inline-flex", alignItems: "center", gap: 6,
-              padding: "5px 11px", borderRadius: 6, border: "none",
-              background: mode === t.k ? "rgba(96,165,250,0.14)" : "transparent",
-              color: mode === t.k ? "#cfe1fb" : "var(--text-secondary)",
-              cursor: "pointer", fontSize: 12.5, fontWeight: 500,
-              boxShadow: mode === t.k ? "inset 0 0 0 1px rgba(96,165,250,0.30)" : "none",
-              transition: "all .12s ease",
+              position: "fixed", top: 56, right: 12, left: 12, zIndex: 100,
+              borderRadius: 12, padding: 14,
+              display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6,
             }}
           >
-            <Icon name={t.icon} size={13} />
-            {t.label}
-          </button>
-        ))}
-      </div>
+            {TABS.map((t) => (
+              <button
+                key={t.k}
+                onClick={() => { setMode(t.k); setMobileMenuOpen(false); }}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 8,
+                  padding: "12px 14px", borderRadius: 8, border: "none",
+                  background: mode === t.k ? "rgba(96,165,250,0.14)" : "rgba(255,255,255,0.02)",
+                  color: mode === t.k ? "#cfe1fb" : "var(--text-secondary)",
+                  cursor: "pointer", fontSize: 13.5, fontWeight: 500,
+                  boxShadow: mode === t.k ? "inset 0 0 0 1px rgba(96,165,250,0.30)" : "none",
+                  textAlign: "left",
+                }}
+              >
+                <Icon name={t.icon} size={16} />
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
-      <button
-        onClick={onCmdK}
-        style={{
-          flex: 1, maxWidth: 360, marginLeft: 12,
-          display: "flex", alignItems: "center", gap: 8,
-          padding: "6px 12px", borderRadius: 8,
-          border: "1px solid var(--border-subtle)",
-          background: "rgba(255,255,255,0.02)",
-          color: "var(--text-tertiary)",
-          cursor: "pointer", fontSize: 12.5,
-          transition: "all .12s ease",
-        }}
-      >
-        <Icon name="search" size={13} />
-        <span>Rechercher conversations, cibles, dirigeants…</span>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 3 }}>
-          <span className="kbd">⌘</span>
-          <span className="kbd">K</span>
-        </span>
-      </button>
+      {!isMobile && (
+        <button
+          onClick={onCmdK}
+          style={{
+            flex: 1, maxWidth: 360, marginLeft: 12,
+            display: "flex", alignItems: "center", gap: 8,
+            padding: "6px 12px", borderRadius: 8,
+            border: "1px solid var(--border-subtle)",
+            background: "rgba(255,255,255,0.02)",
+            color: "var(--text-tertiary)",
+            cursor: "pointer", fontSize: 12.5,
+            transition: "all .12s ease",
+          }}
+        >
+          <Icon name="search" size={13} />
+          <span>Rechercher conversations, cibles, dirigeants…</span>
+          <span style={{ marginLeft: "auto", display: "flex", gap: 3 }}>
+            <span className="kbd">⌘</span>
+            <span className="kbd">K</span>
+          </span>
+        </button>
+      )}
 
-      <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+      <div style={{ marginLeft: isMobile ? 0 : "auto", display: "flex", gap: 6, alignItems: "center" }}>
         <button
           ref={bellRef}
           className="dem-btn dem-btn-ghost dem-btn-icon"

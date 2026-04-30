@@ -148,6 +148,28 @@ export function AuditView() {
                   fontSize: 10.5, color: "var(--text-tertiary)",
                   minWidth: 110, textAlign: "right",
                 }}>{fmtRelativeDate(a.created_at)}</span>
+                {a.status?.toLowerCase() === "failed" && a.source_id && (
+                  <button
+                    title={`Relancer l'ingestion ${a.source_id}`}
+                    aria-label={`Retry ${a.source_id}`}
+                    className="dem-btn dem-btn-icon dem-btn-ghost"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      try {
+                        const r = await fetch(`/api/datalake/agent-retry/${a.source_id}`, { method: "POST" });
+                        if (r.ok) {
+                          alert(`Retry ${a.source_id} déclenché`);
+                        } else {
+                          alert(`Retry ${a.source_id} : HTTP ${r.status}`);
+                        }
+                      } catch (err) {
+                        alert(`Retry ${a.source_id} échoué : ${err instanceof Error ? err.message : String(err)}`);
+                      }
+                    }}
+                  >
+                    <Icon name="refresh" size={12} />
+                  </button>
+                )}
               </div>
             );
           })}
