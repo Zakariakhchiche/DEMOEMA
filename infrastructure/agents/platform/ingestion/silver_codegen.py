@@ -468,13 +468,79 @@ async def generate_silver_sql(
         return {"error": "agent lead-data-engineer not loaded"}
 
     prompt = _build_prompt(spec, schemas, feedback=feedback)
-    response = await _llm_chat(
-        model=agent.model,
-        system=agent.system_prompt,
-        user=prompt,
-        temperature=agent.temperature,
-        num_ctx=agent.num_ctx,
-    )
+
+    # Tool-calling path : si CODEGEN_USE_TOOLS=1, on offre au LLM un ensemble
+    # de tools READ-ONLY (introspect_table, sample_jsonb_keys, dry_run_sql,
+    # count_rows_estimate). Le LLM peut alors vérifier le schéma + valider
+    # le SELECT via EXPLAIN avant de retourner le CREATE MV final, ce qui
+    # élimine ~80% des hallucinations de colonnes (cf. cache audit).
+    import os as _os
+    use_tools = _os.environ.get("CODEGEN_USE_TOOLS", "").lower() in ("1", "true", "yes")
+    tool_audit: list = []
+    if use_tools and agent.model.startswith("deepseek") and settings.database_url:
+        from ingestion.codegen_tools import llm_chat_with_tools
+        from deepseek_client import DeepSeekClient
+        ds_client = DeepSeekClient(model=agent.model, timeout=settings.deepseek_timeout_s)
+        tools_system = (
+            agent.system_prompt
+            + "\n\nTu disposes de 8 tools READ-ONLY pour vérifier le schéma "
+              "Postgres en direct AVANT de produire ton SQL final :\n"
+              "- introspect_table(schema, table) : colonnes + types réels\n"
+              "- find_column(column_name) : cherche une colonne dans toutes les tables\n"
+              "- sample_jsonb_keys(schema, table, column) : top-keys d'un payload jsonb\n"
+              "- peek_sample_rows(schema, table, n) : 3-5 vraies lignes en JSON\n"
+              "- count_rows_estimate(schema, table) : taille rapide d'une source\n"
+              "- look_at_existing_silver(silver_name) : SQL d'un silver/gold OK pour t'inspirer\n"
+              "- dry_run_sql(select_sql) : EXPLAIN d'un SELECT (compile check)\n"
+              "- test_compile_create(create_sql) : ⭐ TEST FINAL — applique le CREATE MV "
+              "dans pg_temp + DROP. Retourne ok=true si Postgres compile, sinon l'erreur exacte.\n\n"
+              "WORKFLOW STRICT :\n"
+              "1) Avant tout JOIN/SELECT non trivial : introspect_table sur les sources\n"
+              "2) Si tu hésites sur une colonne : find_column\n"
+              "3) Si une source est jsonb : sample_jsonb_keys + peek_sample_rows\n"
+              "4) Construis ton SELECT, valide avec dry_run_sql\n"
+              "5) ⭐ AVANT de retourner ton SQL final : APPELLE test_compile_create "
+              "avec le CREATE MV complet. Si erreur, corrige et re-teste. "
+              "Quand ok=true, alors retourne le SQL final entre ```sql ... ```."
+        )
+        try:
+            with psycopg.connect(settings.database_url) as tools_conn:
+                response = await llm_chat_with_tools(
+                    deepseek_client=ds_client,
+                    system=tools_system,
+                    user=prompt,
+                    conn=tools_conn,
+                    max_iterations=6,
+                    temperature=agent.temperature,
+                    max_tokens=settings.deepseek_max_tokens,
+                )
+            tool_audit = response.get("tool_audit", [])
+            if response.get("error"):
+                log.warning(
+                    "[silver_codegen] tool-calling pour %s : %s — fallback no-tools",
+                    silver_name, response["error"],
+                )
+                response = None
+        except Exception as e:
+            log.warning("[silver_codegen] tool-calling exception : %s — fallback no-tools", e)
+            response = None
+        if response is not None:
+            log.info(
+                "[silver_codegen] tool-calling pour %s : %d itérations, %d tool calls",
+                silver_name, response.get("iterations", 0), len(tool_audit),
+            )
+    else:
+        response = None
+
+    if response is None:
+        # Voie classique sans tools (fallback ou opt-out)
+        response = await _llm_chat(
+            model=agent.model,
+            system=agent.system_prompt,
+            user=prompt,
+            temperature=agent.temperature,
+            num_ctx=agent.num_ctx,
+        )
 
     content = response.get("message", {}).get("content", "") if isinstance(response, dict) else ""
     sql = _extract_sql_from_response(content)
@@ -489,8 +555,13 @@ async def generate_silver_sql(
     target_path = SILVER_TRANSFORMS_DIR / f"{silver_name.replace('silver.', '')}.sql"
     target_path.write_text(sql, encoding="utf-8")
 
-    # Log in audit
-    _log_version(silver_name, spec, sql, ok, msg, version_uid, agent.model, feedback)
+    # Log in audit (avec tool_audit si tool-calling actif)
+    _tool_iters = response.get("iterations") if isinstance(response, dict) else None
+    _log_version(
+        silver_name, spec, sql, ok, msg, version_uid, agent.model, feedback,
+        tool_audit=tool_audit if use_tools else None,
+        tool_iterations=_tool_iters if use_tools else None,
+    )
 
     result = {
         "silver_name": silver_name,
@@ -501,6 +572,7 @@ async def generate_silver_sql(
         "path": str(target_path),
         "applied": False,
         "retries": 0,
+        "tool_calls_count": len(tool_audit),
     }
 
     if ok and apply_immediately:
@@ -587,17 +659,22 @@ def _log_version(
     version_uid: str,
     llm_model: str,
     feedback: str | None,
+    tool_audit: list | None = None,
+    tool_iterations: int | None = None,
 ):
     if not settings.database_url:
         return
     try:
+        import json as _json
+        tool_calls_json = _json.dumps(tool_audit, default=str) if tool_audit else None
         with psycopg.connect(settings.database_url, autocommit=True) as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO audit.silver_specs_versions
                   (version_uid, silver_name, spec_yaml, generated_sql, generator,
-                   llm_model, llm_feedback, validation_status, validation_msg)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                   llm_model, llm_feedback, validation_status, validation_msg,
+                   tool_calls, tool_iterations)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (version_uid) DO NOTHING
                 """,
                 (
@@ -605,6 +682,7 @@ def _log_version(
                     yaml.safe_dump(spec, allow_unicode=True, sort_keys=False),
                     sql, "codegen_llm", llm_model, feedback,
                     "ok" if ok else "invalid", msg,
+                    tool_calls_json, tool_iterations,
                 ),
             )
     except Exception as e:

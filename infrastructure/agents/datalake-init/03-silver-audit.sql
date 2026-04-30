@@ -23,6 +23,15 @@ CREATE TABLE IF NOT EXISTS audit.silver_specs_versions (
 CREATE INDEX IF NOT EXISTS idx_silver_specs_name  ON audit.silver_specs_versions(silver_name);
 CREATE INDEX IF NOT EXISTS idx_silver_specs_applied ON audit.silver_specs_versions(silver_name, applied_at DESC);
 
+-- Tool-calling audit (codegen_tools.py) — chaque appel de tool LLM lors de la
+-- génération du SQL est loggué ici en jsonb pour permettre l'analyse a
+-- posteriori (combien d'introspect, quelles colonnes interrogées, dry_run OK?,
+-- combien de retries pour ce silver…).
+ALTER TABLE audit.silver_specs_versions
+    ADD COLUMN IF NOT EXISTS tool_calls jsonb;
+ALTER TABLE audit.silver_specs_versions
+    ADD COLUMN IF NOT EXISTS tool_iterations int;
+
 -- Log de chaque refresh MATERIALIZED VIEW
 CREATE TABLE IF NOT EXISTS audit.silver_runs (
     run_uid          text PRIMARY KEY,

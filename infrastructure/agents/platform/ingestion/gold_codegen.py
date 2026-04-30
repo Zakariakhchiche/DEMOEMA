@@ -336,13 +336,60 @@ async def generate_gold_sql(
         return {"error": "agent lead-data-engineer not loaded"}
 
     prompt = _build_gold_prompt(spec, source_schemas, feedback=feedback)
-    response = await _llm_chat(
-        model=agent.model,
-        system=agent.system_prompt,
-        user=prompt,
-        temperature=agent.temperature,
-        num_ctx=agent.num_ctx,
-    )
+
+    # Tool-calling path (CODEGEN_USE_TOOLS=1) — mêmes garanties que silver
+    import os as _os
+    use_tools = _os.environ.get("CODEGEN_USE_TOOLS", "").lower() in ("1", "true", "yes")
+    tool_audit: list = []
+    response = None
+    if use_tools and agent.model.startswith("deepseek") and settings.database_url:
+        from ingestion.codegen_tools import llm_chat_with_tools
+        from deepseek_client import DeepSeekClient
+        ds_client = DeepSeekClient(model=agent.model, timeout=settings.deepseek_timeout_s)
+        tools_system = (
+            agent.system_prompt
+            + "\n\nTu disposes de tools READ-ONLY pour vérifier le schéma "
+              "Postgres en direct AVANT de produire ton SQL final. Privilégie "
+              "`introspect_table`, `find_column`, `peek_sample_rows`, "
+              "`look_at_existing_silver`, et VALIDE TON RÉSULTAT via "
+              "`test_compile_create` avant de retourner le SQL final entre "
+              "balises ```sql ... ```."
+        )
+        try:
+            with psycopg.connect(settings.database_url) as tools_conn:
+                response = await llm_chat_with_tools(
+                    deepseek_client=ds_client,
+                    system=tools_system,
+                    user=prompt,
+                    conn=tools_conn,
+                    max_iterations=6,
+                    temperature=agent.temperature,
+                    max_tokens=settings.deepseek_max_tokens,
+                )
+            tool_audit = response.get("tool_audit", [])
+            if response.get("error"):
+                log.warning(
+                    "[gold_codegen] tool-calling pour %s : %s — fallback no-tools",
+                    gold_name, response["error"],
+                )
+                response = None
+        except Exception as e:
+            log.warning("[gold_codegen] tool-calling exception : %s — fallback no-tools", e)
+            response = None
+        if response is not None:
+            log.info(
+                "[gold_codegen] tool-calling pour %s : %d itérations, %d tool calls",
+                gold_name, response.get("iterations", 0), len(tool_audit),
+            )
+
+    if response is None:
+        response = await _llm_chat(
+            model=agent.model,
+            system=agent.system_prompt,
+            user=prompt,
+            temperature=agent.temperature,
+            num_ctx=agent.num_ctx,
+        )
 
     content = response.get("message", {}).get("content", "") if isinstance(response, dict) else ""
     sql = _extract_sql(content)
@@ -357,7 +404,12 @@ async def generate_gold_sql(
     target_path.write_text(sql, encoding="utf-8")
 
     # Audit
-    _log_version(gold_name, spec, sql, ok, msg, version_uid, agent.model, feedback)
+    _tool_iters = response.get("iterations") if isinstance(response, dict) else None
+    _log_version(
+        gold_name, spec, sql, ok, msg, version_uid, agent.model, feedback,
+        tool_audit=tool_audit if use_tools else None,
+        tool_iterations=_tool_iters if use_tools else None,
+    )
 
     result = {
         "gold_name": gold_name,
