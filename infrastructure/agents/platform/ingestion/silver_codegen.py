@@ -436,16 +436,7 @@ async def generate_silver_sql(
 
                 if row:
                     cached_sql, cached_uid, was_applied = row
-                    # Auto-fix patterns connus (LLM hallucinations recurrentes)
-                    if cache_source == "audit_ok_autofix":
-                        # Fix 1 : double parens index → simple parens
-                        # CREATE INDEX ON t ((col1, col2)) → CREATE INDEX ON t (col1, col2)
-                        # Pattern : "((nom1, nom2..."  →  "(nom1, nom2..."
-                        cached_sql = re.sub(
-                            r"CREATE INDEX (\w+\s+)?ON (\S+)\s+\(\((.+?)\)\)",
-                            r"CREATE INDEX \1ON \2 (\3)",
-                            cached_sql,
-                        )
+                    # _apply_sql applique _autofix_sql universellement
                     log.info(
                         "[silver_codegen] reuse SQL from %s for %s (version %s, was_applied=%s) — skip LLM",
                         cache_source, silver_name,
@@ -650,6 +641,28 @@ def _list_downstream_silvers(conn, qualified: str) -> list[str]:
         return []
 
 
+def _autofix_sql(sql: str) -> str:
+    """Réparations syntaxiques universelles avant apply (cache + LLM frais).
+
+    Les LLM tombent régulièrement dans les memes pièges. On corrige avant que
+    Postgres rejette — moins de bruit + retries inutiles.
+    """
+    # Fix 1 : double parens index → simple parens
+    # CREATE INDEX ON t ((c1, c2, c3)) → CREATE INDEX ON t (c1, c2, c3)
+    sql = re.sub(
+        r"CREATE INDEX (\w+\s+)?ON (\S+)\s+\(\((.+?)\)\)",
+        r"CREATE INDEX \1ON \2 (\3)",
+        sql,
+    )
+    # Fix 2 : variantes "CREATE INDEX IF NOT EXISTS name ON t ((...))"
+    sql = re.sub(
+        r"CREATE INDEX IF NOT EXISTS (\w+)\s+ON (\S+)\s+\(\((.+?)\)\)",
+        r"CREATE INDEX IF NOT EXISTS \1 ON \2 (\3)",
+        sql,
+    )
+    return sql
+
+
 def _apply_sql(silver_name: str, sql: str, version_uid: str) -> dict:
     """Execute the generated SQL atomically.
 
@@ -664,6 +677,7 @@ def _apply_sql(silver_name: str, sql: str, version_uid: str) -> dict:
     """
     if not settings.database_url:
         return {"applied": False, "error": "no database_url"}
+    sql = _autofix_sql(sql)
     qualified = silver_name if "." in silver_name else f"silver.{silver_name}"
     downstream: list[str] = []
     try:
