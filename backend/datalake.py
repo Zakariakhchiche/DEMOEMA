@@ -87,17 +87,18 @@ GOLD_TABLES_WHITELIST: dict[str, dict[str, Any]] = {
     "gold.dirigeants_master": {
         "label": "Dirigeants (Master)",
         "category": "core",
-        "pk": "person_id",
-        "default_order": "score_decideur DESC NULLS LAST",
-        "search_cols": ["nom", "prenom", "qualite"],
+        # Schema v3 PRO — yaml spec : grain `1 row par person_uid`,
+        # score = pro_ma_score, mandats = n_mandats_actifs, age = age_2026.
+        "pk": "person_uid",
+        "default_order": "pro_ma_score DESC NULLS LAST",
+        "search_cols": ["nom", "prenom"],
         "preview_cols": [
-            "person_id",
+            "person_uid",
             "nom",
             "prenom",
-            "qualite",
-            "n_mandats",
-            "age",
-            "score_decideur",
+            "n_mandats_actifs",
+            "age_2026",
+            "pro_ma_score",
         ],
     },
     "gold.cibles_ma_top": {
@@ -254,16 +255,18 @@ GOLD_TABLES_WHITELIST: dict[str, dict[str, Any]] = {
     "gold.persons_master_universal": {
         "label": "Persons (Universal)",
         "category": "osint",
-        "pk": "person_id",
-        "default_order": "score_decideur DESC NULLS LAST",
+        # Schema v3 — yaml grain `1 row par person_uid`, key cols
+        # person_uid + resolution_confidence + pro_ma_score (hérité de
+        # dirigeants_master via JOIN).
+        "pk": "person_uid",
+        "default_order": "pro_ma_score DESC NULLS LAST",
         "search_cols": ["nom", "prenom"],
         "preview_cols": [
-            "person_id",
+            "person_uid",
             "nom",
             "prenom",
-            "n_mandats",
-            "age",
-            "score_decideur",
+            "resolution_confidence",
+            "pro_ma_score",
         ],
     },
     "silver.press_mentions_matched": {
