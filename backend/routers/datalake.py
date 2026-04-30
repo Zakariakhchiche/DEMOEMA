@@ -1091,13 +1091,20 @@ async def _dirigeant_full(
 
 @router.get("/scoring/{siren}")
 async def scoring_detail(req: Request, siren: str):
-    """Détail du scoring M&A 103 signaux pour un siren — décomposé en 12
-    dimensions, signaux détectés, score brut, multiplicateur composite,
-    classification finale.
+    """Détail scoring M&A v3 PRO — barème advisor 4 axes business multiplicatif.
 
-    Source : gold.scoring_ma (matérialisée par silver_runner depuis le yaml
-    gold_specs/scoring_ma.yaml). Si la table n'existe pas encore, retourne
-    503 avec message "scoring_ma pas encore matérialisée".
+    Source : gold.scoring_ma v3 (formule géométrique Transmission × Attractivity ×
+    Scale × Risk_multiplier, percentile-based tier).
+
+    Output keys :
+    - deal_score (0-100), tier (A_HOT/B_WARM/C_PIPELINE/D_WATCH/E_REJECT/Z_ELIM),
+      deal_percentile (1-100)
+    - axes : {transmission, attractivity, scale, structure} chacun 0-100
+    - risk : {multiplier, sanctions, procedure_collective, contentieux, late_filing}
+    - financials : {ca_latest, proxy_ebitda, proxy_margin, sector_multiple, ev_estimated_eur}
+    - context : {age_dirigeant_max, n_sci_dirigeants, n_dirigeants, has_pro_ma, ...}
+
+    Voir docs/SIGNAUX_MA.md pour le détail du barème.
     """
     if not siren.isdigit() or len(siren) != 9:
         raise HTTPException(status_code=400, detail="SIREN invalide")
@@ -1117,6 +1124,92 @@ async def scoring_detail(req: Request, siren: str):
     if not row:
         raise HTTPException(status_code=404, detail=f"Pas de scoring pour {siren}")
 
+    data = row["r"]
+    if isinstance(data, str):
+        data = json.loads(data)
+
+    # Format v3 PRO — 4 axes business + risk multiplier + EV estimée
+    return {
+        "siren": siren,
+        "denomination": data.get("denomination"),
+        # Score global et tier
+        "deal_score": data.get("deal_score_raw") or data.get("score_total") or 0,
+        "deal_percentile": data.get("deal_percentile"),
+        "tier": data.get("tier"),
+        # 4 axes business 0-100
+        "axes": {
+            "transmission": data.get("transmission_score", 0),
+            "attractivity": data.get("attractivity_score", 0),
+            "scale": data.get("scale_score", 0),
+            "structure": data.get("structure_score", 0),
+        },
+        # Risk multiplier détaillé
+        "risk": {
+            "multiplier": float(data.get("risk_multiplier") or 1.0),
+            "has_sanction_ofac_eu": bool(data.get("has_sanction_ofac_eu")),
+            "has_sanction_cnil": bool(data.get("has_sanction_cnil")),
+            "has_sanction_dgccrf": bool(data.get("has_sanction_dgccrf")),
+            "has_proc_collective_recent": bool(data.get("has_proc_collective_recent")),
+            "has_cession_recent": bool(data.get("has_cession_recent")),
+            "n_contentieux_recent": data.get("n_contentieux_recent") or 0,
+            "has_late_filing": bool(data.get("has_late_filing")),
+        },
+        # Financials proxies + EV estimée
+        "financials": {
+            "ca_latest": float(data["ca_latest"]) if data.get("ca_latest") else None,
+            "capitaux_propres_latest": float(data["capitaux_propres_latest"]) if data.get("capitaux_propres_latest") else None,
+            "resultat_net_latest": float(data["resultat_net_latest"]) if data.get("resultat_net_latest") else None,
+            "proxy_ebitda": float(data["proxy_ebitda"]) if data.get("proxy_ebitda") else None,
+            "proxy_margin": float(data["proxy_margin"]) if data.get("proxy_margin") else None,
+            "sector_multiple": float(data["sector_multiple"]) if data.get("sector_multiple") else None,
+            "ev_estimated_eur": float(data["ev_estimated_eur"]) if data.get("ev_estimated_eur") else None,
+        },
+        # Contexte (filtres / affichage)
+        "context": {
+            "code_ape": data.get("code_ape"),
+            "adresse_dept": data.get("adresse_dept"),
+            "forme_juridique": data.get("forme_juridique"),
+            "capital_social": float(data["capital_social"]) if data.get("capital_social") else None,
+            "age_entreprise": data.get("age_entreprise"),
+            "effectif_salarie": data.get("effectif_salarie"),
+            "age_dirigeant_max": data.get("age_dirigeant_max"),
+            "n_dirigeants": data.get("n_dirigeants"),
+            "n_mandats_dirigeant_max": data.get("n_mandats_dirigeant_max"),
+            "has_pro_ma": bool(data.get("has_pro_ma")),
+            "has_dirigeant_senior": bool(data.get("has_dirigeant_senior")),
+            "n_sci_dirigeants": float(data["n_sci_dirigeants"]) if data.get("n_sci_dirigeants") else None,
+            "total_capital_sci": float(data["total_capital_sci"]) if data.get("total_capital_sci") else None,
+            "has_holding_patrimoniale": bool(data.get("has_holding_patrimoniale")),
+            "is_sector_premium": bool(data.get("is_sector_premium")),
+            "is_geo_premium": bool(data.get("is_geo_premium")),
+            "is_stable": bool(data.get("is_stable")),
+            "is_clean_legal_form": bool(data.get("is_clean_legal_form")),
+            "lei": data.get("lei"),
+        },
+        # Compat ascendante : ancien score_total mappé sur deal_score
+        "score_total": data.get("deal_score_raw") or data.get("score_total") or 0,
+        "feature_version": "v3_pro_4axes",
+        "derniere_maj": str(data.get("materialized_at")) if data.get("materialized_at") else None,
+    }
+
+
+@router.get("/_scoring_detail_legacy/{siren}")
+async def scoring_detail_legacy(req: Request, siren: str):
+    """Legacy : ancien format 13 dimensions / 123 signaux additif.
+
+    Conservé pour compat ascendante (clients qui consomment encore l'ancien format).
+    À déprécier après migration complète frontend → format v3.
+    """
+    if not siren.isdigit() or len(siren) != 9:
+        raise HTTPException(status_code=400, detail="SIREN invalide")
+    pool = _pool(req)
+    if not await _table_exists(pool, "gold", "scoring_ma"):
+        raise HTTPException(status_code=503, detail="scoring_ma pas matérialisée")
+    row = await _safe(pool.fetchrow(
+        "SELECT row_to_json(s.*) AS r FROM gold.scoring_ma s WHERE s.siren = $1", siren,
+    ), timeout_s=4.0)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Pas de scoring pour {siren}")
     data = row["r"]
     if isinstance(data, str):
         data = json.loads(data)
@@ -2022,9 +2115,16 @@ async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_r
     has_scoring = await _table_exists(pool, "gold", "scoring_ma")
     score_join = ""
     score_col = "score_ma"
+    extra_select = ""
     if has_scoring:
         score_join = " LEFT JOIN gold.scoring_ma sm ON sm.siren = t.siren"
-        score_col = "COALESCE(sm.score_total, t.score_ma)"
+        # Format v3 PRO : on remonte le deal_score_raw + 4 axes + tier + EV
+        score_col = "COALESCE(sm.deal_score_raw, sm.score_total, t.score_ma)"
+        extra_select = (
+            ", sm.transmission_score, sm.attractivity_score, sm.scale_score, "
+            "sm.structure_score, sm.tier, sm.deal_percentile, sm.risk_multiplier, "
+            "sm.ev_estimated_eur, sm.proxy_margin, sm.sector_multiple"
+        )
 
     where: list[str] = ["statut = 'actif'"]
     params: list[Any] = []
@@ -2055,7 +2155,7 @@ async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_r
 
     order_col = {"score_ma": score_col, "ca_dernier": "t.ca_dernier", "date_creation": "t.date_creation"}[sort]
     sql = f"""
-        SELECT row_to_json(t.*) AS row, {score_col} AS score_ma_resolved
+        SELECT row_to_json(t.*) AS row, {score_col} AS score_ma_resolved{extra_select}
         FROM gold.entreprises_master t
         {score_join}
         WHERE {' AND '.join(where)}
@@ -2068,9 +2168,17 @@ async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_r
         v = r["row"]
         if isinstance(v, str):
             v = json.loads(v)
-        # Override score_ma avec la vraie valeur 103-signaux si dispo
+        # Override score_ma avec la vraie valeur depuis scoring_ma v3 si dispo
         if "score_ma_resolved" in r and r["score_ma_resolved"] is not None:
             v["score_ma"] = r["score_ma_resolved"]
+        # Hydrate les champs scoring v3 (axes + tier + EV) si dispo
+        for k in (
+            "transmission_score", "attractivity_score", "scale_score", "structure_score",
+            "tier", "deal_percentile", "risk_multiplier", "ev_estimated_eur",
+            "proxy_margin", "sector_multiple",
+        ):
+            if k in r and r[k] is not None:
+                v[k] = float(r[k]) if isinstance(r[k], (int, float)) and k in ("risk_multiplier", "proxy_margin", "sector_multiple", "ev_estimated_eur") else r[k]
         cibles.append(v)
     return {"cibles": cibles, "limit": limit, "offset": offset, "has_more": len(cibles) == limit, "source": "gold", "scoring_v2": has_scoring}
 

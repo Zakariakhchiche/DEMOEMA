@@ -39,6 +39,17 @@ export interface Target {
   ca_history: number[];
   spark?: number[];
   statut?: string; // 'actif' | 'cesse' | 'cessée' | 'C' | 'RADIE' — exposé par /api/datalake/cibles
+  // Scoring v3 PRO — 4 axes business + risk + EV
+  axes?: {
+    transmission: number;  // 0-100, prob cession dirigeant
+    attractivity: number;  // 0-100, valeur réelle (marge × multiple sectoriel)
+    scale: number;         // 0-100, taille pour barrière transactionnelle
+    structure: number;     // 0-100, suitability transaction (forme juridique, holding)
+  };
+  tier?: "A_HOT" | "B_WARM" | "C_PIPELINE" | "D_WATCH" | "E_REJECT" | "Z_ELIM";
+  deal_percentile?: number;  // 1-100, ntile DESC sur deal_score
+  risk_multiplier?: number;  // 0-1, multiplicateur appliqué au composite
+  ev_estimated_eur?: number; // Valorisation indicative
 }
 
 export interface Person {

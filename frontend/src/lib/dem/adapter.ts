@@ -76,6 +76,17 @@ export function rowToTarget(r: Record<string, unknown>): Target {
       Math.round(ca * 0.93 / 1e6),
       Math.round(ca / 1e6),
     ] : [],
+    // Scoring v3 PRO — 4 axes business + tier + EV
+    axes: (num(r.transmission_score) != null || num(r.attractivity_score) != null) ? {
+      transmission: num(r.transmission_score) ?? 0,
+      attractivity: num(r.attractivity_score) ?? 0,
+      scale: num(r.scale_score) ?? 0,
+      structure: num(r.structure_score) ?? 0,
+    } : undefined,
+    tier: (str(r.tier) as Target["tier"]) || undefined,
+    deal_percentile: num(r.deal_percentile) ?? undefined,
+    risk_multiplier: num(r.risk_multiplier) ?? undefined,
+    ev_estimated_eur: num(r.ev_estimated_eur) ?? undefined,
   };
 }
 

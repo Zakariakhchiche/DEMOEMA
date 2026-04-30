@@ -3,6 +3,7 @@
 import { Icon } from "./Icon";
 import { ScoreBadge } from "./ScoreBadge";
 import { Sparkline } from "./Sparkline";
+import { ScoreAxes, TierBadge } from "./ScoreAxes";
 import { formatSiren } from "@/lib/dem/format";
 import type { Target, Density } from "@/lib/dem/types";
 
@@ -65,6 +66,7 @@ export function TargetCard({ target, density = "comfortable", selected, onSelect
             {target.denomination}
           </div>
           <span className="dem-mono" style={{ fontSize: 11, color: "var(--text-tertiary)" }}>siren {formatSiren(target.siren)}</span>
+          {target.tier && <TierBadge tier={target.tier} percentile={target.deal_percentile} />}
           {hasFlag && (
             <span style={{
               display: "inline-flex", alignItems: "center", gap: 4,
@@ -76,6 +78,10 @@ export function TargetCard({ target, density = "comfortable", selected, onSelect
             </span>
           )}
         </div>
+
+        {!compact && target.axes && (
+          <ScoreAxes axes={target.axes} variant="compact" />
+        )}
 
         {!compact && (
           <div style={{ display: "flex", gap: 18, marginTop: 8, fontSize: 12, color: "var(--text-secondary)", flexWrap: "wrap", alignItems: "center" }}>
