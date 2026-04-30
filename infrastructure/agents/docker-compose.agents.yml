@@ -93,6 +93,12 @@ services:
       # Sans `:-default`, la valeur du compose OVERRIDE SILENCIEUSEMENT le .env
       # (precedence Compose : environment > env_file).
       DATABASE_URL: "${DATABASE_URL:-postgresql://postgres:${DATALAKE_POSTGRES_ROOT_PASSWORD}@datalake-db:5432/datalake}"
+      # Tool-calling LLM pour silver_codegen + gold_codegen — donne au LLM
+      # des tools READ-ONLY (introspect_table, find_column, dry_run_sql,
+      # test_compile_create…) pour vérifier le schéma Postgres en direct
+      # AVANT de produire le SQL final. Élimine ~80% des hallucinations
+      # de colonnes. Off par défaut, on=1.
+      CODEGEN_USE_TOOLS: "${CODEGEN_USE_TOOLS:-1}"
     volumes:
       - ./prompts:/app/prompts:ro
       - ./docs:/app/docs:ro
