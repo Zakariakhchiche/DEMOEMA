@@ -1749,7 +1749,7 @@ async def pitch_pdf(req: Request, siren: str):
     return Response(content=html, media_type="text/html; charset=utf-8")
 
 
-@router.get("/pitch/{siren}.pdf")
+@router.get("/pitch-pdf/{siren}")
 async def pitch_pdf_real(req: Request, siren: str):
     """Génère un VRAI PDF côté serveur (Bug S rapport QA — avant : window.print
     en HTML). Utilise WeasyPrint pour rendre le HTML pitch en PDF.

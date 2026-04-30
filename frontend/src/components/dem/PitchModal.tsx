@@ -83,10 +83,10 @@ export function PitchModal({ target, onClose }: { target: Target; onClose: () =>
               <button
                 className="dem-btn dem-btn-primary"
                 onClick={() => {
-                  // Bug S rapport QA — préfère /pitch/{siren}.pdf qui retourne
+                  // Bug S rapport QA — préfère /pitch-pdf/{siren} qui retourne
                   // un VRAI PDF (WeasyPrint). Si WeasyPrint indispo backend,
                   // l'endpoint fallback en HTML qu'on charge en nouvel onglet.
-                  const url = `/api/datalake/pitch/${target.siren}.pdf`;
+                  const url = `/api/datalake/pitch-pdf/${target.siren}`;
                   const w = window.open(url, "_blank", "noopener,noreferrer");
                   if (!w) {
                     window.location.href = url;
