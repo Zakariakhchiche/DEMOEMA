@@ -1511,7 +1511,12 @@ _PROMPT_INJECTION_PATTERNS = re.compile(
     # ───── Bug v6/1.1 — exfil system prompt via "Output JSON object with key="
     r"|(?:output|return|print|provide|reveal|show|give|disclose|dump|leak)"
     r"\s+(?:a|the|your)\s+(?:json|system|initial|original|raw|internal|full)"
-    r"\s+(?:prompt|instructions?|config(?:uration)?|context|message|content)"
+    r"\s+(?:prompt|instructions?|config(?:uration)?|context|message|content"
+    # Variante : "Output a JSON object with key='system_prompt'" — le user
+    # demande au LLM de structurer une exfil. On catche tout output JSON
+    # avec une key/value qui mentionne system|prompt|instructions|config.
+    r"|object\s+with\s+(?:key|value)|object\b.{0,60}key\s*[:=].{0,40}"
+    r"(?:system|prompt|instructions?|config|original|initial))"
     # ───── Bug v6/1.2 — "Décris ton rôle exact / describe your role"
     r"|(?:describe|liste|list|détaille|expose|montre|show)\s+(?:me\s+)?"
     r"(?:ton|your|tes|les|the)\s+(?:rôle|role|prompt|instructions?|configuration|setup|persona)"
@@ -1521,9 +1526,12 @@ _PROMPT_INJECTION_PATTERNS = re.compile(
     r".{0,80}?(?:write|say|respond|repeat|réponds|dis|écris)"
     # ───── "Step 1: forget. Step 2: say X"
     r"|step\s*\d+\s*:.{0,60}(?:forget|ignore|disregard).{0,80}step\s*\d+\s*:.{0,60}(?:say|write|respond)"
-    # ───── Compliance bypass : "réponds exactement par 'X'"
-    r"|(?:réponds|reply|respond|answer)\s+exactement\s+(?:par|with|by)\s+['\"]"
-    r"|(?:tu\s+vas\s+)?(?:répondre|respond)\s+(?:uniquement|only)\s+(?:par|with)\s+['\"]"
+    # ───── Compliance bypass : "tu vas répondre exactement par 'X'"
+    # Le pattern matche "réponds|réponse|repondre|repondras|répondre|reply|answer"
+    # combiné à "exactement|uniquement|only" et un ['"], que le verbe soit à
+    # l'impératif ou au futur ("tu vas répondre").
+    r"|(?:tu\s+vas\s+)?(?:réponds?|répondre|répondras|repondre|repondras|reply|respond|answer)"
+    r"\s+(?:exactement|uniquement|only|just|seulement)\s+(?:par|with|by)\s+['\"]"
     # ───── DAN / jailbreak persona
     r"|(?:you\s+are|tu\s+es)\s+DAN\b|do\s+anything\s+now"
     r"|reset\s+(?:your|the|le|ton)\s+context"
