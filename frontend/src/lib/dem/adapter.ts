@@ -25,11 +25,17 @@ import type { Target, Person } from "./types";
  */
 export function extractDirigeantsFromText(text: string): Person[] {
   if (!text) return [];
-  // Capture multi-mot lastname : (?:[CAPS]+(?:\s+[CAPS]+)*) jusqu'à 5 mots
-  // Tolère em/en-dash, hyphen, virgule, deux-points, espaces avant l'âge.
+  // Capture multi-mot lastname : 1 à 5 mots ALL CAPS séparés par espaces.
+  // Séparateur entre LASTNAME et "XX ans" : tout caractère non-alphanumérique
+  // (1-15 chars max). Ainsi on couvre tous ces formats LLM :
+  //   - "Serge LUFTMAN (83 ans)"            (parens)
+  //   - "Éric BACONNIER — 72 ans"           (em-dash)
+  //   - "Yves DELIEUVIN, 76 ans"            (virgule)
+  //   - "**Serge LUFTMAN** (83 ans)"        (markdown bold avant parens)
+  //   - "| Serge LUFTMAN | 83 ans | 2 SCI"  (table markdown : pipe)
   // (?<![A-Za-zÀ-ÿ]) en lookbehind négatif au lieu de \b car \b en regex JS
   // ne fonctionne pas devant les chars Unicode non-ASCII (Éric, Über, etc.).
-  const re = /(?<![A-Za-zÀ-ÿ])([A-ZÀ-ÖØ-Ý][a-zà-öø-ÿ\-']{1,30})\s+([A-ZÀ-ÖØ-Ý][A-ZÀ-ÖØ-Ý\-']{1,40}(?:\s+[A-ZÀ-ÖØ-Ý][A-ZÀ-ÖØ-Ý\-']{1,40}){0,4})\s*[—–\-,:;\s\(]+(\d{2,3})\s*ans/g;
+  const re = /(?<![A-Za-zÀ-ÿ])([A-ZÀ-ÖØ-Ý][a-zà-öø-ÿ\-']{1,30})\s+([A-ZÀ-ÖØ-Ý][A-ZÀ-ÖØ-Ý\-']{1,40}(?:\s+[A-ZÀ-ÖØ-Ý][A-ZÀ-ÖØ-Ý\-']{1,40}){0,4})[^A-Za-zÀ-ÿ0-9]{1,15}(\d{2,3})\s*ans/g;
   const seen = new Set<string>();
   const persons: Person[] = [];
   let m: RegExpExecArray | null;
