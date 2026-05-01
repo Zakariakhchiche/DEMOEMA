@@ -27,17 +27,22 @@
   "shortcuts": [
     {
       "name": "Tableau de Bord",
-      "url": "/",
+      "url": "/#dashboard",
       "description": "Centre de contrôle M&A"
     },
     {
-      "name": "Intelligence Vault",
-      "url": "/targets",
-      "description": "Base de données des cibles"
+      "name": "Chat Copilot",
+      "url": "/#chat",
+      "description": "Copilot M&A — sourcing, scoring, due diligence"
+    },
+    {
+      "name": "Pipeline",
+      "url": "/#pipeline",
+      "description": "Kanban deals M&A en cours"
     },
     {
       "name": "Graphe Réseau",
-      "url": "/graph",
+      "url": "/#graph",
       "description": "Cartographie des connexions"
     }
   ]

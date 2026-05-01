@@ -3,6 +3,7 @@ import { Inter, Outfit } from "next/font/google";
 import "./globals.css";
 import MainLayout from "@/components/MainLayout";
 import QueryProvider from "@/lib/providers/QueryProvider";
+import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -50,6 +51,7 @@ export default function RootLayout({
   return (
     <html lang="fr" className="dark">
       <body className={`${inter.variable} ${outfit.variable} antialiased selection:bg-indigo-500/30 font-sans overflow-x-hidden`}>
+        <ServiceWorkerRegistration />
         <QueryProvider>
           <MainLayout>
             {children}

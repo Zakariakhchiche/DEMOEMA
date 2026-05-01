@@ -15,14 +15,7 @@ import { PersonSheet } from "@/components/dem/PersonSheet";
 import { CmdPalette } from "@/components/dem/CmdPalette";
 import { PitchModal } from "@/components/dem/PitchModal";
 import type { Mode, Target, Density, Person } from "@/lib/dem/types";
-
-const VALID_MODES: Mode[] = ["dashboard", "chat", "pipeline", "watchlist", "explorer", "graph", "compare", "audit"];
-
-function readHashMode(): Mode {
-  if (typeof window === "undefined") return "dashboard";
-  const fromHash = window.location.hash.replace("#", "") as Mode;
-  return VALID_MODES.includes(fromHash) ? fromHash : "dashboard";
-}
+import { readHashMode } from "@/lib/hashRouting";
 
 export default function Home() {
   // Lazy init évite d'écraser le hash au premier render. État source-of-truth
