@@ -13,7 +13,9 @@
 --   - On retient les leaks (source_leak) et le pays Officer.
 -- ============================================================================
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS silver.icij_offshore_match AS
+DROP MATERIALIZED VIEW IF EXISTS silver.icij_offshore_match CASCADE;
+
+CREATE MATERIALIZED VIEW silver.icij_offshore_match AS
 WITH officers_normalized AS (
     SELECT
         node_id,
@@ -29,7 +31,8 @@ WITH officers_normalized AS (
       AND name IS NOT NULL
       AND length(name) > 4
 ),
--- Dirigeants FR Tier consolidé (incluant gold pour pro_ma_score)
+-- Dirigeants FR (silver.dirigeants_360 n'existe pas — utiliser inpi_dirigeants
+-- direct ; gold.dirigeants_master pour pro_ma_score quand dispo).
 dirigeants_index AS (
     SELECT
         d.nom,
@@ -40,7 +43,7 @@ dirigeants_index AS (
         coalesce(gd.pro_ma_score, 0) AS pro_ma_score,
         upper(unaccent(d.nom || ' ' || d.prenom)) AS nom_prenom_uc,
         upper(unaccent(d.prenom || ' ' || d.nom)) AS prenom_nom_uc
-    FROM silver.dirigeants_360 d
+    FROM silver.inpi_dirigeants d
     LEFT JOIN gold.dirigeants_master gd
       ON gd.nom = d.nom AND gd.prenom = d.prenom
 )
