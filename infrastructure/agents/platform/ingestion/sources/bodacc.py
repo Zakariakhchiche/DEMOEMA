@@ -25,7 +25,15 @@ MAX_PAGES_PER_RUN = 100000
 # FULL historique par bulk export streamé (48M annonces possible mais long)
 BACKFILL_DAYS_FIRST_RUN = 3650
 INCREMENTAL_HOURS = 87600
-BULK_BATCH_SIZE = 1000  # commit tous les 1000 rows
+# Audit QA 2026-05-01 (SCRUM-NEW-15) : worker BODACC fetch+insert prenait
+# 153-158 secondes par run dans la page Audit. Cause : BULK_BATCH_SIZE=1000
+# avec executemany() = ~50000 roundtrips DB pour 50M rows. Bump à 10000
+# pour x10 throughput. Maintient ON CONFLICT DO NOTHING pour idempotence.
+BULK_BATCH_SIZE = 10000
+# Cap par run pour éviter qu'un fetch full bloque le scheduler 2h.
+# Aligné sur opensanctions.py (MAX_ROWS_PER_RUN = 1_000_000). Permet de
+# splitter un backfill 48M en ~50 runs de ~30 min plutôt qu'un mega-run.
+MAX_ROWS_PER_RUN = 500_000
 
 
 async def count_upstream() -> int | None:
@@ -64,7 +72,10 @@ async def fetch_bodacc_full() -> dict:
                     import io
                     header = None
                     buffer = ""
+                    cap_reached = False
                     async for chunk in resp.aiter_text(1024 * 1024):  # 1 MB chunks
+                        if cap_reached:
+                            break
                         buffer += chunk
                         lines = buffer.split("\n")
                         buffer = lines.pop()  # garder le dernier incomplet
@@ -88,6 +99,15 @@ async def fetch_bodacc_full() -> dict:
                                 continue
 
                             processed += 1
+                            # Cap MAX_ROWS_PER_RUN — break propre du stream
+                            if processed > MAX_ROWS_PER_RUN:
+                                log.info(
+                                    "BODACC bulk : MAX_ROWS_PER_RUN=%d atteint, "
+                                    "break (next run reprendra via ON CONFLICT DO NOTHING)",
+                                    MAX_ROWS_PER_RUN,
+                                )
+                                cap_reached = True
+                                break
                             annonce_id = _s(rec.get("id") or f"{rec.get('numeroannonce', '')}-{rec.get('dateparution', '')}")
                             if not annonce_id:
                                 continue
