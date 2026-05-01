@@ -132,6 +132,36 @@ services:
       - agents-net
       - web              # accès via Caddy principal DEMOEMA
 
+  # ── Neo4j Community : graphe relations dirigeants/companies + ICIJ + GLEIF
+  # Use case M&A : "trouve tous les dirigeants Var avec lien à Panama Papers
+  # via N degrés", non-faisable proprement en SQL pur. Le code de sync existe
+  # dans neo4j_sync.py — ce service le réveille.
+  neo4j:
+    image: neo4j:5-community
+    container_name: demomea-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD:-demoema_neo4j_pass}"
+      NEO4J_server_memory_heap_initial__size: "2G"
+      NEO4J_server_memory_heap_max__size: "4G"
+      NEO4J_server_memory_pagecache_size: "2G"
+      # Anti-zombie : ferme les sessions idle 10min (graphe perso, pas API)
+      NEO4J_dbms_transaction_timeout: "600s"
+    expose:
+      - "7474"   # HTTP Browser (accès via tunnel SSH uniquement)
+      - "7687"   # Bolt (depuis agents-platform sur le même network)
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - agents-net
+
 networks:
   agents-net:
     driver: bridge
@@ -141,4 +171,8 @@ networks:
 
 volumes:
   datalake-data:
+    driver: local
+  neo4j-data:
+    driver: local
+  neo4j-logs:
     driver: local
