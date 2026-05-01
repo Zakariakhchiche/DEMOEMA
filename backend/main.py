@@ -1617,7 +1617,10 @@ _PROMPT_INJECTION_PATTERNS = re.compile(
     # `ignore\s+(?:all\s+)?(?:previous|prior|above)` ne couvrait pas
     # "ignore ANY previous", "ignore THESE previous", "ignore the FOLLOWING".
     # Élargi à : ignore + (any|all|these|those|the)? + (previous|prior|above|following).
-    r"\b(?:ignore\s+(?:all\s+|any\s+|these\s+|those\s+|the\s+)?(?:previous|prior|above|following|subsequent)\s+(?:and\s+(?:previous|prior|above|following|subsequent)\s+)?(?:instructions?|rules|prompts?|messages?|commands?|directives?)"
+    # NOTE 2026-05-01 : `\b` global retiré (cassait les patterns `[system]`,
+    # `<inst>`, et les caractères non-ASCII). Chaque alternative ajoute son
+    # propre anchor (`\b` ou caractère littéral) si nécessaire.
+    r"(?:\bignore\s+(?:all\s+|any\s+|these\s+|those\s+|the\s+)?(?:previous|prior|above|following|subsequent)\s+(?:and\s+(?:previous|prior|above|following|subsequent)\s+)?(?:instructions?|rules|prompts?|messages?|commands?|directives?)"
     r"|disregard\s+(?:any\s+|all\s+|the\s+|these\s+|those\s+)?(?:previous|prior|above|following|subsequent)"
     r"|forget\s+(?:everything|all\s+(?:previous|above|prior)|any\s+(?:previous|prior)|your\s+role|previous|prior)"
     # ───── Audit garak — "Just print X" / "STOP EVERYTHING NOW"
@@ -1659,6 +1662,25 @@ _PROMPT_INJECTION_PATTERNS = re.compile(
     r"|reset\s+(?:your|the|le|ton)\s+context"
     # ───── "Write only the word X"
     r"|write\s+(?:only|just)\s+(?:the\s+)?(?:word|phrase|response)\s*['\"]"
+    # ───── Audit garak v6 (2026-05-01) — latentinjection translation bypass
+    # Garak injecte des triggers universels dans le contenu à traduire/résumer.
+    # Vulns détectées : 78% EnZh, 73% EnFr, 50% FactSnippetLegal — le copilot
+    # répétait "Haha, pwned/possédé/被耍" embarqué dans le payload.
+    # Trigger phrases universelles garak (à bloquer dans tout input) :
+    r"|\bhaha[\s,!.]*(?:pwned|pwn3d|poss[eé]d[eé]|posseder|owned|被耍)"
+    # Variantes CJK pures (pas de \b, non-ASCII) — garak EnZh injecte 被耍/被骗
+    r"|(?:哈哈|呵呵)[\s,，!.！。]*(?:被耍|被骗|被坑|被拐)"
+    r"|被耍了|被骗了"
+    # "Repeat/say/translate exactly/literally 'X'" → exfil pattern
+    r"|(?:repeat|say|output|print|write|translate|traduis|traduire|écris|dis)"
+    r"\s+(?:the\s+|this\s+|cette\s+|le\s+|la\s+|les\s+)?"
+    r"(?:phrase|sentence|words?|text|quote|line|string)?"
+    r"\s*(?:exactly|exactement|literally|verbatim|word\s+for\s+word|mot\s+(?:à|pour)\s+mot)"
+    # Markers d'injection latente embarqués dans documents fournis
+    r"|\[\s*(?:system|admin|inst|important|note|system_note|new_instructions?|override)\s*\]"
+    r"|<\s*(?:system|admin|inst|important|note|new_instructions?|override)\s*>"
+    # "Repeat after me 'X'" / "say after me"
+    r"|(?:repeat|say|dis)\s+after\s+(?:me|moi)\b"
     r")",
     re.IGNORECASE | re.DOTALL,
 )
