@@ -152,12 +152,13 @@ def _run_enrich(name, conn, driver, sql, cypher, key_func=None):
     with conn.cursor() as cur:
         cur.execute(sql)
         rows = cur.fetchall()
+        # Capture columns INSIDE the with-block — sinon cur.description = None.
+        columns = [d.name for d in cur.description]
     print(f"[{name}] {len(rows)} rows to process", file=sys.stderr)
 
     n_flagged = 0
     if not rows:
         return 0
-    columns = [d.name for d in cur.description]
     with driver.session() as s:
         for i in range(0, len(rows), BATCH):
             chunk = rows[i:i + BATCH]
