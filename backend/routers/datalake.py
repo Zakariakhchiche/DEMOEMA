@@ -1159,8 +1159,58 @@ async def _dirigeant_full(
              AND ($3::text IS NULL OR date_naissance LIKE $3 || '%')""",
         nom_u, prenom_u, date_n,
     ))
+
+    # Fallback 1 : silver.dirigeants_360 — feature store consolidé. Couvre les
+    # dirigeants présents dans gold.dirigeants_master mais absents/incomplets
+    # en silver.inpi_dirigeants (e.g. dirigeants enrichis depuis sources non-INPI).
     if not inpi or not inpi.get("nom"):
-        raise HTTPException(status_code=404, detail="Dirigeant introuvable en silver")
+        inpi = await _safe(pool.fetchrow(
+            """SELECT nom, prenom, date_naissance, age_2026 AS age,
+                      n_mandats_total, n_mandats_actifs,
+                      sirens_mandats, denominations_mandats AS denominations,
+                      formes_juridiques, roles,
+                      first_mandat_date, last_mandat_date,
+                      is_multi_mandat
+               FROM silver.dirigeants_360
+               WHERE UPPER(unaccent(nom)) = UPPER(unaccent($1))
+                 AND UPPER(unaccent(prenom)) = UPPER(unaccent($2))
+                 AND ($3::text IS NULL OR date_naissance LIKE $3 || '%')
+               ORDER BY n_mandats_actifs DESC NULLS LAST
+               LIMIT 1""",
+            nom_u, prenom_u, date_n,
+        ))
+
+    # Fallback 2 : gold.dirigeants_master — au minimum on récupère le grain de base
+    # pour ne pas 404 sur un dirigeant exposé en card mais absent des silvers
+    # (cas v6 : Olivier Esteve / Maxime Moczulski / Tania Geny / Gregoire Chertok
+    # remontés par fetchPersons depuis gold mais 404 sur l'ancienne route silver-only).
+    if not inpi or not inpi.get("nom"):
+        inpi = await _safe(pool.fetchrow(
+            """SELECT nom, prenom,
+                      NULL::text AS date_naissance,
+                      age_2026 AS age,
+                      NULL::bigint AS n_mandats_total,
+                      n_mandats_actifs,
+                      NULL::char(9)[] AS sirens_mandats,
+                      NULL::text[] AS denominations,
+                      NULL::text[] AS formes_juridiques,
+                      NULL::text[] AS roles,
+                      NULL::date AS first_mandat_date,
+                      NULL::date AS last_mandat_date,
+                      (n_mandats_actifs >= 5) AS is_multi_mandat
+               FROM gold.dirigeants_master
+               WHERE UPPER(unaccent(nom)) = UPPER(unaccent($1))
+                 AND UPPER(unaccent(prenom)) = UPPER(unaccent($2))
+               ORDER BY pro_ma_score DESC NULLS LAST
+               LIMIT 1""",
+            nom_u, prenom_u,
+        ))
+
+    if not inpi or not inpi.get("nom"):
+        raise HTTPException(
+            status_code=404,
+            detail="Dirigeant introuvable (silver.inpi_dirigeants / silver.dirigeants_360 / gold.dirigeants_master)",
+        )
 
     # 2. Patrimoine SCI agrégé sur (nom, prenom, date_naissance) normalisé
     sci = await _safe(pool.fetchrow(
