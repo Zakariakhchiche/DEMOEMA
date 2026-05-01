@@ -115,11 +115,13 @@ async def list_tables(req: Request):
     for name, meta in GOLD_TABLES_WHITELIST.items():
         if name not in existing:
             continue
-        # Count approx via pg_class (instant, vs COUNT(*) sur 30M rows = 8s)
+        # Count approx via pg_class (instant, vs COUNT(*) sur 30M rows = 8s).
+        # Audit QA 2026-05-01 : pg_class.reltuples = -1 quand jamais ANALYZE
+        # (ex hatvp_lobbying). On normalise à 0 — Explorer exposait du -1 trompeur.
         schema, tbl = name.split(".", 1)
         try:
             n = await pool.fetchval(
-                """SELECT reltuples::bigint FROM pg_class c
+                """SELECT GREATEST(0, reltuples::bigint) FROM pg_class c
                    JOIN pg_namespace n ON n.oid = c.relnamespace
                    WHERE n.nspname = $1 AND c.relname = $2""",
                 schema,
