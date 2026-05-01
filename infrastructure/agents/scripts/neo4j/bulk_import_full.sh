@@ -78,7 +78,7 @@ COPY (
 SET statement_timeout = 0;
 COPY (
   SELECT
-    encode(sha256((coalesce(nom,'')||'|'||coalesce(prenom,'')||'|'||coalesce(date_naissance,''))::bytea), 'hex') AS \"uid:ID(Person)\",
+    md5(coalesce(nom,'')||'|'||coalesce(prenom,'')||'|'||coalesce(date_naissance,'')) AS \"uid:ID(Person)\",
     coalesce(nom, '') AS nom,
     coalesce(prenom, '') AS prenom,
     coalesce(prenom || ' ' || nom, '') AS full_name,
@@ -100,7 +100,7 @@ COPY (
 SET statement_timeout = 0;
 COPY (
   SELECT
-    encode(sha256((coalesce(p.individu_nom,'')||'|'||coalesce(p.individu_prenoms[1],'')||'|'||coalesce(p.individu_date_naissance,''))::bytea), 'hex') AS \":START_ID(Person)\",
+    md5(coalesce(p.individu_nom,'')||'|'||coalesce(p.individu_prenoms[1],'')||'|'||coalesce(p.individu_date_naissance,'')) AS \":START_ID(Person)\",
     p.siren AS \":END_ID(Company)\",
     coalesce(p.individu_role, '') AS role,
     coalesce(p.actif, false) AS \"actif:boolean\",
