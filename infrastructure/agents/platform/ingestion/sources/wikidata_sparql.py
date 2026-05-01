@@ -36,11 +36,25 @@ HEADERS = {
 }
 
 QUERY_HUMANS_FR = """SELECT ?qid ?label ?birth ?occupation ?wikipedia ?orcid ?employerLabel WHERE {
+  # Filtrage humain FR avec occupation business pour éviter timeout Wikidata
+  # endpoint sur la query "tous les humains FR" (~1.5M résultats → 60s timeout).
+  # On cible : CEO, founder, businessperson, entrepreneur, manager — soit
+  # ~50K humains FR, scope M&A relevant.
+  VALUES ?occupation {
+    wd:Q484876   # chief executive officer
+    wd:Q43845    # businessperson
+    wd:Q131524   # entrepreneur
+    wd:Q3387717  # manager
+    wd:Q1607826  # executive
+    wd:Q5710907  # founder
+    wd:Q14467526 # business owner
+    wd:Q806798   # investor
+  }
   ?qid wdt:P31 wd:Q5 .
   ?qid wdt:P27 wd:Q142 .
+  ?qid wdt:P106 ?occupation .
   OPTIONAL { ?qid rdfs:label ?label FILTER(LANG(?label) = "fr") }
   OPTIONAL { ?qid wdt:P569 ?birth }
-  OPTIONAL { ?qid wdt:P106 ?occupation }
   OPTIONAL { ?qid wdt:P496 ?orcid }
   OPTIONAL { ?qid wdt:P108 ?employer .
              ?employer rdfs:label ?employerLabel FILTER(LANG(?employerLabel)="fr") }
