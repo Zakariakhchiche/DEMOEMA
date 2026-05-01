@@ -13,6 +13,10 @@
 --   - On retient les leaks (source_leak) et le pays Officer.
 -- ============================================================================
 
+-- Désactive le timeout pour cette session (CREATE MV peut durer plusieurs minutes
+-- sur le JOIN officers EU × dirigeants_index 8M sans index UPPER(unaccent(...))).
+SET statement_timeout = 0;
+
 DROP MATERIALIZED VIEW IF EXISTS silver.icij_offshore_match CASCADE;
 
 CREATE MATERIALIZED VIEW silver.icij_offshore_match AS
