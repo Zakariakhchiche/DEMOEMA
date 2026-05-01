@@ -1419,98 +1419,102 @@ async def copilot_stream_endpoint(q: str = Query(...)):
             siren_val = siren_match.group(1)
             datalake_ok = False
             try:
-                pool = getattr(app.state, "dl_pool", None)
-                if pool is not None:
-                    row = await pool.fetchrow(
-                        """
-                        SELECT
-                          em.siren,
-                          em.denomination,
-                          em.ca_latest::float8 AS ca,
-                          em.resultat_net_latest::float8 AS ebitda_proxy,
-                          em.naf_libelle,
-                          em.code_ape,
-                          em.adresse_dept AS dept,
-                          em.ville,
-                          em.effectif_moyen_latest::int AS effectif,
-                          em.insee_tranche_effectifs AS tranche_effectif,
-                          sm.deal_score::int AS deal_score,
-                          sm.tier,
-                          (SELECT COUNT(*)::int
-                             FROM silver.inpi_dirigeants
-                             WHERE em.siren::char(9) = ANY(sirens_mandats)) AS n_dirigeants
-                        FROM gold.entreprises_master em
-                        LEFT JOIN gold.scoring_ma sm USING (siren)
-                        WHERE em.siren = $1
-                        """,
-                        siren_val,
+                # Fix G2 part 2 : utiliser l'endpoint /api/datalake/fiche/{siren}
+                # interne plutot que de re-implementer la SQL (les noms de colonnes
+                # gold.entreprises_master different de ceux que j'avais codes en dur :
+                # ca_dernier vs ca_latest, ebitda_dernier vs resultat_net_latest,
+                # adresse_commune vs ville, etc.). L'endpoint existant fait deja
+                # la fusion gold/silver et expose les bons alias.
+                async with httpx.AsyncClient(timeout=10) as client:
+                    fiche_resp = await client.get(
+                        f"http://localhost:8000/api/datalake/fiche/{siren_val}"
                     )
-                    if row and row["denomination"]:
-                        datalake_ok = True
-                        nom = row["denomination"]
-                        ville = row["ville"] or ""
-                        dept = row["dept"] or ""
-                        naf_lib = row["naf_libelle"] or row["code_ape"] or ""
-                        ca = float(row["ca"]) if row["ca"] is not None else 0.0
-                        ebitda = float(row["ebitda_proxy"]) if row["ebitda_proxy"] is not None else None
-                        effectif = row["effectif"] or row["tranche_effectif"] or "N/A"
-                        deal_score = row["deal_score"]
-                        tier = row["tier"]
-                        n_dirigeants = row["n_dirigeants"] or 0
+                    if fiche_resp.status_code == 200:
+                        data = fiche_resp.json()
+                        fiche_data = data.get("fiche") or {}
+                        dirigeants_data = data.get("dirigeants") or []
+                        nom = fiche_data.get("denomination")
+                        if nom:
+                            datalake_ok = True
+                            ville = fiche_data.get("adresse_commune") or fiche_data.get("ville") or ""
+                            dept = fiche_data.get("adresse_dept") or fiche_data.get("dept") or ""
+                            naf_lib = (
+                                fiche_data.get("naf_libelle")
+                                or fiche_data.get("libelle_activite_principale")
+                                or fiche_data.get("code_ape")
+                                or ""
+                            )
+                            ca = fiche_data.get("ca_dernier") or fiche_data.get("ca_latest") or 0
+                            ebitda = fiche_data.get("ebitda_dernier") or fiche_data.get("resultat_net_latest")
+                            effectif_v = (
+                                fiche_data.get("effectif_exact")
+                                or fiche_data.get("effectif_moyen_latest")
+                                or fiche_data.get("tranche_effectifs")
+                                or "N/A"
+                            )
+                            deal_score = fiche_data.get("deal_score") or fiche_data.get("pro_ma_score")
+                            tier = fiche_data.get("tier")
+                            n_dirigeants = (
+                                fiche_data.get("n_dirigeants")
+                                or len(dirigeants_data)
+                                or 0
+                            )
 
-                        def _fmt_eur(v):
-                            if v is None or v == 0:
-                                return "N/A"
-                            if v >= 1_000_000_000:
-                                return f"{v/1e9:.1f} Md€"
-                            if v >= 1_000_000:
-                                return f"{v/1e6:.1f} M€"
-                            return f"{v/1e3:.0f} k€"
+                            def _fmt_eur(v):
+                                try:
+                                    v = float(v) if v is not None else 0.0
+                                except (TypeError, ValueError):
+                                    return "N/A"
+                                if not v or v == 0:
+                                    return "N/A"
+                                if v >= 1_000_000_000:
+                                    return f"{v/1e9:.1f} Md€"
+                                if v >= 1_000_000:
+                                    return f"{v/1e6:.1f} M€"
+                                return f"{v/1e3:.0f} k€"
 
-                        ca_str = _fmt_eur(ca)
-                        ebitda_str = _fmt_eur(ebitda) if ebitda is not None else "N/A"
+                            ca_str = _fmt_eur(ca)
+                            ebitda_str = _fmt_eur(ebitda) if ebitda is not None else "N/A"
 
-                        # Top 3 dirigeants : nom + qualité (mandat principal)
-                        dir_rows = await pool.fetch(
-                            """
-                            SELECT prenom, nom, qualite
-                            FROM silver.inpi_dirigeants
-                            WHERE $1::char(9) = ANY(sirens_mandats)
-                            LIMIT 3
-                            """,
-                            siren_val,
-                        )
-                        rep_lines = "\n".join([
-                            f"  - {(r.get('prenom') or '').strip()} {(r.get('nom') or '').strip()}"
-                            + (f" ({r.get('qualite')})" if r.get('qualite') else "")
-                            for r in dir_rows
-                        ]) or "  N/A"
+                            # Top 3 dirigeants depuis le payload fiche
+                            rep_items = []
+                            for d in dirigeants_data[:3]:
+                                if not isinstance(d, dict):
+                                    continue
+                                prenom = (d.get("prenom") or d.get("prenoms") or "").strip()
+                                nom_d = (d.get("nom") or d.get("nom_de_famille") or "").strip()
+                                qualite = d.get("qualite") or d.get("role") or d.get("fonction")
+                                line = f"  - {prenom} {nom_d}".rstrip()
+                                if qualite:
+                                    line += f" ({qualite})"
+                                rep_items.append(line)
+                            rep_lines = "\n".join(rep_items) or "  N/A"
 
-                        score_line = ""
-                        if deal_score is not None:
-                            tier_str = f" — tier {tier}" if tier else ""
-                            score_line = f"- **Score M&A** : {deal_score}/100{tier_str}\n"
+                            score_line = ""
+                            if deal_score is not None:
+                                tier_str = f" — tier {tier}" if tier else ""
+                                score_line = f"- **Score M&A** : {deal_score}/100{tier_str}\n"
 
-                        text = (
-                            f"**{nom}** — SIREN {siren_val}\n\n"
-                            f"- **Siège** : {ville}{', ' + dept if dept else ''}\n"
-                            f"- **Activité** : {naf_lib or 'N/A'}\n"
-                            f"- **CA** : {ca_str}  |  **EBITDA proxy** : {ebitda_str}\n"
-                            f"- **Effectif** : {effectif}  |  **Dirigeants actifs** : {n_dirigeants}\n"
-                            f"{score_line}\n"
-                            f"**Top dirigeants :**\n{rep_lines}\n"
-                        )
-                        chunk_size = 40
-                        for i in range(0, len(text), chunk_size):
-                            yield f"data: {json.dumps({'chunk': text[i:i+chunk_size]})}\n\n"
-                        yield (
-                            "data: " + json.dumps({
-                                "done": True,
-                                "source": "silver.inpi_comptes ⨝ silver.inpi_dirigeants ⨝ gold.scoring_ma",
-                                "targets_updated": False,
-                            }) + "\n\n"
-                        )
-                        return
+                            text = (
+                                f"**{nom}** — SIREN {siren_val}\n\n"
+                                f"- **Siège** : {ville}{', ' + dept if dept else ''}\n"
+                                f"- **Activité** : {naf_lib or 'N/A'}\n"
+                                f"- **CA** : {ca_str}  |  **EBITDA proxy** : {ebitda_str}\n"
+                                f"- **Effectif** : {effectif_v}  |  **Dirigeants actifs** : {n_dirigeants}\n"
+                                f"{score_line}\n"
+                                f"**Top dirigeants :**\n{rep_lines}\n"
+                            )
+                            chunk_size = 40
+                            for i in range(0, len(text), chunk_size):
+                                yield f"data: {json.dumps({'chunk': text[i:i+chunk_size]})}\n\n"
+                            yield (
+                                "data: " + json.dumps({
+                                    "done": True,
+                                    "source": "silver.inpi_comptes ⨝ silver.inpi_dirigeants ⨝ gold.scoring_ma",
+                                    "targets_updated": False,
+                                }) + "\n\n"
+                            )
+                            return
             except Exception as e:
                 print(f"[Stream] SIREN datalake lookup error: {e}")
 
