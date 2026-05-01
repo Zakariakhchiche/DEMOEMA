@@ -9,6 +9,51 @@
 import { datalakeApi } from "@/lib/api";
 import type { Target, Person } from "./types";
 
+/** Extrait les dirigeants cités dans la réponse texte du LLM via le pattern
+ * "Prenom LASTNAME (XX ans)". Couvre les formats markdown bold/non-bold et les
+ * accents. Dédupe sur (prenom, nom). Retourne des Person minimalistes : nom +
+ * age remontent du texte ; score/mandats/sci restent à 0 (la fiche complète
+ * est lazy-loadée au click sur le bouton Fiche → /api/datalake/dirigeant/...).
+ *
+ * Stratégie : quand le LLM enumere des dirigeants nommés (ex. "Serge LUFTMAN
+ * 83 ans, Yves DELIEUVIN 76 ans"), on veut afficher CES cards en bas, pas le
+ * top-N pro_ma_score indépendant qui retournait des homonymes hors-sujet.
+ */
+export function extractDirigeantsFromText(text: string): Person[] {
+  if (!text) return [];
+  // Group 1: prénom (commence majuscule, peut avoir minuscules + tirets/accents)
+  // Group 2: NOM en MAJUSCULES (au moins 2 chars, peut avoir tirets)
+  // Group 3: âge (2-3 chiffres)
+  const re = /\b([A-ZÀ-ÖØ-Ý][a-zà-öø-ÿ\-']{1,30})\s+([A-ZÀ-ÖØ-Ý][A-ZÀ-ÖØ-Ý\-']{1,40})\s*\(?\s*(\d{2,3})\s*ans\)?/g;
+  const seen = new Set<string>();
+  const persons: Person[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    const prenom = m[1];
+    const nom = m[2];
+    const age = parseInt(m[3], 10);
+    if (age < 18 || age > 110) continue;
+    const key = `${prenom.toUpperCase()}|${nom.toUpperCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    persons.push({
+      id: `p_extracted_${persons.length}_${nom}`,
+      nom: `${prenom} ${nom}`,
+      age,
+      score: 0,
+      mandats: 0,
+      sci: 0,
+      entreprises: [],
+      event: null,
+      dept: "",
+      nom_raw: nom,
+      prenom_raw: prenom,
+      date_naissance: null,
+    });
+  }
+  return persons;
+}
+
 function fmtEur(value: number | null | undefined): string {
   if (value == null || isNaN(Number(value))) return "—";
   const v = Number(value);
