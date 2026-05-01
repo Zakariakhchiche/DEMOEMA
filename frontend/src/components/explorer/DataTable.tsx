@@ -3,6 +3,16 @@
 import { useState, useMemo } from "react";
 import { Loader2, ArrowDown, ArrowUp, AlertTriangle, ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { parseNumericLoose, formatEurCompact, formatCompactNumber } from "@/lib/dem/format";
+
+// Heuristique : noms de colonnes considérés comme montant € (CA, EBITDA,
+// résultat, capital…). Si match → formatEurCompact() avec "M€"/"Md€",
+// sinon formatCompactNumber() (pas de symbole monétaire).
+const EUR_COL_RE = /^(ca|ebitda|chiffre|resultat|résultat|capital|montant|valeur|prix|actif|passif|dettes?)/i;
+const EUR_COL_SUFFIX_RE = /_(ca|eur|euro|amount|price|value)$/i;
+function isMonetaryColumn(col: string): boolean {
+  return EUR_COL_RE.test(col) || EUR_COL_SUFFIX_RE.test(col);
+}
 
 interface Props {
   table: string;
@@ -21,14 +31,21 @@ interface Props {
   onRowClick?: (row: Record<string, unknown>) => void;
 }
 
-function formatCell(v: unknown): string {
+function formatCell(v: unknown, col?: string): string {
   if (v === null || v === undefined) return "—";
   if (typeof v === "boolean") return v ? "✓" : "✗";
-  if (typeof v === "number") {
-    if (Math.abs(v) >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-    if (Math.abs(v) >= 1_000) return v.toLocaleString("fr-FR");
-    return String(v);
+
+  // Audit QA 2026-05-01 (SCRUM-NEW-14) : Postgres numeric remontait des CA en
+  // notation scientifique (`2.66540E+9`, `9.9000E+8`). parseNumericLoose les
+  // détecte et on route vers formatEurCompact (Md€/M€/K€) si la colonne est
+  // un montant, sinon formatCompactNumber (pas de symbole).
+  if (typeof v === "number" || (typeof v === "string" && parseNumericLoose(v) !== null)) {
+    if (col && isMonetaryColumn(col)) {
+      return formatEurCompact(v);
+    }
+    return formatCompactNumber(v);
   }
+
   if (typeof v === "object") {
     try {
       return JSON.stringify(v).slice(0, 80);
@@ -186,7 +203,7 @@ export function DataTable({
                       className="max-w-[280px] truncate px-4 py-2 font-mono tabular-nums text-zinc-300"
                       title={row[col] != null ? String(row[col]) : ""}
                     >
-                      {formatCell(row[col])}
+                      {formatCell(row[col], col)}
                     </td>
                   ))}
                   <td className="px-2 py-2">
