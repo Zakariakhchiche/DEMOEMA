@@ -681,15 +681,64 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
                 }
 
         elif name == "search_sanctions":
+            # Audit QA 2026-05-01 : OpenSanctions API retournait 503 sur 3% des
+            # questions compliance, sans fallback → degraded UX. Patch :
+            # retry exponentiel 3 tentatives + fallback direct silver.opensanctions
+            # (280k rows déjà chargées dans le datalake) avec flag `degraded:true`
+            # pour que le LLM mentionne le mode dégradé au user.
             params = {"limit": args.get("limit", 10)}
             if args.get("entity_name"):
                 params["search"] = args["entity_name"]
-            async with httpx.AsyncClient(timeout=10) as client:
-                r = await client.get(f"{datalake_base}/api/datalake/silver/sanctions", params=params)
-                if r.status_code == 200:
-                    data = r.json()
-                    return {"n_sanctions": len(data.get("rows", [])), "sanctions": data.get("rows", [])[:10]}
-                return {"error": f"HTTP {r.status_code}", "sanctions": []}
+
+            # Retry primary endpoint (silver.sanctions = vue consolidée AMF/ICIJ/etc)
+            last_status: int | None = None
+            for attempt in range(3):
+                try:
+                    async with httpx.AsyncClient(timeout=15) as client:
+                        r = await client.get(f"{datalake_base}/api/datalake/silver/sanctions", params=params)
+                        last_status = r.status_code
+                        if r.status_code == 200:
+                            data = r.json()
+                            return {
+                                "n_sanctions": len(data.get("rows", [])),
+                                "sanctions": data.get("rows", [])[:10],
+                                "source": "silver.sanctions",
+                            }
+                        if r.status_code in (502, 503, 504) and attempt < 2:
+                            await asyncio.sleep(2 ** attempt)
+                            continue
+                        break  # 4xx ou erreur définitive → tente fallback
+                except (httpx.TimeoutException, httpx.ConnectError):
+                    if attempt < 2:
+                        await asyncio.sleep(2 ** attempt)
+                        continue
+                    break
+
+            # Fallback : interroger silver.opensanctions directement
+            # (sous-ensemble, mais 280k rows = couvre l'essentiel des sanctions UE/OFAC)
+            try:
+                async with httpx.AsyncClient(timeout=15) as client:
+                    r = await client.get(
+                        f"{datalake_base}/api/datalake/silver/opensanctions",
+                        params=params,
+                    )
+                    if r.status_code == 200:
+                        data = r.json()
+                        return {
+                            "n_sanctions": len(data.get("rows", [])),
+                            "sanctions": data.get("rows", [])[:10],
+                            "source": "silver.opensanctions",
+                            "degraded": True,
+                            "degraded_reason": f"silver.sanctions HTTP {last_status} — fallback OpenSanctions cache (280k rows)",
+                        }
+            except Exception:
+                pass
+
+            return {
+                "error": f"HTTP {last_status} (sanctions service unavailable, no fallback rows)",
+                "sanctions": [],
+                "degraded": True,
+            }
 
         elif name == "search_signaux_bodacc":
             params: dict = {"limit": args.get("limit", 10)}
