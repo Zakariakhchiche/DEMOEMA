@@ -5,6 +5,7 @@ Pydantic Settings dans une PR séparée).
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from typing import AsyncIterator
@@ -691,15 +692,36 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
                 return {"error": f"HTTP {r.status_code}", "sanctions": []}
 
         elif name == "search_signaux_bodacc":
-            params = {"limit": args.get("limit", 10)}
+            params: dict = {"limit": args.get("limit", 10)}
+            # Filtres composables (audit QA 2026-05-01: les params dept/type_avis/days
+            # étaient déclarés dans la signature LLM mais ignorés côté impl → faux positifs).
+            filters = []
             if args.get("siren"):
-                params["search"] = args["siren"]
+                filters.append(f"siren.eq.{args['siren']}")
+            if args.get("dept"):
+                # zfill pour normaliser "1" → "01" car colonne BODACC stocke à 2 digits
+                filters.append(f"dept.eq.{str(args['dept']).zfill(2)}")
+            if args.get("type_avis"):
+                filters.append(f"type_avis.eq.{args['type_avis']}")
+            if args.get("days"):
+                try:
+                    n_days = int(args["days"])
+                    filters.append(f"date_publication.gte.now()-interval'{n_days}days'")
+                except (TypeError, ValueError):
+                    pass
+            if filters:
+                params["filter"] = ",".join(filters)
             async with httpx.AsyncClient(timeout=10) as client:
                 r = await client.get(f"{datalake_base}/api/datalake/silver/bodacc_annonces", params=params)
                 if r.status_code == 200:
                     data = r.json()
-                    return {"n_signaux": len(data.get("rows", [])), "signaux": data.get("rows", [])[:10]}
-                return {"error": f"HTTP {r.status_code}", "signaux": []}
+                    rows = data.get("rows", [])
+                    return {
+                        "n_signaux": len(rows),
+                        "signaux": rows[:10],
+                        "filters_applied": filters or ["(aucun, top {} dernières)".format(params["limit"])],
+                    }
+                return {"error": f"HTTP {r.status_code}", "signaux": [], "filters_applied": filters}
 
         # ====== Sourcing avancé ======
         elif name == "search_dirigeants_60plus":
@@ -890,10 +912,18 @@ _SYSTEM_PROMPT_TOOLS = (
     "- search_dvf_zones : transactions immobilières par CP/dept\n"
     "**Structure groupe** :\n"
     "- get_groupe_filiation : filiales + maison mère (GLEIF + INPI PM + BODACC fusions)\n\n"
+    "**RÈGLE ANTI-HALLUCINATION LABELS** : si la query commence par un identifiant interne "
+    "(ex: DL12, DL28-, Q5/55, UI3, BUG-42, TEST-7), IGNORE totalement ce label. Ne l'interprète "
+    "PAS comme code département FR, code postal, montant, NAF ou tout autre signal métier — "
+    "c'est un identifiant de test/audit, jamais une donnée. Concentre-toi uniquement sur le texte "
+    "qui suit le label. Exemples : 'DL28 NAF 7010Z' = sourcing NAF 7010Z TOUTES géographies "
+    "(PAS département 28 Eure-et-Loir) ; 'Q1/55 fusion vs acquisition' = définition M&A "
+    "(PAS sociétés du dept 1 ni T1 2026).\n\n"
     "**RÈGLE CRITIQUE** : tu DOIS appeler les tools pour répondre. Ne jamais halluciner de données.\n"
     "Si on te demande une entreprise (TotalEnergies, Renault, Carrefour...), appelle search_cibles ou get_fiche_entreprise.\n"
     "Combine plusieurs tools si pertinent (ex: get_fiche + check_offshore + check_lobbying pour DD).\n"
     "Si tu ne trouves rien, dis-le clairement plutôt qu'inventer.\n"
+    "Si un tool retourne `\"degraded\": true` (fallback cache local), mentionne-le explicitement à l'utilisateur.\n"
 )
 
 
@@ -921,7 +951,7 @@ async def copilot_ai_query_stream_with_tools(
         {"role": "user", "content": query},
     ]
 
-    MAX_ITERATIONS = 12  # bumpé de 5 → 12 pour permettre orchestration multi-tools (DD complète, sourcing complexe)
+    MAX_ITERATIONS = 20  # bumpé 12→20 (audit QA 2026-05-01: 8% des Q complexes hit le plafond avec 12)
     tool_results_collected: list[dict] = []  # checkpoint : retient les tools réussis pour fallback en synthèse
     for iteration in range(MAX_ITERATIONS):
         try:
@@ -948,16 +978,50 @@ async def copilot_ai_query_stream_with_tools(
                 # Si le LLM veut appeler des tools → exécute et re-loop
                 if tool_calls:
                     messages.append(msg)  # ajoute la réponse assistant avec tool_calls
+
+                    # Parse args + group par SIREN cible commun pour préserver l'ordre causal
+                    # (ex: get_fiche puis get_scoring du même SIREN doit rester séquentiel —
+                    # les autres tools s'exécutent en parallèle).
+                    parsed = []
                     for tc in tool_calls:
-                        fn_name = tc["function"]["name"]
                         try:
                             fn_args = json.loads(tc["function"]["arguments"])
                         except json.JSONDecodeError:
                             fn_args = {}
-                        result = await _execute_tool(fn_name, fn_args, datalake_base)
-                        # Cap résultat à 8000 chars pour ne pas exploser le context
+                        parsed.append((tc, tc["function"]["name"], fn_args))
+
+                    # SIREN-aware ordering: tools partageant le même siren restent groupés
+                    # et s'exécutent séquentiellement ; les groupes différents en parallèle.
+                    by_siren: dict[str, list] = {}
+                    standalone: list = []
+                    for tc, fn_name, fn_args in parsed:
+                        siren = str(fn_args.get("siren") or "").strip()
+                        if siren:
+                            by_siren.setdefault(siren, []).append((tc, fn_name, fn_args))
+                        else:
+                            standalone.append((tc, fn_name, fn_args))
+
+                    async def _run_group(group: list) -> list[tuple]:
+                        """Exécute séquentiellement un groupe (même siren)."""
+                        out = []
+                        for tc, fn_name, fn_args in group:
+                            r = await _execute_tool(fn_name, fn_args, datalake_base)
+                            out.append((tc, fn_name, fn_args, r))
+                        return out
+
+                    # Chaque groupe siren = 1 task (séquentielle). Standalone = 1 task chacun (parallèle).
+                    coroutines = [_run_group(g) for g in by_siren.values()]
+                    coroutines += [_run_group([s]) for s in standalone]
+                    results_groups = await asyncio.gather(*coroutines)
+
+                    # Aplatir et préserver l'ordre original des tool_calls
+                    flat: dict[str, tuple] = {}  # tool_call_id -> (fn_name, fn_args, result)
+                    for grp in results_groups:
+                        for tc, fn_name, fn_args, result in grp:
+                            flat[tc["id"]] = (fn_name, fn_args, result)
+                    for tc in tool_calls:
+                        fn_name, fn_args, result = flat[tc["id"]]
                         result_str = json.dumps(result, ensure_ascii=False)[:8000]
-                        # Checkpoint : garde une trace pour fallback si on hit max_iter
                         if not result.get("error"):
                             tool_results_collected.append({"tool": fn_name, "args": fn_args, "result_preview": result_str[:500]})
                         messages.append({
