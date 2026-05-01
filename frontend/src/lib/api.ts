@@ -141,6 +141,24 @@ export const datalakeApi = {
       presse: Record<string, unknown>[];
     }>(`/api/datalake/fiche/${siren}`),
 
+  /** Fiche complète dirigeant : INPI identité + SCI patrimoine + OSINT + sanctions + DVF.
+   * Backend route /dirigeant/{nom}/{prenom}[/{date_naissance}]. */
+  dirigeantFull: (nom: string, prenom: string, dateNaissance?: string) => {
+    const path = dateNaissance
+      ? `/api/datalake/dirigeant/${encodeURIComponent(nom)}/${encodeURIComponent(prenom)}/${encodeURIComponent(dateNaissance)}`
+      : `/api/datalake/dirigeant/${encodeURIComponent(nom)}/${encodeURIComponent(prenom)}`;
+    return jget<{
+      identity: Record<string, unknown> | null;
+      sci_patrimoine: Record<string, unknown> | null;
+      sci_value_total: Record<string, unknown> | null;
+      sci_values_per_company: Record<string, unknown>[];
+      osint: Record<string, unknown> | null;
+      osint_raw: Record<string, unknown> | null;
+      sanctions: Record<string, unknown>[];
+      dvf_zones: Record<string, unknown> | null;
+    }>(path);
+  },
+
   /** Scoring v3 PRO : 4 axes business + tier + percentile + EV estimée */
   scoringDetail: (siren: string) =>
     jget<{

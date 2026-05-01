@@ -95,6 +95,7 @@ export function rowToPerson(r: Record<string, unknown>, idx = 0): Person {
   const nom = str(r.nom);
   const sirens = Array.isArray(r.sirens_mandats) ? (r.sirens_mandats as string[]) : [];
   const denos = Array.isArray(r.denominations) ? (r.denominations as string[]) : [];
+  const dn = str(r.date_naissance);
   return {
     id: `p_${idx}_${nom}`,
     nom: `${prenom} ${nom}`.trim(),
@@ -105,6 +106,9 @@ export function rowToPerson(r: Record<string, unknown>, idx = 0): Person {
     entreprises: denos.slice(0, 4),
     event: null,
     dept: str(r.dept) || "",
+    nom_raw: nom || undefined,
+    prenom_raw: prenom || undefined,
+    date_naissance: dn || null,
   };
 }
 

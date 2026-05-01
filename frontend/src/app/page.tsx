@@ -11,9 +11,10 @@ import { AuditView } from "@/components/dem/AuditView";
 import { CompareView } from "@/components/dem/CompareView";
 import { NetworkGraphView } from "@/components/dem/NetworkGraphView";
 import { TargetSheet } from "@/components/dem/TargetSheet";
+import { PersonSheet } from "@/components/dem/PersonSheet";
 import { CmdPalette } from "@/components/dem/CmdPalette";
 import { PitchModal } from "@/components/dem/PitchModal";
-import type { Mode, Target, Density } from "@/lib/dem/types";
+import type { Mode, Target, Density, Person } from "@/lib/dem/types";
 
 const VALID_MODES: Mode[] = ["dashboard", "chat", "pipeline", "watchlist", "explorer", "graph", "compare", "audit"];
 
@@ -30,6 +31,7 @@ export default function Home() {
   const [density] = useState<Density>("comfortable");
   const [showSidebar, setShowSidebar] = useState(true);
   const [openTarget, setOpenTarget] = useState<Target | null>(null);
+  const [openPerson, setOpenPerson] = useState<Person | null>(null);
   const [pitchTarget, setPitchTarget] = useState<Target | null>(null);
   const [showCmdK, setShowCmdK] = useState(false);
 
@@ -93,6 +95,7 @@ export default function Home() {
           <ChatPanel
             density={density}
             onOpenTarget={setOpenTarget}
+            onOpenPerson={setOpenPerson}
             onPitch={setPitchTarget}
             showSidebar={showSidebar}
           />
@@ -111,6 +114,9 @@ export default function Home() {
           onClose={() => setOpenTarget(null)}
           onPitch={() => setPitchTarget(openTarget)}
         />
+      )}
+      {openPerson && (
+        <PersonSheet person={openPerson} onClose={() => setOpenPerson(null)} />
       )}
       {pitchTarget && <PitchModal target={pitchTarget} onClose={() => setPitchTarget(null)} />}
       {showCmdK && (
