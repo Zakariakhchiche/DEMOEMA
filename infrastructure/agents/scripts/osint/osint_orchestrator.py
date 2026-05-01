@@ -153,10 +153,11 @@ WITH targets AS (
   -- LEFT JOIN gold/silver (peut ne pas exister sur fresh boot)
   LEFT JOIN silver.inpi_dirigeants d
     ON d.nom = p.individu_nom
-   AND d.prenom = (p.individu_prenoms->>0)
-   AND d.date_naissance = p.individu_date_naissance::date
-  -- Optional join gold.dirigeants_master pour pro_ma_score (peut ne pas exister)
-  LEFT JOIN gold.dirigeants_master gd ON gd.person_uid = d.person_uid
+   AND d.prenom = p.individu_prenoms[1]
+   AND d.date_naissance::text = p.individu_date_naissance
+  -- Optional join gold.dirigeants_master pour pro_ma_score
+  -- silver.inpi_dirigeants n'a pas person_uid : join sur (nom, prenom)
+  LEFT JOIN gold.dirigeants_master gd ON gd.nom = d.nom AND gd.prenom = d.prenom
   WHERE p.type_de_personne = 'INDIVIDU'
     AND p.actif = true
     AND p.individu_nom IS NOT NULL
@@ -185,8 +186,8 @@ SELECT t.*
 FROM targets t
 JOIN bronze.inpi_formalites_entreprises e ON e.siren = t.siren
 LEFT JOIN silver.inpi_dirigeants d
-  ON d.nom = t.individu_nom AND d.prenom = (t.individu_prenoms->>0)
-LEFT JOIN gold.dirigeants_master gd ON gd.person_uid = d.person_uid
+  ON d.nom = t.individu_nom AND d.prenom = t.individu_prenoms[1]
+LEFT JOIN gold.dirigeants_master gd ON gd.nom = d.nom AND gd.prenom = d.prenom
 ORDER BY
   -- Priorité 1 : pro_ma_score si dispo, sinon montant_capital, sinon nb mandats
   coalesce(gd.pro_ma_score, 0) DESC,

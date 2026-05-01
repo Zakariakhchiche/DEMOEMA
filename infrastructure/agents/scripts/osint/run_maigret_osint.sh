@@ -76,8 +76,14 @@ preflight() {
 # ─── DSN derivation ──────────────────────────────────────────────────────
 derive_dsn() {
     blue "[2/5] Deriving DSN from .env..."
-    set -a; . "${REPO_DIR}/.env"; set +a
-    local pwd_var="${DATALAKE_POSTGRES_ROOT_PASSWORD:-}"
+    # Lecture safe sans `source` : un .env peut contenir des caractères
+    # spéciaux non-quotés ('(', '$', backticks…) qui font crasher bash.
+    # On extrait juste les valeurs brutes via grep+cut, pas d'interprétation.
+    local pwd_var
+    pwd_var=$(grep -E '^DATALAKE_POSTGRES_ROOT_PASSWORD=' "${REPO_DIR}/.env" | head -1 | cut -d= -f2-)
+    # Strip surrounding quotes éventuels
+    pwd_var="${pwd_var%\"}"; pwd_var="${pwd_var#\"}"
+    pwd_var="${pwd_var%\'}"; pwd_var="${pwd_var#\'}"
     [ -n "$pwd_var" ] || die "DATALAKE_POSTGRES_ROOT_PASSWORD missing in .env"
     # Internal Docker network DNS: agents-platform → datalake-db:5432
     DSN="postgres://postgres:${pwd_var}@datalake-db:5432/datalake"
