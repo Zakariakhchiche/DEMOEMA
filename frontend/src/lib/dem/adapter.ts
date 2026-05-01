@@ -9,35 +9,40 @@
 import { datalakeApi } from "@/lib/api";
 import type { Target, Person } from "./types";
 
-/** Extrait les dirigeants cités dans la réponse texte du LLM via le pattern
- * "Prenom LASTNAME (XX ans)". Couvre les formats markdown bold/non-bold et les
- * accents. Dédupe sur (prenom, nom). Retourne des Person minimalistes : nom +
- * age remontent du texte ; score/mandats/sci restent à 0 (la fiche complète
- * est lazy-loadée au click sur le bouton Fiche → /api/datalake/dirigeant/...).
+/** Extrait les dirigeants cités dans la réponse texte du LLM. Couvre :
+ *   - "Serge LUFTMAN (83 ans)"      -- parens
+ *   - "Éric BACONNIER — 72 ans"     -- em-dash
+ *   - "Yves DELIEUVIN, 76 ans"      -- virgule
+ *   - "Véronique DE SAINT JULLE DE COLMONT — 71 ans" -- nom multi-mots
  *
- * Stratégie : quand le LLM enumere des dirigeants nommés (ex. "Serge LUFTMAN
- * 83 ans, Yves DELIEUVIN 76 ans"), on veut afficher CES cards en bas, pas le
- * top-N pro_ma_score indépendant qui retournait des homonymes hors-sujet.
+ * Group 1 : prénom (Capitalize-then-lowercase + accents/tirets)
+ * Group 2 : 1 à 5 mots en majuscules (LASTNAME[s])
+ * Group 3 : âge entier 18-110
+ *
+ * Dédupe sur (prenom upper | nom upper). Retourne des Person minimalistes
+ * (score/mandats/sci à 0). Le drawer Fiche lazy-load la richesse via
+ * /api/datalake/dirigeant/{nom}/{prenom}.
  */
 export function extractDirigeantsFromText(text: string): Person[] {
   if (!text) return [];
-  // Group 1: prénom (commence majuscule, peut avoir minuscules + tirets/accents)
-  // Group 2: NOM en MAJUSCULES (au moins 2 chars, peut avoir tirets)
-  // Group 3: âge (2-3 chiffres)
-  const re = /\b([A-ZÀ-ÖØ-Ý][a-zà-öø-ÿ\-']{1,30})\s+([A-ZÀ-ÖØ-Ý][A-ZÀ-ÖØ-Ý\-']{1,40})\s*\(?\s*(\d{2,3})\s*ans\)?/g;
+  // Capture multi-mot lastname : (?:[CAPS]+(?:\s+[CAPS]+)*) jusqu'à 5 mots
+  // Tolère em/en-dash, hyphen, virgule, deux-points, espaces avant l'âge.
+  // (?<![A-Za-zÀ-ÿ]) en lookbehind négatif au lieu de \b car \b en regex JS
+  // ne fonctionne pas devant les chars Unicode non-ASCII (Éric, Über, etc.).
+  const re = /(?<![A-Za-zÀ-ÿ])([A-ZÀ-ÖØ-Ý][a-zà-öø-ÿ\-']{1,30})\s+([A-ZÀ-ÖØ-Ý][A-ZÀ-ÖØ-Ý\-']{1,40}(?:\s+[A-ZÀ-ÖØ-Ý][A-ZÀ-ÖØ-Ý\-']{1,40}){0,4})\s*[—–\-,:;\s\(]+(\d{2,3})\s*ans/g;
   const seen = new Set<string>();
   const persons: Person[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
-    const prenom = m[1];
-    const nom = m[2];
+    const prenom = m[1].trim();
+    const nom = m[2].trim().replace(/\s+/g, " ");
     const age = parseInt(m[3], 10);
     if (age < 18 || age > 110) continue;
     const key = `${prenom.toUpperCase()}|${nom.toUpperCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
     persons.push({
-      id: `p_extracted_${persons.length}_${nom}`,
+      id: `p_extracted_${persons.length}_${nom.replace(/\s+/g, "_")}`,
       nom: `${prenom} ${nom}`,
       age,
       score: 0,
