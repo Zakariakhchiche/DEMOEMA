@@ -13,11 +13,12 @@ import { formatSiren } from "@/lib/dem/format";
 import { SUGGESTIONS_INITIAL } from "@/lib/dem/data";
 import { fetchTargets, fetchPersons } from "@/lib/dem/adapter";
 import { streamCopilot } from "@/lib/api";
-import type { ChatMsg, AiMessageData, Target, Density } from "@/lib/dem/types";
+import type { ChatMsg, AiMessageData, Target, Density, Person } from "@/lib/dem/types";
 
 interface Props {
   density: Density;
   onOpenTarget: (t: Target) => void;
+  onOpenPerson?: (p: Person) => void;
   onPitch: (t: Target) => void;
   showSidebar: boolean;
 }
@@ -218,7 +219,7 @@ function saveConvs(convs: StoredConv[]) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(convs)); } catch {}
 }
 
-export function ChatPanel({ density, onOpenTarget, onPitch, showSidebar }: Props) {
+export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSidebar }: Props) {
   const [conversations, setConversations] = useState<StoredConv[]>([]);
   const [activeId, setActiveId] = useState<string | undefined>();
   const [streaming, setStreaming] = useState(false);
@@ -691,7 +692,7 @@ export function ChatPanel({ density, onOpenTarget, onPitch, showSidebar }: Props
         <div className="fade-up">
           <div style={{ marginBottom: 12 }}><MarkdownRenderer content={m.content} /></div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {m.persons.map((p) => <PersonCard key={p.id} person={p} />)}
+            {m.persons.map((p) => <PersonCard key={p.id} person={p} onOpen={onOpenPerson} />)}
           </div>
         </div>
       )}

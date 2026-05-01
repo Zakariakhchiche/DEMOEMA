@@ -62,6 +62,9 @@ export interface Person {
   entreprises: string[];
   event: string | null;
   dept: string;
+  nom_raw?: string;
+  prenom_raw?: string;
+  date_naissance?: string | null;
 }
 
 export interface Conversation {

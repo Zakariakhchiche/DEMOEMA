@@ -4,7 +4,12 @@ import { Icon } from "./Icon";
 import { ScoreBadge } from "./ScoreBadge";
 import type { Person } from "@/lib/dem/types";
 
-export function PersonCard({ person }: { person: Person }) {
+interface Props {
+  person: Person;
+  onOpen?: (p: Person) => void;
+}
+
+export function PersonCard({ person, onOpen }: Props) {
   return (
     <div className="dem-glass card-lift" style={{ borderRadius: 14, padding: "14px 18px", display: "flex", gap: 14, alignItems: "center" }}>
       <div style={{
@@ -40,8 +45,13 @@ export function PersonCard({ person }: { person: Person }) {
           </div>
         )}
       </div>
-      <button className="dem-btn dem-btn-ghost" title="Voir réseau">
-        <Icon name="network" size={12} /> Réseau
+      <button
+        className="dem-btn dem-btn-ghost"
+        title="Voir la fiche complète du dirigeant"
+        onClick={() => onOpen?.(person)}
+        disabled={!onOpen}
+      >
+        <Icon name="network" size={12} /> Fiche
       </button>
     </div>
   );
