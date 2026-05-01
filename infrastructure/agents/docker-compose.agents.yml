@@ -142,11 +142,16 @@ services:
     restart: unless-stopped
     environment:
       NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD:-demoema_neo4j_pass}"
-      NEO4J_server_memory_heap_initial__size: "2G"
-      NEO4J_server_memory_heap_max__size: "4G"
-      NEO4J_server_memory_pagecache_size: "2G"
-      # Anti-zombie : ferme les sessions idle 10min (graphe perso, pas API)
-      NEO4J_dbms_transaction_timeout: "600s"
+      # Scale full datalake : 8M Persons + 5M Companies + 30M IS_DIRIGEANT
+      # + ~50M CO_MANDATE rels = ~100M nodes/rels. Heap 24G + pagecache 16G
+      # = ~40G RAM total (VPS a 62G dispo). Marge pour les autres services.
+      NEO4J_server_memory_heap_initial__size: "8G"
+      NEO4J_server_memory_heap_max__size: "24G"
+      NEO4J_server_memory_pagecache_size: "16G"
+      # Bulk import + big graph queries → timeout long
+      NEO4J_dbms_transaction_timeout: "3600s"
+      # Pour bulk import via neo4j-admin (offline)
+      NEO4J_dbms_security_auth__minimum__password__length: "1"
     expose:
       - "7474"   # HTTP Browser (accès via tunnel SSH uniquement)
       - "7687"   # Bolt (depuis agents-platform sur le même network)
