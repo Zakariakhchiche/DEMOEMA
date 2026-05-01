@@ -1408,50 +1408,158 @@ async def copilot_stream_endpoint(q: str = Query(...)):
                 except Exception as e:
                     print(f"[Stream] denomination lookup error: {e}")
 
-        # SIREN direct lookup
+        # SIREN direct lookup — Audit QA 2026-05-01 (SCRUM-NEW-04, NEW-05, NEW-11) :
+        # avant on appelait _papperclip_get_company (recherche-entreprises.api.gouv.fr
+        # live, lent, fiche pauvre : CA + dirigeants seuls), avec un side effect
+        # _add_company_to_targets automatique (mutation sans confirmation) + une
+        # mention trompeuse "Entreprise ajoutée à la base EdRCF". Désormais on
+        # interroge directement le datalake silver/gold (instantané, fiche complète
+        # avec EBITDA, NAF lib, score M&A, mandats, effectif), sans side effect.
         if siren_match:
             siren_val = siren_match.group(1)
+            datalake_ok = False
             try:
-                company_info = await _papperclip_get_company(siren_val)
-                if company_info and isinstance(company_info, dict) and company_info.get("siren"):
-                    await _add_company_to_targets(siren_val)
-                    targets_updated = True
-                    nom = company_info.get("nom_entreprise", siren_val)
-                    siege = company_info.get("siege") or {}
-                    ville = siege.get("ville", "")
-                    naf = company_info.get("libelle_code_naf", "")
-                    ca = company_info.get("chiffre_affaires", 0)
-                    # Format CA lisible : Md€ si ≥ 1B, M€ sinon (le LLM hallucinait
-                    # avant : "214550.0M EUR" pour TotalEnergies = 214 Md€).
-                    if ca and ca >= 1_000_000_000:
-                        ca_str = f"{ca/1e9:.1f} Md€"
-                    elif ca and ca >= 1_000_000:
-                        ca_str = f"{ca/1e6:.1f} M€"
-                    elif ca and ca > 0:
-                        ca_str = f"{ca/1e3:.0f} k€"
-                    else:
-                        ca_str = "N/A"
-                    reps = company_info.get("representants") or []
-                    rep_lines = "\n".join([
-                        f"  - {r.get('prenom','')} {r.get('nom','')} ({r.get('qualite','')})"
-                        for r in reps[:3]
-                    ])
-                    text = (
-                        f"**{nom}** — SIREN {siren_val}\n\n"
-                        f"- **Siège** : {ville}\n"
-                        f"- **Activité** : {naf}\n"
-                        f"- **CA** : {ca_str}\n\n"
-                        f"**Dirigeants :**\n{rep_lines or '  N/A'}\n\n"
-                        f"*Entreprise ajoutée à la base EdRCF.*"
+                pool = getattr(app.state, "dl_pool", None)
+                if pool is not None:
+                    row = await pool.fetchrow(
+                        """
+                        SELECT
+                          em.siren,
+                          em.denomination,
+                          em.ca_latest::float8 AS ca,
+                          em.resultat_net_latest::float8 AS ebitda_proxy,
+                          em.naf_libelle,
+                          em.code_ape,
+                          em.adresse_dept AS dept,
+                          em.ville,
+                          em.effectif_moyen_latest::int AS effectif,
+                          em.insee_tranche_effectifs AS tranche_effectif,
+                          sm.deal_score::int AS deal_score,
+                          sm.tier,
+                          (SELECT COUNT(*)::int
+                             FROM silver.inpi_dirigeants
+                             WHERE em.siren::char(9) = ANY(sirens_mandats)) AS n_dirigeants
+                        FROM gold.entreprises_master em
+                        LEFT JOIN gold.scoring_ma sm USING (siren)
+                        WHERE em.siren = $1
+                        """,
+                        siren_val,
                     )
-                    # Simulate streaming for rule-based response
-                    chunk_size = 40
-                    for i in range(0, len(text), chunk_size):
-                        yield f"data: {json.dumps({'chunk': text[i:i+chunk_size]})}\n\n"
-                    yield f"data: {json.dumps({'done': True, 'source': 'pappers', 'targets_updated': True})}\n\n"
-                    return
+                    if row and row["denomination"]:
+                        datalake_ok = True
+                        nom = row["denomination"]
+                        ville = row["ville"] or ""
+                        dept = row["dept"] or ""
+                        naf_lib = row["naf_libelle"] or row["code_ape"] or ""
+                        ca = float(row["ca"]) if row["ca"] is not None else 0.0
+                        ebitda = float(row["ebitda_proxy"]) if row["ebitda_proxy"] is not None else None
+                        effectif = row["effectif"] or row["tranche_effectif"] or "N/A"
+                        deal_score = row["deal_score"]
+                        tier = row["tier"]
+                        n_dirigeants = row["n_dirigeants"] or 0
+
+                        def _fmt_eur(v):
+                            if v is None or v == 0:
+                                return "N/A"
+                            if v >= 1_000_000_000:
+                                return f"{v/1e9:.1f} Md€"
+                            if v >= 1_000_000:
+                                return f"{v/1e6:.1f} M€"
+                            return f"{v/1e3:.0f} k€"
+
+                        ca_str = _fmt_eur(ca)
+                        ebitda_str = _fmt_eur(ebitda) if ebitda is not None else "N/A"
+
+                        # Top 3 dirigeants : nom + qualité (mandat principal)
+                        dir_rows = await pool.fetch(
+                            """
+                            SELECT prenom, nom, qualite
+                            FROM silver.inpi_dirigeants
+                            WHERE $1::char(9) = ANY(sirens_mandats)
+                            LIMIT 3
+                            """,
+                            siren_val,
+                        )
+                        rep_lines = "\n".join([
+                            f"  - {(r.get('prenom') or '').strip()} {(r.get('nom') or '').strip()}"
+                            + (f" ({r.get('qualite')})" if r.get('qualite') else "")
+                            for r in dir_rows
+                        ]) or "  N/A"
+
+                        score_line = ""
+                        if deal_score is not None:
+                            tier_str = f" — tier {tier}" if tier else ""
+                            score_line = f"- **Score M&A** : {deal_score}/100{tier_str}\n"
+
+                        text = (
+                            f"**{nom}** — SIREN {siren_val}\n\n"
+                            f"- **Siège** : {ville}{', ' + dept if dept else ''}\n"
+                            f"- **Activité** : {naf_lib or 'N/A'}\n"
+                            f"- **CA** : {ca_str}  |  **EBITDA proxy** : {ebitda_str}\n"
+                            f"- **Effectif** : {effectif}  |  **Dirigeants actifs** : {n_dirigeants}\n"
+                            f"{score_line}\n"
+                            f"**Top dirigeants :**\n{rep_lines}\n"
+                        )
+                        chunk_size = 40
+                        for i in range(0, len(text), chunk_size):
+                            yield f"data: {json.dumps({'chunk': text[i:i+chunk_size]})}\n\n"
+                        yield (
+                            "data: " + json.dumps({
+                                "done": True,
+                                "source": "silver.inpi_comptes ⨝ silver.inpi_dirigeants ⨝ gold.scoring_ma",
+                                "targets_updated": False,
+                            }) + "\n\n"
+                        )
+                        return
             except Exception as e:
-                print(f"[Stream] SIREN lookup error: {e}")
+                print(f"[Stream] SIREN datalake lookup error: {e}")
+
+            # Fallback : datalake silver/gold ne connaît pas ce SIREN → retombe
+            # sur recherche-entreprises.api.gouv.fr (live), mais SANS side effect
+            # _add_company_to_targets (le user peut sauver via le bouton dédié).
+            if not datalake_ok:
+                try:
+                    company_info = await _papperclip_get_company(siren_val)
+                    if company_info and isinstance(company_info, dict) and company_info.get("siren"):
+                        nom = company_info.get("nom_entreprise", siren_val)
+                        siege = company_info.get("siege") or {}
+                        ville = siege.get("ville", "")
+                        naf = company_info.get("libelle_code_naf", "")
+                        ca = company_info.get("chiffre_affaires", 0)
+                        if ca and ca >= 1_000_000_000:
+                            ca_str = f"{ca/1e9:.1f} Md€"
+                        elif ca and ca >= 1_000_000:
+                            ca_str = f"{ca/1e6:.1f} M€"
+                        elif ca and ca > 0:
+                            ca_str = f"{ca/1e3:.0f} k€"
+                        else:
+                            ca_str = "N/A"
+                        reps = company_info.get("representants") or []
+                        rep_lines = "\n".join([
+                            f"  - {r.get('prenom','')} {r.get('nom','')} ({r.get('qualite','')})"
+                            for r in reps[:3]
+                        ])
+                        text = (
+                            f"**{nom}** — SIREN {siren_val}\n\n"
+                            f"- **Siège** : {ville}\n"
+                            f"- **Activité** : {naf}\n"
+                            f"- **CA** : {ca_str}\n\n"
+                            f"**Dirigeants :**\n{rep_lines or '  N/A'}\n\n"
+                            f"*Source : annuaire-entreprises.data.gouv.fr (datalake silver indisponible)*"
+                        )
+                        chunk_size = 40
+                        for i in range(0, len(text), chunk_size):
+                            yield f"data: {json.dumps({'chunk': text[i:i+chunk_size]})}\n\n"
+                        yield (
+                            "data: " + json.dumps({
+                                "done": True,
+                                "source": "annuaire-entreprises-fallback",
+                                "targets_updated": False,
+                            }) + "\n\n"
+                        )
+                        return
+                except Exception as e:
+                    print(f"[Stream] SIREN gov fallback error: {e}")
 
         # Stream AI response avec tool-calling activé
         # Le LLM peut maintenant appeler search_cibles, get_fiche_entreprise,
