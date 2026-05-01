@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 # Base deps + Chromium runtime libs (pour Playwright headless) +
 # docker.io CLI (pour OSINT orchestrator qui spawn maigret/holehe via
