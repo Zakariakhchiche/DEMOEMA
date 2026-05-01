@@ -1162,14 +1162,21 @@ async def _dirigeant_full(
         nom_u, prenom_u, date_n,
     ))
 
-    # Pour les fallbacks ci-dessous, on UPPER côté Python pour exploiter les index
-    # btree (nom) / btree (nom, prenom) sur silver.dirigeants_360 et
-    # gold.dirigeants_master. UPPER(unaccent(...)) côté SQL force un seq scan
-    # → timeout 4s sur tables 8M+ rows. Trade-off : on perd la tolérance aux
-    # accents (DUFOÛR vs DUFOUR) — acceptable car les data sont normalisées
-    # en UPPER côté ETL (vérifié sur CHERTOK / GREGOIRE).
+    # Pour les fallbacks ci-dessous, on UPPER + strip-accents côté Python pour
+    # exploiter les index btree (nom) / btree (nom, prenom) sur
+    # silver.dirigeants_360 et gold.dirigeants_master. UPPER(unaccent(...))
+    # côté SQL force un seq scan → timeout 4s sur tables 8M+ rows.
+    # On essaie avec ET sans accent pour couvrir les 2 conventions ETL :
+    #   - "ÉRIC BACONNIER" cité par le LLM (avec accent)
+    #   - "ERIC" stocké dans gold (sans accent, vérifié SQL direct)
+    #   - "GRÉGOIRE" stocké aussi (CHERTOK) — donc OR sur les 2 versions.
+    import unicodedata
+    def _strip_accents(s: str) -> str:
+        return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
     nom_uc = nom_u.upper()
     prenom_uc = prenom_u.upper()
+    nom_uc_na = _strip_accents(nom_uc)
+    prenom_uc_na = _strip_accents(prenom_uc)
 
     # Fallback 1 : silver.dirigeants_360 — feature store consolidé. Couvre les
     # dirigeants présents dans gold.dirigeants_master mais absents/incomplets
@@ -1183,12 +1190,12 @@ async def _dirigeant_full(
                       first_mandat_date, last_mandat_date,
                       is_multi_mandat
                FROM silver.dirigeants_360
-               WHERE nom = $1
-                 AND prenom = $2
-                 AND ($3::text IS NULL OR date_naissance LIKE $3 || '%')
+               WHERE nom IN ($1, $2)
+                 AND prenom IN ($3, $4)
+                 AND ($5::text IS NULL OR date_naissance LIKE $5 || '%')
                ORDER BY n_mandats_actifs DESC NULLS LAST
                LIMIT 1""",
-            nom_uc, prenom_uc, date_n,
+            nom_uc, nom_uc_na, prenom_uc, prenom_uc_na, date_n,
         ), timeout_s=8.0)
 
     # Fallback 2 : gold.dirigeants_master — au minimum on récupère le grain de base
@@ -1210,10 +1217,10 @@ async def _dirigeant_full(
                       NULL::date AS last_mandat_date,
                       (n_mandats_actifs >= 5) AS is_multi_mandat
                FROM gold.dirigeants_master
-               WHERE nom = $1 AND prenom = $2
+               WHERE nom IN ($1, $2) AND prenom IN ($3, $4)
                ORDER BY pro_ma_score DESC NULLS LAST
                LIMIT 1""",
-            nom_uc, prenom_uc,
+            nom_uc, nom_uc_na, prenom_uc, prenom_uc_na,
         ), timeout_s=8.0)
 
     if not inpi or not inpi.get("nom"):
