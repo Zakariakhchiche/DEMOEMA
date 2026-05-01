@@ -40,7 +40,8 @@ WITH officers_normalized AS (
           OR country ILIKE '%Belgi%'
           OR country ILIKE '%Switzerland%'
           OR country ILIKE '%Luxembourg%'
-          OR country IS NULL  -- Inclus null country car beaucoup officers ont country=null
+          -- Note : country IS NULL retiré car ça matche 320K rows et explose le JOIN.
+          -- Les officers FR avec country=null sont missed mais très rares.
       )
       AND name ~ '\s'  -- Au moins un espace (multi-mot, exclut les "John" seul qui matchent trop)
       AND name !~ '[0-9]'  -- Exclut les noms avec chiffres (souvent IDs ou companies)
