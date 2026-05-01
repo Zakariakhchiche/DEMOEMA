@@ -11,7 +11,7 @@ import { UserMessage, AiMessage } from "./ChatBubbles";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { formatSiren } from "@/lib/dem/format";
 import { SUGGESTIONS_INITIAL } from "@/lib/dem/data";
-import { fetchTargets, fetchPersons } from "@/lib/dem/adapter";
+import { fetchTargets, fetchPersons, extractDirigeantsFromText } from "@/lib/dem/adapter";
 import { streamCopilot } from "@/lib/api";
 import type { ChatMsg, AiMessageData, Target, Density, Person } from "@/lib/dem/types";
 
@@ -429,10 +429,18 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
         followups: ["Fiche complète", "Dirigeants", "DD Compliance", "Évolution finance", "Réseau"],
       };
     } else if (isDirigeants) {
+      // Bug v6/cards : avant, on remontait toujours le top-4 pro_ma_score depuis
+      // gold.dirigeants_master (Esteve/Moczulski/Geny/Chertok), indépendamment
+      // de la query user (60+/Var/holding). Maintenant on extrait les noms
+      // cités par le LLM dans sa réponse — quand il liste "Serge LUFTMAN 83
+      // ans, Yves DELIEUVIN 76 ans", ce sont eux qui s'affichent en cards.
+      // Fallback sur le top-N existant si le LLM n'a pas enuméré.
+      const extracted = extractDirigeantsFromText(streamedText);
+      const personsForCards = extracted.length > 0 ? extracted.slice(0, 8) : persons;
       response = {
         role: "ai", kind: "persons", header: "Dirigeants",
         content: streamedText || "Croisement INPI dirigeants × patrimoine SCI :",
-        persons,
+        persons: personsForCards,
       };
     } else if (isDD && cibles.length > 0) {
       response = {
