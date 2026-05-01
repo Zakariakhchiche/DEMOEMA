@@ -304,8 +304,12 @@ GOLD_TABLES_WHITELIST: dict[str, dict[str, Any]] = {
     "silver.press_mentions_matched": {
         "label": "Presse (mentions matchées)",
         "category": "press",
-        "pk": "article_id",
-        "default_order": "published_at DESC",
+        # Audit Explorer 2026-05-01 : pk était 'article_id' mais le grain réel
+        # est 'match_uid' (1 row par match presse↔SIREN). Default order par
+        # match_uid (PK indexé) plutôt que published_at qui timeoutait par
+        # full scan sans index sur la matérialisée.
+        "pk": "match_uid",
+        "default_order": "match_uid DESC",
         "search_cols": ["title", "denomination", "siren", "source"],
         "preview_cols": [
             "published_at",
@@ -313,7 +317,9 @@ GOLD_TABLES_WHITELIST: dict[str, dict[str, Any]] = {
             "title",
             "denomination",
             "siren",
-            "ma_signal_type",
+            "match_method",
+            "match_score",
+            "is_recent",
         ],
     },
     # Silvers materialisés — exposés en attendant que la couche gold soit
@@ -322,8 +328,12 @@ GOLD_TABLES_WHITELIST: dict[str, dict[str, Any]] = {
     "silver.insee_unites_legales": {
         "label": "INSEE — Unités légales (29M)",
         "category": "core",
+        # Audit Explorer 2026-05-01 : default_order 'date_creation DESC' faisait
+        # un full scan sur 29M rows (timeout 30s). Tri par siren = pk indexé,
+        # le user peut cliquer sur la col date_creation pour trier ASC/DESC
+        # explicitement (mais sera lent sans index dédié).
         "pk": "siren",
-        "default_order": "date_creation DESC NULLS LAST",
+        "default_order": "siren",
         "search_cols": ["denomination_unite", "siren", "sigle"],
         "preview_cols": [
             "siren",
