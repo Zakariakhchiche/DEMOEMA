@@ -113,11 +113,16 @@ services:
       - ./secrets:/app/.secrets:rw
       # Screenshots openclaw accessibles depuis host
       - ./screenshots:/tmp/openclaw_screenshots:rw
-      # OSINT Maigret/Holehe : socket Docker pour spawner les containers tools
-      # depuis l'orchestrator Python (`docker run --rm soxoj/maigret:latest`).
-      # Le socket monté = équivalent root sur l'host — accepté car
-      # agents-platform n'est pas exposé public et lit le datalake interne.
+      # OSINT Maigret/Holehe : socket Docker + binaire CLI host pour spawner
+      # les containers tools depuis l'orchestrator Python (`docker run --rm
+      # soxoj/maigret:latest`). Le socket = équivalent root sur l'host —
+      # accepté car agents-platform n'est pas exposé public et lit le
+      # datalake interne uniquement. Le mount /usr/bin/docker évite d'avoir
+      # à installer docker.io complet dans l'image (--no-install-recommends
+      # skip le binaire CLI sur python:3.11-slim, et docker-ce-cli upstream
+      # nécessite d'ajouter le repo Docker).
       - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/bin/docker:/usr/bin/docker:ro
       # OSINT scripts (osint_orchestrator.py + wrappers). Pas dans le build
       # context (./platform), monté en RO depuis le repo.
       - ./scripts:/app/scripts:ro
