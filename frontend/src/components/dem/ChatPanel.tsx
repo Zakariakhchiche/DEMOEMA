@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { flushSync } from "react-dom";
 import { Icon } from "./Icon";
 import { ChatSidebar, type ChatConvSummary } from "./ChatSidebar";
 import { ChatInput } from "./ChatInput";
@@ -235,6 +236,14 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
   const abortRef = useRef<AbortController | null>(null);
+  // Audit QA 2026-05-01 (SCRUM-NEW-02 — G5) : sous charge (5 questions
+  // consécutives), l'API SSE backend complétait (200 + body OK) mais le DOM
+  // ne rendait pas le bloc message — `<summary>"X outils utilisés"</summary>`
+  // restait figé. Cause : race entre `setStreamText` incrémental et le
+  // `setConversations` final via `Promise.all`. Pour les streams stale (un
+  // nouveau submit invalide le précédent), les setState venaient écraser
+  // l'état attendu. Patch : streamId ref + flushSync sur le commit final.
+  const streamIdRef = useRef<string>("");
   const [elapsedMs, setElapsedMs] = useState(0);
   // savedSet : persisté en localStorage pour visibilité dans /watchlist + survie au reload
   const [savedSet, setSavedSet] = useState<Set<string>>(() => {
@@ -305,6 +314,15 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
     if (!convId) {
       convId = await newConversation(text.slice(0, 50));
     }
+    // Génère un streamId unique pour cette soumission. Toutes les setState
+    // déclenchées par les promesses de cette submit DOIVENT vérifier que
+    // le streamIdRef est encore le même (sinon = stream stale, on ignore
+    // pour éviter d'écraser un stream plus récent).
+    const myStreamId =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `sid_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    streamIdRef.current = myStreamId;
     setConversations((prev) => prev.map((c) =>
       c.id === convId
         ? {
@@ -386,6 +404,12 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
         let acc = "";
         try {
           for await (const ev of streamCopilot(text, signal)) {
+            // Stream stale (un nouveau submit a invalidé celui-ci) → on arrête
+            // sans setState pour ne pas écraser le stream plus récent.
+            if (streamIdRef.current !== myStreamId) {
+              console.warn("[chat] stale stream detected, abandoning");
+              break;
+            }
             if (ev.chunk) {
               acc = ev.chunk.startsWith(acc) ? ev.chunk : acc + ev.chunk;
               setStreamText(acc);
@@ -530,14 +554,35 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
       };
     }
 
-    setStreamText("");
-    setConversations((prev) => prev.map((c) =>
-      c.id === convId
-        ? { ...c, messages: [...c.messages, response], updated_at: Date.now() }
-        : c
-    ));
     clearTimeout(timeoutId);
     clearInterval(elapsedTimer);
+
+    // Stream stale : ne rien commit côté DOM (un autre submit a pris le
+    // relais et fera son propre setConversations). Sans ce garde, l'ancien
+    // setConversations écrasait éventuellement le nouveau message arrivé
+    // entre-temps → bug audit "DOM bloqué à 51 messages".
+    if (streamIdRef.current !== myStreamId) {
+      console.warn("[chat] stream finalized but stale (newer submit in-flight), skipping commit");
+      abortRef.current = null;
+      // Ne PAS toucher streaming ici : le stream actif (myStreamId !== current)
+      // gérera son propre setStreaming(false) à la fin.
+      return;
+    }
+
+    // Commit synchrone via flushSync : garantit que React 19 ne batche pas
+    // setStreamText("") + setConversations(append) + setStreaming(false)
+    // d'une manière qui pourrait perdre le message si un autre rerender
+    // arrive juste après. Le coût (un tear) est négligeable vs un message
+    // perdu.
+    flushSync(() => {
+      setStreamText("");
+      setConversations((prev) => prev.map((c) =>
+        c.id === convId
+          ? { ...c, messages: [...c.messages, response], updated_at: Date.now() }
+          : c
+      ));
+    });
+
     abortRef.current = null;
     setStreaming(false);
   }, [streaming, activeId, newConversation]);
