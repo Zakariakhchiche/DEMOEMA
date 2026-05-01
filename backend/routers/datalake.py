@@ -1160,25 +1160,34 @@ async def _dirigeant_full(
         nom_u, prenom_u, date_n,
     ))
 
+    # Pour les fallbacks ci-dessous, on UPPER côté Python pour exploiter les index
+    # btree (nom) / btree (nom, prenom) sur silver.dirigeants_360 et
+    # gold.dirigeants_master. UPPER(unaccent(...)) côté SQL force un seq scan
+    # → timeout 4s sur tables 8M+ rows. Trade-off : on perd la tolérance aux
+    # accents (DUFOÛR vs DUFOUR) — acceptable car les data sont normalisées
+    # en UPPER côté ETL (vérifié sur CHERTOK / GREGOIRE).
+    nom_uc = nom_u.upper()
+    prenom_uc = prenom_u.upper()
+
     # Fallback 1 : silver.dirigeants_360 — feature store consolidé. Couvre les
     # dirigeants présents dans gold.dirigeants_master mais absents/incomplets
-    # en silver.inpi_dirigeants (e.g. dirigeants enrichis depuis sources non-INPI).
+    # en silver.inpi_dirigeants (ex. ArraySubscriptError sur agg corrupt).
     if not inpi or not inpi.get("nom"):
         inpi = await _safe(pool.fetchrow(
             """SELECT nom, prenom, date_naissance, age_2026 AS age,
                       n_mandats_total, n_mandats_actifs,
-                      sirens_mandats, denominations_mandats AS denominations,
+                      sirens_mandats, denominations,
                       formes_juridiques, roles,
                       first_mandat_date, last_mandat_date,
                       is_multi_mandat
                FROM silver.dirigeants_360
-               WHERE UPPER(unaccent(nom)) = UPPER(unaccent($1))
-                 AND UPPER(unaccent(prenom)) = UPPER(unaccent($2))
+               WHERE nom = $1
+                 AND prenom = $2
                  AND ($3::text IS NULL OR date_naissance LIKE $3 || '%')
                ORDER BY n_mandats_actifs DESC NULLS LAST
                LIMIT 1""",
-            nom_u, prenom_u, date_n,
-        ))
+            nom_uc, prenom_uc, date_n,
+        ), timeout_s=8.0)
 
     # Fallback 2 : gold.dirigeants_master — au minimum on récupère le grain de base
     # pour ne pas 404 sur un dirigeant exposé en card mais absent des silvers
@@ -1199,12 +1208,11 @@ async def _dirigeant_full(
                       NULL::date AS last_mandat_date,
                       (n_mandats_actifs >= 5) AS is_multi_mandat
                FROM gold.dirigeants_master
-               WHERE UPPER(unaccent(nom)) = UPPER(unaccent($1))
-                 AND UPPER(unaccent(prenom)) = UPPER(unaccent($2))
+               WHERE nom = $1 AND prenom = $2
                ORDER BY pro_ma_score DESC NULLS LAST
                LIMIT 1""",
-            nom_u, prenom_u,
-        ))
+            nom_uc, prenom_uc,
+        ), timeout_s=8.0)
 
     if not inpi or not inpi.get("nom"):
         raise HTTPException(
