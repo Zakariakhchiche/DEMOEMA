@@ -82,10 +82,10 @@ PICK_SQL_SIMPLE = """
 SELECT
   upper(unaccent(name)) AS name_uc,
   (array_agg(entity_id))[1:5] AS entity_ids,
-  (array_agg(caption))[1:5] AS captions,
-  (array_agg(topics))[1] AS topics,
-  (array_agg(sanctions_programs))[1] AS programs,
-  (array_agg(countries))[1] AS countries
+  (array_agg(caption) FILTER (WHERE caption IS NOT NULL))[1:5] AS captions,
+  (array_agg(topics) FILTER (WHERE topics IS NOT NULL))[1] AS topics,
+  (array_agg(sanctions_programs) FILTER (WHERE sanctions_programs IS NOT NULL))[1] AS programs,
+  (array_agg(countries) FILTER (WHERE countries IS NOT NULL))[1] AS countries
 FROM silver.opensanctions
 WHERE schema = 'Person'
   AND name IS NOT NULL
