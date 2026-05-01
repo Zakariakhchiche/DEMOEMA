@@ -6,6 +6,17 @@ import { ScoreBadge } from "./ScoreBadge";
 import { datalakeApi, type TableInfo } from "@/lib/api";
 import type { Target } from "@/lib/dem/types";
 import { rowToTarget } from "@/lib/dem/adapter";
+import { parseNumericLoose, formatEurCompact, formatCompactNumber } from "@/lib/dem/format";
+
+// Audit QA 2026-05-01 (SCRUM-NEW-14) : la table Explorer affichait des CA en
+// notation scientifique illisible (`2.66540E+9`, `9.9000E+8`) car formatCell ne
+// gérait pas les strings numériques. Heuristique : nom de colonne CA/EBITDA/
+// capital → formatEurCompact (Md€/M€/K€), sinon formatCompactNumber.
+const EUR_COL_RE = /^(ca|ebitda|chiffre|resultat|résultat|capital|montant|valeur|prix|actif|passif|dettes?)/i;
+const EUR_COL_SUFFIX_RE = /_(ca|eur|euro|amount|price|value)$/i;
+function isMonetaryColumn(col: string): boolean {
+  return EUR_COL_RE.test(col) || EUR_COL_SUFFIX_RE.test(col);
+}
 
 interface Props {
   onOpenTarget: (t: Target) => void;
@@ -30,14 +41,20 @@ const PRIORITY_ORDER = [
   "silver.press_mentions_matched",
 ];
 
-function formatCell(v: unknown): string {
+function formatCell(v: unknown, col?: string): string {
   if (v === null || v === undefined) return "—";
   if (typeof v === "boolean") return v ? "✓" : "✗";
-  if (typeof v === "number") {
-    if (Math.abs(v) >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-    if (Math.abs(v) >= 1_000) return v.toLocaleString("fr-FR");
-    return String(v);
+
+  // Strings numériques (Postgres `numeric` remonté en text → notation
+  // scientifique `2.66540E+9` côté JSON) sont parsées et formatées comme les
+  // numbers natifs.
+  if (typeof v === "number" || (typeof v === "string" && parseNumericLoose(v) !== null)) {
+    if (col && isMonetaryColumn(col)) {
+      return formatEurCompact(v);
+    }
+    return formatCompactNumber(v);
   }
+
   if (typeof v === "object") {
     try { return JSON.stringify(v).slice(0, 60); } catch { return "[obj]"; }
   }
@@ -317,7 +334,7 @@ export function DataExplorerView({ onOpenTarget }: Props) {
                             {isScore && typeof v === "number" ? (
                               <ScoreBadge value={v} size="sm" />
                             ) : (
-                              formatCell(v)
+                              formatCell(v, c)
                             )}
                           </td>
                         );
