@@ -6,7 +6,7 @@ import { ScoreBadge } from "./ScoreBadge";
 import { datalakeApi, type TableInfo } from "@/lib/api";
 import type { Target } from "@/lib/dem/types";
 import { rowToTarget } from "@/lib/dem/adapter";
-import { parseNumericLoose, formatEurCompact, formatCompactNumber } from "@/lib/dem/format";
+import { parseNumericLoose, formatEurCompact, formatCompactNumber, formatSiren, formatSiret } from "@/lib/dem/format";
 
 // Audit QA 2026-05-01 (SCRUM-NEW-14) : la table Explorer affichait des CA en
 // notation scientifique illisible (`2.66540E+9`, `9.9000E+8`) car formatCell ne
@@ -17,6 +17,15 @@ const EUR_COL_SUFFIX_RE = /_(ca|eur|euro|amount|price|value)$/i;
 function isMonetaryColumn(col: string): boolean {
   return EUR_COL_RE.test(col) || EUR_COL_SUFFIX_RE.test(col);
 }
+
+// Audit QA 2026-05-01 follow-up : SIREN/SIRET 9-14 digits etaient interpretes
+// comme des montants par formatCompactNumber → "450,8M" pour 450 777 008.
+// Heuristique : col matchant /siren|siret/ → formatSiren/Siret format INSEE.
+const SIREN_COL_RE = /^siren$/i;
+const SIRET_COL_RE = /^siret$/i;
+// Codes departement FR : zfill a 2 digits si la valeur est numerique 1-9
+// (ex code_ape "06" pour Alpes-Maritimes vs "6" non-zfilled).
+const DEPT_COL_RE = /^(adresse_dept|dept|departement|code_dept|code_postal_dept)$/i;
 
 interface Props {
   onOpenTarget: (t: Target) => void;
@@ -44,6 +53,19 @@ const PRIORITY_ORDER = [
 function formatCell(v: unknown, col?: string): string {
   if (v === null || v === undefined) return "—";
   if (typeof v === "boolean") return v ? "✓" : "✗";
+
+  // SIREN/SIRET — format INSEE "XXX XXX XXX" / "XXX XXX XXX XXXXX".
+  // À traiter AVANT le path numeric car SIREN à 9 digits passe parseNumericLoose
+  // et finit en "450,8M" (cf audit follow-up).
+  if (col) {
+    if (SIREN_COL_RE.test(col)) return formatSiren(String(v));
+    if (SIRET_COL_RE.test(col)) return formatSiret(String(v));
+    // Departements FR : zfill a 2 digits ("6" → "06")
+    if (DEPT_COL_RE.test(col)) {
+      const s = String(v);
+      if (/^\d{1,2}$/.test(s)) return s.padStart(2, "0");
+    }
+  }
 
   // Strings numériques (Postgres `numeric` remonté en text → notation
   // scientifique `2.66540E+9` côté JSON) sont parsées et formatées comme les
