@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start -p 3010",
     "lint": "eslint",
+    "lint:design": "npx --yes @google/design.md lint ../DESIGN.md",
     "test": "vitest run",
     "cf:build": "opennextjs-cloudflare build",
     "cf:preview": "opennextjs-cloudflare preview",
