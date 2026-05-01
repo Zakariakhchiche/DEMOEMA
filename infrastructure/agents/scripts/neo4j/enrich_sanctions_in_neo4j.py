@@ -79,18 +79,20 @@ LIMIT %s
 # directement le 1er topics/programs/countries (la plupart des persons n'ont
 # qu'1 entry sanctions de toute façon).
 PICK_SQL_SIMPLE = """
-SELECT
+-- DISTINCT ON (name) garde 1 row par sanctioned name (le 1er trouvé).
+-- Plus simple et rapide que array_agg sur des cols arrays nestées.
+SELECT DISTINCT ON (upper(unaccent(name)))
   upper(unaccent(name)) AS name_uc,
-  (array_agg(entity_id))[1:5] AS entity_ids,
-  (array_agg(caption) FILTER (WHERE caption IS NOT NULL))[1:5] AS captions,
-  (array_agg(topics) FILTER (WHERE topics IS NOT NULL))[1] AS topics,
-  (array_agg(sanctions_programs) FILTER (WHERE sanctions_programs IS NOT NULL))[1] AS programs,
-  (array_agg(countries) FILTER (WHERE countries IS NOT NULL))[1] AS countries
+  ARRAY[entity_id] AS entity_ids,
+  ARRAY[caption] AS captions,
+  coalesce(topics, ARRAY[]::text[]) AS topics,
+  coalesce(sanctions_programs, ARRAY[]::text[]) AS programs,
+  coalesce(countries, ARRAY[]::text[]) AS countries
 FROM silver.opensanctions
 WHERE schema = 'Person'
   AND name IS NOT NULL
   AND length(name) > 4
-GROUP BY upper(unaccent(name))
+ORDER BY upper(unaccent(name)), entity_id
 LIMIT %s
 """
 
