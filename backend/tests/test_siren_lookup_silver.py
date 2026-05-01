@@ -51,20 +51,29 @@ class TestSirenLookupG2Migration:
         assert "app.state" in block
         assert "dl_pool" in block
 
-    def test_query_uses_gold_entreprises_master(self):
-        """La query JOIN gold.entreprises_master + gold.scoring_ma."""
+    def test_query_uses_datalake_fiche_endpoint(self):
+        """Le SIREN lookup interroge l'endpoint datalake interne /api/datalake/fiche/{siren}.
+
+        Apres fix G2 part 2, on n'a plus de SQL inline (les noms de colonnes
+        gold.entreprises_master differaient → exception → fallback gov en prod).
+        On utilise maintenant l'endpoint existant qui fait deja le bon mapping.
+        """
         block = _stream_endpoint_source()
-        # gold.entreprises_master est la SoT pour fiches
-        assert "gold.entreprises_master" in block
-        assert "gold.scoring_ma" in block
+        # Soit on appelle /api/datalake/fiche/, soit on garde la SQL gold direct
+        has_endpoint_call = "/api/datalake/fiche/" in block
+        has_gold_sql = "gold.entreprises_master" in block and "gold.scoring_ma" in block
+        assert has_endpoint_call or has_gold_sql, (
+            "Le SIREN lookup doit interroger soit /api/datalake/fiche/{siren} "
+            "soit faire la query SQL gold directe"
+        )
 
     def test_returns_enriched_fields(self):
         """La fiche retourne désormais EBITDA + NAF lib + score M&A + mandats."""
         block = _stream_endpoint_source()
-        # Champs G2 nouvellement exposés
+        # Champs G2 nouvellement exposés (extraits du payload fiche endpoint)
         assert "ebitda" in block.lower(), "ebitda manquant — G2 fiche enrichie"
         assert "naf_libelle" in block or "naf_lib" in block, "naf libellé manquant"
-        assert "deal_score" in block, "score M&A manquant — G2 fiche enrichie"
+        assert "deal_score" in block or "pro_ma_score" in block, "score M&A manquant"
         assert "tier" in block, "tier M&A manquant"
         assert "n_dirigeants" in block, "nombre de mandats manquant"
 
@@ -122,12 +131,13 @@ class TestSirenLookupG2Migration:
     def test_targets_updated_false_in_silver_path(self):
         """Le done event silver renvoie targets_updated=False (read-only fiche)."""
         block = _stream_endpoint_source()
-        # Pattern : 'targets_updated': False/false dans le done event silver
-        # On vérifie au moins une occurrence après le bloc silver query
-        silver_block_start = block.find("gold.entreprises_master")
-        silver_done_event_region = block[silver_block_start:silver_block_start + 4000]
-        assert '"targets_updated": False' in silver_done_event_region or \
-               "'targets_updated': False" in silver_done_event_region, (
+        # Trouve le label source silver dans le done event
+        src_label = block.find('"silver.inpi_comptes')
+        assert src_label > 0, "Source silver.inpi_comptes manquante"
+        # Cherche dans une fenetre autour (avant + apres) — le dict est sur plusieurs lignes
+        window = block[max(0, src_label - 500): src_label + 500]
+        assert '"targets_updated": False' in window or \
+               "'targets_updated': False" in window, (
             "Le done event silver doit annoncer targets_updated=False"
         )
 
