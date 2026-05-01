@@ -23,20 +23,30 @@ interface Props {
   showSidebar: boolean;
 }
 
-const initialMessage: AiMessageData = {
-  role: "ai",
-  kind: "proactive",
-  header: "Brief du matin · 08:14",
-  content:
-    "Bonjour Anne ☕ J'ai analysé ta watchlist \"Cibles tech IDF\" cette nuit. Voici les premières alertes prioritaires sur tes cibles sauvées :",
-  cards: [],
-  stats: [
-    { l: "Nouveaux signaux 24h", v: "47" },
-    { l: "Cibles franchies tier-1", v: "12" },
-    { l: "Nouveaux red flags majeurs", v: "0", color: "var(--accent-emerald)" },
-  ],
-  suggestion: "Tu veux qu'on regarde le mandat sell-side prioritaire ce matin ?",
-};
+// Factory plutôt qu'objet partagé — chaque appel produit une nouvelle instance,
+// évite les mutations partagées entre conversations + permet de personnaliser
+// l'heure du brief. Audit QA 2026-05-01 (SCRUM-NEW-13) : avant, "Nouvelle
+// conversation" gardait le brief précédent en état parce que initialMessage
+// était partagé entre toutes les confs.
+function getInitialMessage(): AiMessageData {
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2, "0");
+  const mm = String(now.getMinutes()).padStart(2, "0");
+  return {
+    role: "ai",
+    kind: "proactive",
+    header: `Brief du matin · ${hh}:${mm}`,
+    content:
+      "Bonjour Anne ☕ J'ai analysé ta watchlist \"Cibles tech IDF\" cette nuit. Voici les premières alertes prioritaires sur tes cibles sauvées :",
+    cards: [],
+    stats: [
+      { l: "Nouveaux signaux 24h", v: "47" },
+      { l: "Cibles franchies tier-1", v: "12" },
+      { l: "Nouveaux red flags majeurs", v: "0", color: "var(--accent-emerald)" },
+    ],
+    suggestion: "Tu veux qu'on regarde le mandat sell-side prioritaire ce matin ?",
+  };
+}
 
 function CitationText({ text, citations }: { text: string; citations?: { id: number; label: string; detail: string }[] }) {
   // Markdown rendering avec citations [N] post-processées en marqueurs cliquables.
@@ -242,12 +252,13 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
 
   const newConversation = useCallback(async (autoTitle?: string) => {
     const cards = await fetchTargets({ limit: 3 });
+    const fresh = getInitialMessage();
     const conv: StoredConv = {
       id: `conv_${Date.now()}`,
       title: autoTitle ?? "Brief du matin",
       updated_at: Date.now(),
       type: "sourcing",
-      messages: [{ ...initialMessage, cards }],
+      messages: [{ ...fresh, cards }],
     };
     setConversations((prev) => [conv, ...prev]);
     setActiveId(conv.id);
@@ -493,18 +504,29 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
         duration: 25 + Math.floor(Math.random() * 15),
         rows: cibles.length,
       });
+      // Audit QA 2026-05-01 (SCRUM-NEW-12) : avant, quickReplies/citations/reasoning
+      // étaient affichés en dur même sur questions définitionnelles ("Qu'est-ce qu'un
+      // LBO ?") où cibles=[] → CTAs "Affiner score ≥ 70" et sources "silver.inpi_comptes"
+      // sans rapport avec la réponse. Désormais on conditionne sur `hasCibles`.
+      const hasCibles = cibles.length >= 3;
       response = {
-        role: "ai", kind: "sourcing", header: "Sourcing M&A",
-        content: streamedText || `J'ai trouvé ${cibles.length} cibles correspondant à tes critères [1].`,
-        cards: cibles,
-        quickReplies: ["Affiner score ≥ 70", "Sans red flags", "Compare top 3", "Export en watchlist"],
-        seeMore: Math.max(0, cibles.length - 5),
-        citations: [
-          { id: 1, label: "silver.inpi_comptes ⨝ silver.osint_companies_enriched", detail: "Live datalake (silver fallback, gold pas matérialisé)" },
-          { id: 2, label: "pro_ma_score()", detail: "Score 50 + (CA / 200K€), capé 95 — proxy" },
-        ],
-        reasoning,
-        toolCalls,
+        role: "ai", kind: "sourcing", header: hasCibles ? "Sourcing M&A" : "Réponse",
+        content: streamedText || (hasCibles
+          ? `J'ai trouvé ${cibles.length} cibles correspondant à tes critères [1].`
+          : "Voici ma réponse."),
+        cards: hasCibles ? cibles : [],
+        quickReplies: hasCibles
+          ? ["Affiner score ≥ 70", "Sans red flags", "Compare top 3", "Export en watchlist"]
+          : undefined,
+        seeMore: hasCibles ? Math.max(0, cibles.length - 5) : 0,
+        citations: hasCibles
+          ? [
+              { id: 1, label: "silver.inpi_comptes ⨝ silver.osint_companies_enriched", detail: "Live datalake (silver fallback, gold pas matérialisé)" },
+              { id: 2, label: "pro_ma_score()", detail: "Score 50 + (CA / 200K€), capé 95 — proxy" },
+            ]
+          : undefined,
+        reasoning: hasCibles ? reasoning : undefined,
+        toolCalls: hasCibles ? toolCalls : undefined,
       };
     }
 
