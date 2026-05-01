@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from typing import Dict, Any, Optional
 import asyncio
 import copy
@@ -1672,6 +1673,38 @@ def _detect_prompt_injection(q: str) -> str | None:
             "« combien de cibles tech IDF avec dirigeant 60+ ? »)."
         )
     return None
+
+
+class _RedteamRequest(BaseModel):
+    """Body schema pour /api/copilot/redteam (POST).
+
+    Endpoint dédié au red-teaming avec garak/Promptfoo : POST + body JSON
+    contourne les limitations URL-encoding du GET ?q=... (utile pour les
+    payloads multilignes/UTF-8/binary qui cassent en query string).
+    """
+    q: str
+    # Garak peut aussi envoyer le prompt sous le champ "prompt" / "input"
+    # selon la config — on accepte les 3 et on prend le premier non-vide.
+    prompt: str | None = None
+    input: str | None = None
+
+
+@app.post("/api/copilot/redteam")
+async def copilot_redteam(payload: _RedteamRequest):
+    """Endpoint POST proxy vers copilot_query() pour les outils de red-team.
+
+    Utilisé par garak (https://github.com/NVIDIA/garak) en CI security :
+    POST {"q": "<prompt>"} → mêmes guardrails + même réponse que GET ?q=.
+
+    Voir `.github/workflows/security-redteam.yml` et `garak_demoema/`.
+    Audit QA 2026-05-01 round 2 — round 1 a montré que GET ?q= ne se prêtait
+    pas au templating $INPUT de garak (ajout en query param positionnel
+    `?q=&prompt-encoded` au lieu de `?q=prompt-encoded`).
+    """
+    q = (payload.q or payload.prompt or payload.input or "").strip()
+    if not q:
+        return {"response": "", "source": "redteam-empty", "targets_updated": False}
+    return await copilot_query(q=q)
 
 
 @app.get("/api/copilot/query")
