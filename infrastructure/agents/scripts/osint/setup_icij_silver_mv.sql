@@ -17,19 +17,33 @@ DROP MATERIALIZED VIEW IF EXISTS silver.icij_offshore_match CASCADE;
 
 CREATE MATERIALIZED VIEW silver.icij_offshore_match AS
 WITH officers_normalized AS (
+    -- Pre-filter sur officers avec country contenant France/FR/Monaco — réduit
+    -- de ~770K à ~5-30K rows. Plus le filter "nom contient pattern FR-like"
+    -- (au moins 2 mots, pas de chiffres). Évite le full scan 770K × 8M dirigeants
+    -- qui dure plusieurs minutes sans index.
     SELECT
         node_id,
         name AS raw_name,
         country,
         source_leak,
         payload,
-        -- Heuristique simple : split sur espace/virgule pour extraire prenom/nom
-        -- Format ICIJ varie : "FIRST LAST", "LAST, FIRST", "Mr First LAST"...
         upper(unaccent(trim(regexp_replace(name, '^(Mr|Mme|Mlle|Dr)\.?\s+', '', 'i')))) AS name_clean
     FROM bronze.icij_offshore_raw
     WHERE role = 'OFFICER'
       AND name IS NOT NULL
       AND length(name) > 4
+      AND (
+          country ILIKE '%France%'
+          OR country ILIKE '%FRA%'
+          OR country ILIKE '%Monaco%'
+          OR country ILIKE '%MCO%'
+          OR country ILIKE '%Belgi%'
+          OR country ILIKE '%Switzerland%'
+          OR country ILIKE '%Luxembourg%'
+          OR country IS NULL  -- Inclus null country car beaucoup officers ont country=null
+      )
+      AND name ~ '\s'  -- Au moins un espace (multi-mot, exclut les "John" seul qui matchent trop)
+      AND name !~ '[0-9]'  -- Exclut les noms avec chiffres (souvent IDs ou companies)
 ),
 -- Dirigeants FR (silver.dirigeants_360 n'existe pas — utiliser inpi_dirigeants
 -- direct ; gold.dirigeants_master pour pro_ma_score quand dispo).
