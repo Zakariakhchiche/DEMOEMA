@@ -66,17 +66,20 @@ RETURN count(DISTINCT p) AS flagged
 
 
 # ────────── SCI patrimoine ──────────
+# Note : silver.dirigeant_sci_patrimoine a déjà 1 row par dirigeant
+# (nom, prenom, date_naissance) avec les arrays sci_sirens, sci_denominations
+# pré-agrégés. Pas besoin de GROUP BY supplémentaire.
 SCI_SQL = """
 SELECT
   upper(unaccent(nom)) AS nom_uc,
   upper(unaccent(prenom)) AS prenom_uc,
-  sum(coalesce(n_sci, 0))::int AS total_n_sci,
-  sum(coalesce(total_capital_sci, 0))::numeric AS total_capital,
-  array_agg(DISTINCT denomination_sci) FILTER (WHERE denomination_sci IS NOT NULL) AS sci_denos
+  coalesce(n_sci, 0)::int AS total_n_sci,
+  coalesce(total_capital_sci, 0)::numeric AS total_capital,
+  sci_denominations AS sci_denos,
+  sci_sirens
 FROM silver.dirigeant_sci_patrimoine
 WHERE nom IS NOT NULL AND prenom IS NOT NULL
-GROUP BY upper(unaccent(nom)), upper(unaccent(prenom))
-HAVING sum(coalesce(n_sci, 0)) > 0
+  AND coalesce(n_sci, 0) > 0
 """
 
 SCI_CYPHER = """
@@ -87,7 +90,8 @@ WHERE upper(p.nom) = row.nom_uc
        OR row.prenom_uc IN [x IN p.prenoms | upper(x)])
 SET p.n_sci = row.total_n_sci,
     p.total_capital_sci = toFloat(row.total_capital),
-    p.sci_denominations = row.sci_denos
+    p.sci_denominations = row.sci_denos,
+    p.sci_sirens = row.sci_sirens
 RETURN count(DISTINCT p) AS flagged
 """
 
