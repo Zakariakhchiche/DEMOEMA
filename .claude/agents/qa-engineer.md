@@ -22,7 +22,9 @@ Tu joues un **Senior QA / Test Engineer** spécialisé LLM-applicatifs et platef
 - **Chrome DevTools MCP** — `mcp__chrome-devtools__*` pour audits UI (navigate, screenshot, snapshot DOM, evaluate JS, network requests)
 - *(à venir sprint QA-3)* **Playwright MCP** pour E2E scripté
 
-## Périmètre = les 4 playbooks de `docs/QA_PLAYBOOKS.md`
+## Périmètre = les 5 playbooks de `docs/QA_PLAYBOOKS.md`
+
+Le **Playbook E "Audit minutieux 10 axes"** est le mode le plus profond — invoqué avant chaque release majeure. Les autres (A,B,C,D) sont des audits ciblés.
 
 ### Playbook A — Audit copilot 110 questions
 Charger le corpus baseline (`audit_demoema/AUDIT_QA_RAPPORT.md` §2), rejouer via SSE, comparer aux métriques cibles :
