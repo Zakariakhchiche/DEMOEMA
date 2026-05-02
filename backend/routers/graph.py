@@ -238,6 +238,142 @@ async def person_graph(nom: str, prenom: str, top_n: int = 10):
     }
 
 
+@router.get("/red_flags/{nom}/{prenom}")
+async def red_flags_network(nom: str, prenom: str, hops: int = 2, limit: int = 50):
+    """Liste les red flags (sanctions / offshore / lobbying) à N hops dans
+    le réseau co-mandataires d'un dirigeant. Killer DD M&A : avant de
+    pitcher une cible, vérifier qui dans son réseau étendu a un risque.
+
+    `hops` clamped 1..3 (au-delà = explosion combinatoire 7.7M edges).
+    `limit` clamped 10..200.
+    """
+    driver = _get_driver()
+    nom_uc = (nom or "").strip().upper()
+    prenom_uc = (prenom or "").strip().upper()
+    hops = max(1, min(3, int(hops)))
+    limit = max(10, min(200, int(limit)))
+
+    if not nom_uc or not prenom_uc:
+        raise HTTPException(status_code=400, detail="nom + prenom requis")
+
+    # Cypher : on collecte les paths jusqu'à hops, on filtre sur les flags
+    # red sur le NOEUD FINAL (q), on retourne triplé (q, distance, path).
+    # variable-length pattern *1..N supporté natif Neo4j 5.
+    query = f"""
+    MATCH (p:Person {{nom: $nom_uc, prenom: $prenom_uc}})
+    WITH p LIMIT 1
+    MATCH path=(p)-[:CO_MANDATE*1..{hops}]-(q:Person)
+    WHERE q <> p
+      AND (coalesce(q.is_sanctioned, false)
+           OR coalesce(q.has_offshore, false)
+           OR coalesce(q.is_lobbyist, false))
+    WITH q, length(path) AS hops_distance,
+         [n IN nodes(path) | {{full_name: n.full_name, nom: n.nom, prenom: n.prenom}}] AS via_persons
+    RETURN
+        q.full_name AS full_name,
+        q.nom AS nom,
+        q.prenom AS prenom,
+        min(hops_distance) AS hops,
+        coalesce(q.is_sanctioned, false) AS is_sanctioned,
+        coalesce(q.has_offshore, false) AS has_offshore,
+        coalesce(q.is_lobbyist, false) AS is_lobbyist,
+        coalesce(q.sanctions_programs, []) AS sanctions_programs,
+        coalesce(q.icij_leaks, []) AS icij_leaks,
+        coalesce(q.lobby_denominations, []) AS lobby_denominations,
+        collect(via_persons)[0] AS sample_path
+    ORDER BY hops, full_name
+    LIMIT $limit
+    """
+
+    try:
+        with driver.session() as s:
+            rows = [dict(r) for r in s.run(query, nom_uc=nom_uc, prenom_uc=prenom_uc, limit=limit)]
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Neo4j: {type(e).__name__}: {e}")
+
+    # Bucket par hop pour l'affichage LLM
+    by_hop = {}
+    for r in rows:
+        by_hop.setdefault(r["hops"], []).append(r)
+
+    return {
+        "person": {"nom": nom_uc, "prenom": prenom_uc},
+        "max_hops": hops,
+        "n_red_flags": len(rows),
+        "red_flags": rows,
+        "by_hop": {str(k): v for k, v in sorted(by_hop.items())},
+    }
+
+
+@router.get("/path/{nom_a}/{prenom_a}/{nom_b}/{prenom_b}")
+async def path_between(
+    nom_a: str, prenom_a: str, nom_b: str, prenom_b: str,
+    max_hops: int = 4,
+):
+    """Trouve le chemin le plus court entre 2 personnes via co-mandats.
+    Use case : warm intro mapping, investigation network, "comment X
+    est-il connecté à Y".
+
+    `max_hops` clamped 1..6 — au-delà la query explose.
+    """
+    driver = _get_driver()
+    nom_a_uc = (nom_a or "").strip().upper()
+    prenom_a_uc = (prenom_a or "").strip().upper()
+    nom_b_uc = (nom_b or "").strip().upper()
+    prenom_b_uc = (prenom_b or "").strip().upper()
+    max_hops = max(1, min(6, int(max_hops)))
+
+    if not (nom_a_uc and prenom_a_uc and nom_b_uc and prenom_b_uc):
+        raise HTTPException(status_code=400, detail="(nom_a, prenom_a, nom_b, prenom_b) requis")
+
+    query = f"""
+    MATCH (a:Person {{nom: $nom_a, prenom: $prenom_a}})
+    MATCH (b:Person {{nom: $nom_b, prenom: $prenom_b}})
+    WITH a, b LIMIT 1
+    MATCH path = shortestPath((a)-[:CO_MANDATE*1..{max_hops}]-(b))
+    RETURN
+        length(path) AS hops,
+        [n IN nodes(path) | {{
+            full_name: n.full_name,
+            nom: n.nom,
+            prenom: n.prenom,
+            is_sanctioned: coalesce(n.is_sanctioned, false),
+            has_offshore: coalesce(n.has_offshore, false),
+            is_lobbyist: coalesce(n.is_lobbyist, false)
+        }}] AS persons,
+        [r IN relationships(path) | coalesce(r.via_sirens, [])] AS via_sirens_per_edge
+    LIMIT 1
+    """
+
+    try:
+        with driver.session() as s:
+            rec = s.run(
+                query,
+                nom_a=nom_a_uc, prenom_a=prenom_a_uc,
+                nom_b=nom_b_uc, prenom_b=prenom_b_uc,
+            ).single()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Neo4j: {type(e).__name__}: {e}")
+
+    if rec is None:
+        return {
+            "found": False,
+            "from": {"nom": nom_a_uc, "prenom": prenom_a_uc},
+            "to": {"nom": nom_b_uc, "prenom": prenom_b_uc},
+            "max_hops_searched": max_hops,
+            "hint": "Pas de connexion via co-mandats à cette profondeur.",
+        }
+
+    return {
+        "found": True,
+        "from": {"nom": nom_a_uc, "prenom": prenom_a_uc},
+        "to": {"nom": nom_b_uc, "prenom": prenom_b_uc},
+        "hops": rec["hops"],
+        "persons": rec["persons"],
+        "via_sirens_per_edge": rec["via_sirens_per_edge"],
+    }
+
+
 @router.get("/health")
 async def health():
     """Health check Neo4j connectivité."""
