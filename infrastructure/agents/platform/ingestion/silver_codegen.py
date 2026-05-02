@@ -735,6 +735,14 @@ def _autofix_sql(sql: str) -> str:
     Les LLM tombent régulièrement dans les memes pièges. On corrige avant que
     Postgres rejette — moins de bruit + retries inutiles.
     """
+    # Fix 0 : strip `WITH NO DATA` — DeepSeek interprète parfois le prompt
+    # "CREATE MATERIALIZED VIEW silver.X AS ..." comme "structure only" et
+    # ajoute WITH NO DATA, ce qui laisse la matview ispopulated=false jusqu'à
+    # un REFRESH manuel. Comme le silver_maintainer regenère toutes les heures,
+    # le bug se réinstalle 1h après chaque REFRESH manuel. Plus simple : on
+    # supprime WITH NO DATA au niveau autofix pour FORCER la population au
+    # moment du CREATE. Match insensible casse + whitespace tolérant.
+    sql = re.sub(r"\bWITH\s+NO\s+DATA\b\s*;?", ";", sql, flags=re.IGNORECASE)
     # Fix 1 : double parens index → simple parens
     # CREATE INDEX ON t ((c1, c2, c3)) → CREATE INDEX ON t (c1, c2, c3)
     sql = re.sub(
@@ -789,6 +797,20 @@ def _apply_sql(silver_name: str, sql: str, version_uid: str) -> dict:
                 cur.execute("SET statement_timeout = 0")
                 cur.execute(f"DROP MATERIALIZED VIEW IF EXISTS {qualified} CASCADE")
                 cur.execute(sql)
+                # Belt-and-suspenders : si le LLM a glissé un WITH NO DATA
+                # malgré le strip dans _autofix_sql, ou si le SELECT ne
+                # populate pas la matview pour une autre raison, on force
+                # un REFRESH ici dans la MÊME transaction. Si le REFRESH
+                # plante (data error), le rollback DROP+CREATE → la matview
+                # précédente reste intacte. Pas de bug silencieux.
+                cur.execute(
+                    "SELECT 1 FROM pg_matviews WHERE schemaname=%s AND matviewname=%s AND NOT ispopulated",
+                    (qualified.split(".", 1)[0], qualified.split(".", 1)[1]),
+                )
+                if cur.fetchone() is not None:
+                    log.info("[silver_codegen] %s : matview unpopulated post-CREATE, forcing REFRESH",
+                             qualified)
+                    cur.execute(f"REFRESH MATERIALIZED VIEW {qualified}")
                 # Audit UPDATE dans la MÊME transaction — ferme la fenêtre où
                 # la MV était créée mais audit non mis à jour (bug SE-2).
                 cur.execute(
