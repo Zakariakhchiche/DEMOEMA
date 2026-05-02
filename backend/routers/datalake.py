@@ -1150,6 +1150,18 @@ async def _dirigeant_full(
     #
     # Stratégie : ORDER BY n_mandats_total DESC LIMIT 1 → row la plus riche.
     # date_naissance optionnel resserre si fourni.
+    # silver.inpi_dirigeants est 100% uppercase (verified 8.1M/8.1M rows).
+    # On normalise UPPER + strip-accents Python-side et matche via nom IN ($1, $2)
+    # pour exploiter l'index btree (nom, prenom). UPPER(unaccent(...)) côté SQL
+    # force un seq scan 8M rows = timeout 4s.
+    import unicodedata as _u
+    def _stripcc(s: str) -> str:
+        return "".join(c for c in _u.normalize("NFD", s) if _u.category(c) != "Mn")
+    nom_for_sql = nom_u.upper()
+    prenom_for_sql = prenom_u.upper()
+    nom_for_sql_na = _stripcc(nom_for_sql)
+    prenom_for_sql_na = _stripcc(prenom_for_sql)
+
     inpi = await _safe(pool.fetchrow(
         """SELECT
               nom, prenom, date_naissance, age_2026 AS age,
@@ -1158,12 +1170,12 @@ async def _dirigeant_full(
               first_mandat_date, last_mandat_date,
               is_multi_mandat
            FROM silver.inpi_dirigeants
-           WHERE UPPER(unaccent(nom)) = UPPER(unaccent($1))
-             AND UPPER(unaccent(prenom)) = UPPER(unaccent($2))
-             AND ($3::text IS NULL OR date_naissance LIKE $3 || '%')
+           WHERE nom IN ($1, $2)
+             AND prenom IN ($3, $4)
+             AND ($5::text IS NULL OR date_naissance LIKE $5 || '%')
            ORDER BY coalesce(n_mandats_total, n_mandats_actifs, 0) DESC
            LIMIT 1""",
-        nom_u, prenom_u, date_n,
+        nom_for_sql, nom_for_sql_na, prenom_for_sql, prenom_for_sql_na, date_n,
     ))
 
     # Pour les fallbacks ci-dessous, on UPPER + strip-accents côté Python pour
