@@ -1233,14 +1233,36 @@ async def _dirigeant_full(
             detail="Dirigeant introuvable (silver.inpi_dirigeants / silver.dirigeants_360 / gold.dirigeants_master)",
         )
 
-    # 2. Patrimoine SCI agrégé sur (nom, prenom, date_naissance) normalisé
+    # 2. Patrimoine SCI agrégé sur (nom, prenom, date_naissance) normalisé.
+    # Pattern `array_agg(text[])` rejeté par PG si dimensions différentes
+    # entre rows ("cannot accumulate arrays of different dimensionality") —
+    # on utilise des subqueries `unnest(col)` qui flattent par row avant
+    # le DISTINCT global.
     sci = await _safe(pool.fetchrow(
         """SELECT
               SUM(n_sci) AS n_sci,
               SUM(total_capital_sci) AS total_capital_sci,
-              ARRAY(SELECT DISTINCT unnest(array_agg(sci_denominations))) AS sci_denominations,
-              ARRAY(SELECT DISTINCT unnest(array_agg(sci_sirens))) AS sci_sirens,
-              ARRAY(SELECT DISTINCT unnest(array_agg(sci_code_postaux))) AS sci_code_postaux,
+              ARRAY(
+                SELECT DISTINCT s
+                FROM silver.dirigeant_sci_patrimoine d, unnest(d.sci_denominations) s
+                WHERE UPPER(unaccent(d.nom)) = UPPER(unaccent($1))
+                  AND UPPER(unaccent(d.prenom)) = UPPER(unaccent($2))
+                  AND ($3::text IS NULL OR d.date_naissance LIKE $3 || '%')
+              ) AS sci_denominations,
+              ARRAY(
+                SELECT DISTINCT s
+                FROM silver.dirigeant_sci_patrimoine d, unnest(d.sci_sirens) s
+                WHERE UPPER(unaccent(d.nom)) = UPPER(unaccent($1))
+                  AND UPPER(unaccent(d.prenom)) = UPPER(unaccent($2))
+                  AND ($3::text IS NULL OR d.date_naissance LIKE $3 || '%')
+              ) AS sci_sirens,
+              ARRAY(
+                SELECT DISTINCT s
+                FROM silver.dirigeant_sci_patrimoine d, unnest(d.sci_code_postaux) s
+                WHERE UPPER(unaccent(d.nom)) = UPPER(unaccent($1))
+                  AND UPPER(unaccent(d.prenom)) = UPPER(unaccent($2))
+                  AND ($3::text IS NULL OR d.date_naissance LIKE $3 || '%')
+              ) AS sci_code_postaux,
               MIN(first_sci_date) AS first_sci_date
            FROM silver.dirigeant_sci_patrimoine
            WHERE UPPER(unaccent(nom)) = UPPER(unaccent($1))
