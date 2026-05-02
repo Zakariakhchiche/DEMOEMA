@@ -81,11 +81,8 @@ export function PersonGraphModal({ nom, prenom, fullName, onClose, onNavigate }:
     const centerLabel = center.full_name || `${center.prenom} ${center.nom}`;
     const SIZE_SELF = 56;
     const SIZE_COMAND = 36;
-    // Layout circulaire explicite : center à (0,0) — G6 v5 ne fait pas
-    // toujours bouger les nodes en force layout depuis position (0,0). On
-    // place les associés sur un cercle de rayon adapté au nombre.
-    const N = data.top_co_mandataires.length;
-    const radius = 60 + N * 22; // 200-300px selon densité
+    // Le layout G6 "radial" positionne automatiquement les nodes : focus
+    // au centre + leaves sur cercles concentriques selon distance topo.
     const styledNodes = [
       {
         id: "self",
@@ -99,8 +96,6 @@ export function PersonGraphModal({ nom, prenom, fullName, onClose, onNavigate }:
           has_offshore: center.has_offshore,
           is_lobbyist: center.is_lobbyist,
         },
-        x: 0,
-        y: 0,
         style: {
           size: SIZE_SELF,
           fill: colorForPerson({ type: "self" }),
@@ -113,39 +108,34 @@ export function PersonGraphModal({ nom, prenom, fullName, onClose, onNavigate }:
           labelOffsetY: SIZE_SELF / 2 + 10,
         },
       },
-      ...data.top_co_mandataires.map((co, i) => {
-        const angle = (i / Math.max(1, N)) * 2 * Math.PI - Math.PI / 2;
-        return {
-          id: `co_${i}_${co.nom}_${co.prenom}`,
-          data: {
-            type: "comand" as const,
-            label: co.full_name,
-            sub: `${co.n_shared} société${co.n_shared > 1 ? "s" : ""}`,
-            nom: co.nom,
-            prenom: co.prenom,
+      ...data.top_co_mandataires.map((co, i) => ({
+        id: `co_${i}_${co.nom}_${co.prenom}`,
+        data: {
+          type: "comand" as const,
+          label: co.full_name,
+          sub: `${co.n_shared} société${co.n_shared > 1 ? "s" : ""}`,
+          nom: co.nom,
+          prenom: co.prenom,
+          is_sanctioned: co.other_sanctioned,
+          has_offshore: co.other_offshore,
+          is_lobbyist: co.other_lobbyist,
+          n_shared: co.n_shared,
+        },
+        style: {
+          size: SIZE_COMAND,
+          fill: colorForPerson({
             is_sanctioned: co.other_sanctioned,
             has_offshore: co.other_offshore,
             is_lobbyist: co.other_lobbyist,
-            n_shared: co.n_shared,
-          },
-          x: Math.cos(angle) * radius,
-          y: Math.sin(angle) * radius,
-          style: {
-            size: SIZE_COMAND,
-            fill: colorForPerson({
-              is_sanctioned: co.other_sanctioned,
-              has_offshore: co.other_offshore,
-              is_lobbyist: co.other_lobbyist,
-            }),
-            stroke: "rgba(255,255,255,0.2)",
-            lineWidth: 1,
-            labelText: co.full_name,
-            labelFill: "rgba(255,255,255,0.85)",
-            labelFontSize: 11,
-            labelOffsetY: SIZE_COMAND / 2 + 8,
-          },
-        };
-      }),
+          }),
+          stroke: "rgba(255,255,255,0.2)",
+          lineWidth: 1,
+          labelText: co.full_name,
+          labelFill: "rgba(255,255,255,0.85)",
+          labelFontSize: 11,
+          labelOffsetY: SIZE_COMAND / 2 + 8,
+        },
+      })),
     ];
     const styledEdges = data.top_co_mandataires.map((co, i) => ({
       source: "self",
@@ -182,10 +172,17 @@ export function PersonGraphModal({ nom, prenom, fullName, onClose, onNavigate }:
           theme: "dark",
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           data: { nodes: styledNodes as any, edges: styledEdges as any },
-          // Pas de layout — on place déjà les nodes manuellement en cercle.
-          // Le layout "force" en G6 v5 part parfois de positions (0,0) et
-          // n'arrive pas à bien disperser sur un petit graph (3-20 nodes).
-          // L'autoFit s'occupe du zoom pour que tout soit visible.
+          // Layout radial : `self` au centre, associés en cercle autour.
+          // G6 v5 "radial" est conçu pour cette topologie star (1 hub).
+          // `unitRadius` = distance entre le focus et le 1er anneau.
+          layout: {
+            type: "radial",
+            unitRadius: 220,
+            preventOverlap: true,
+            nodeSize: 60,
+            focusNode: "self",
+            linkDistance: 220,
+          },
           node: { type: "circle" },
           edge: { type: "line" },
           behaviors: ["drag-canvas", "zoom-canvas", "drag-element"],
