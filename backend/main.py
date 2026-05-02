@@ -323,12 +323,14 @@ from routers.scoring import router as _scoring_router
 from routers.signals import router as _signals_router
 from routers.pipeline import router as _pipeline_router
 from routers.datalake import router as _datalake_router
+from routers.graph import router as _graph_router
 app.include_router(_admin_router)
 app.include_router(_news_router)
 app.include_router(_scoring_router)
 app.include_router(_signals_router)
 app.include_router(_pipeline_router)
 app.include_router(_datalake_router)
+app.include_router(_graph_router)
 
 # Note (audit PERF-2) : le _load_targets_sync() au module-level a été retiré.
 # Avant : double load (lifespan + module-level) → 100-500ms cold-start gaspillés.

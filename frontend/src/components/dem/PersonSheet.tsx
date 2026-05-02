@@ -4,8 +4,11 @@ import { useEffect, useState } from "react";
 import { Icon } from "./Icon";
 import { ScoreBadge } from "./ScoreBadge";
 import { DirigeantDrillContent } from "./DirigeantDrillContent";
+import { PersonGraphSection } from "./PersonGraphSection";
 import { datalakeApi } from "@/lib/api";
 import type { Person } from "@/lib/dem/types";
+
+type GraphData = Awaited<ReturnType<typeof datalakeApi.personGraph>>;
 
 interface Props {
   person: Person;
@@ -21,6 +24,9 @@ function splitNomPrenom(p: Person): { nom: string; prenom: string } {
 
 export function PersonSheet({ person, onClose }: Props) {
   const [data, setData] = useState<Awaited<ReturnType<typeof datalakeApi.dirigeantFull>> | null>(null);
+  const [graph, setGraph] = useState<GraphData | null>(null);
+  const [graphLoading, setGraphLoading] = useState(true);
+  const [graphError, setGraphError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,16 +38,26 @@ export function PersonSheet({ person, onClose }: Props) {
   useEffect(() => {
     if (!nom || !prenom) {
       setLoading(false);
+      setGraphLoading(false);
       setError("Nom ou prénom manquant pour identifier le dirigeant.");
       return;
     }
     setLoading(true);
+    setGraphLoading(true);
     setError(null);
+    setGraphError(null);
+
     datalakeApi
       .dirigeantFull(nom, prenom, dn)
       .then(setData)
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
+
+    datalakeApi
+      .personGraph(nom, prenom, 10)
+      .then(setGraph)
+      .catch((e) => setGraphError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setGraphLoading(false));
   }, [nom, prenom, dn]);
 
   useEffect(() => {
@@ -107,6 +123,12 @@ export function PersonSheet({ person, onClose }: Props) {
             <div style={{ color: "var(--text-tertiary)", fontSize: 13 }}>Aucune donnée pour ce dirigeant.</div>
           )}
           {!loading && data && <DirigeantDrillContent data={data} />}
+
+          <PersonGraphSection
+            graph={graph}
+            loading={graphLoading}
+            error={graphError}
+          />
         </div>
       </div>
     </>

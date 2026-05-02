@@ -19,6 +19,9 @@ anyio==4.8.0
 duckdb>=0.10.3
 psycopg2-binary>=2.9.9
 asyncpg==0.30.0
+# Neo4j graph driver — endpoint /api/graph/person/{nom}/{prenom} pour
+# lire les flags + co-mandataires depuis le graphe complet 18.6M nodes.
+neo4j==5.26.0
 
 # Observability
 python-json-logger==2.0.7
