@@ -30,6 +30,156 @@ Tu joues un **Senior Neo4j / Graph Data Engineer** sur le projet DEMOEMA. Profil
 - LLM tools : `graph_red_flags_network` + `graph_connection_path` (cf. `backend/clients/deepseek.py`)
 - Scripts ops : `infrastructure/agents/scripts/neo4j/*.py` + `bulk_import_full.sh`
 
+## 🚨 Quick error lookup (commence ici)
+
+Quand un truc plante, regarde d'abord ce tableau — il couvre 90% des galères Neo4j connues sur DEMOEMA.
+
+| Symptôme exact | Cause racine | Fix |
+|----------------|--------------|-----|
+| `CypherSyntaxError: Invalid input 'NULLS': expected ...` | `ORDER BY x DESC NULLS LAST` (Postgres-only) | `ORDER BY coalesce(x, -1) DESC` |
+| `consuming input failed: terminating connection due to idle-in-transaction timeout` | Une seule conn psycopg partagée entre phases longues | Fresh `psycopg.connect(dsn, autocommit=True)` par phase (`enrich_neo4j_priority1.py:_run_enrich`) |
+| `N batch errors / 0 flagged` (silent) sur SCI | psycopg renvoie `numeric` PG en `Decimal` Python → driver Neo4j ne sérialise pas | SQL `total_capital_sci::float8` (PR #92) |
+| `psycopg.errors.UndefinedColumn: column "n_total_social" does not exist` | Codegen LLM hallucine cols absentes du schéma bronze | `\d+ bronze.X` avant d'écrire le SELECT — rebuild depuis array_length() (PR #92) |
+| `ObjectNotInPrerequisiteStateError: matview "X" has not been populated` | silver_codegen génère `WITH NO DATA` sans REFRESH derrière | PR #95 = fix permanent (strip + force REFRESH atomique) ; ad-hoc : `REFRESH MATERIALIZED VIEW silver.X` |
+| `TransientError: DeadlockDetected · ForsetiClient` | MERGE concurrent sur shared Person nodes | Retry exponentiel 5x avec backoff (`build_co_mandates_full.py` post-PR #93) |
+| `502 Bad Gateway` sur `/api/graph/*` directement après deploy | Backend container redémarre, Caddy renvoie 502 le temps que uvicorn boot | Retry 10-30s — pas un bug code |
+| Canvas G6 vide dans le modal, header OK | `node.style: (d) => {...}` callback ignoré en G6 v5 | Inline styles per-node + `await graph.render()` (PR #99) |
+| Nodes G6 empilés au centre (taille adaptée mais position 0,0) | `force` layout cassé sur petits graphes | `layout: { type: "radial", focusNode: "self", unitRadius: 220 }` (PR #101) |
+| `bulk_import.sh : "encode(sha256(...)) invalid cast"` | `encode/sha256` pas dispo en pgsql sans extension | `md5(...)` à la place |
+| `bulk_import.sh : "SET keyword in CSV header"` | psql verbose mode injecte des SET dans le COPY output | `psql -q` quiet flag + `PGOPTIONS='-c statement_timeout=0'` env |
+| `neo4j-admin import : abort at 1000 orphan refs` | Hash mismatch silver↔bronze → 10% IS_DIRIGEANT pointent dans le vide | `--bad-tolerance=10000000` + `--skip-bad-relationships=true` |
+| `MATCH (p:Person {nom: $n}) WHERE upper(p.prenom) = $p` est lent | `upper()` runtime empêche l'usage de `person_nom` index | Data Neo4j est déjà UPPERCASE — drop `upper()`, match direct `{nom: $n_uc, prenom: $p_uc}` |
+
+---
+
+## 📚 Schema Neo4j (snapshot 2026-05-02)
+
+Les noms de props EXACTS — anti-hallucination. À mettre à jour à chaque nouvelle enrichment.
+
+### `:Person` (8.1M nodes)
+
+**Identity (toujours présents — issus de bulk_import_full.sh)** :
+- `uid` text — `md5(nom|prenom|date_naissance)`, `CONSTRAINT person_uid UNIQUE`
+- `nom` text — UPPERCASE, indexé `INDEX person_nom`
+- `prenom` text — UPPERCASE, capitalisé peut varier (Bernard vs BERNARD selon source)
+- `full_name` text — UPPERCASE, indexé `INDEX person_full_name`
+- `date_naissance` text — format `"YYYY-MM"` ou `null`
+- `age_2026`, `n_mandats_actifs` int
+
+**Compliance flags (issus de `enrich_*_in_neo4j.py` — TOUS peuvent être null)** :
+- `is_sanctioned` bool — flag OpenSanctions match (7 771 persons)
+- `sanctions_topics`, `sanctions_programs`, `sanctions_countries` text[]
+- `sanctions_entity_ids`, `sanctions_captions` text[]
+- `is_lobbyist` bool — flag HATVP (22 373 persons), `lobbying_actif` bool
+- `lobby_denominations`, `lobby_categories` text[]
+- `has_offshore` bool — flag ICIJ Panama/Paradise/Pandora (à enrichir, currently 0)
+- `icij_leaks`, `icij_node_ids`, `icij_countries` text[]
+- `n_sci` int — count SCI possédées (4 500 523 persons flagged)
+- `total_capital_sci` float — capital cumulé statutaire SCI
+- `sci_denominations`, `sci_sirens` text[]
+
+**OSINT social (9 609 persons flagged)** :
+- `linkedin_url` text
+- `github_username` text
+- `twitter_handle` text
+- `n_total_social` int — sum des array_length sur 7 sources
+
+**Wikidata (26 849 persons flagged)** :
+- `wikidata_qid` text — ex `"Q32055"`
+- `wikidata_birth_year` int
+- `wikidata_occupation` text — URI Wikidata
+
+### `:Company` (10.5M nodes)
+
+- `siren` text — `CONSTRAINT company_siren UNIQUE`
+- `denomination` text — peut être ""
+- `forme_juridique` text — code INSEE numérique (5710 SAS, 6540 SCI, 5499 SARL...) indexé
+- `code_ape` text — ex `"7010Z"`
+- `date_immat` text — `"YYYY-MM-DD"`
+- `code_postal` text
+- `capital` float — peut être `0` ou `null`
+
+### Relations
+
+- `(:Person)-[:IS_DIRIGEANT {role: text, actif: bool}]->(:Company)` — 10,5M edges
+  - `role` = code INSEE rôle (ex `"75"` = associé) ou texte court
+  - `actif` = false par défaut (post-bulk-import) sauf override
+- `(:Person)-[:CO_MANDATE {via_sirens: text[], n_shared_companies: int}]-(:Person)` — 7,7M edges
+  - **Bidirectionnel** — chaque paire (p1, p2) avec p1.uid < p2.uid
+  - `via_sirens` accumule les sociétés partagées
+  - `n_shared_companies` = count des `via_sirens`
+
+---
+
+## ✅ Verification snippets (smoke tests)
+
+À utiliser après chaque modif Cypher / endpoint / enrichment. Si le smoke test passe, c'est livrable.
+
+### 1. Vérifier qu'un endpoint répond
+
+```bash
+# Health Neo4j (rapide)
+curl -s -k --max-time 10 "https://82-165-57-191.sslip.io/api/graph/health"
+# Expected: {"status":"up","node_count":18641264}
+
+# Person endpoint (test data réel)
+curl -s -k --max-time 15 "https://82-165-57-191.sslip.io/api/graph/person/ARNAULT/Bernard?top_n=5" \
+  | python -m json.tool | head -20
+# Expected: person.uid + 3 top_co_mandataires + 1 company
+```
+
+### 2. Vérifier qu'un Cypher utilise un index (pas de full-scan)
+
+```bash
+docker exec demomea-neo4j cypher-shell -u neo4j -p "${NEO4J_PASSWORD:-demoema_neo4j_pass}" \
+  "EXPLAIN MATCH (p:Person {nom: 'ARNAULT', prenom: 'BERNARD'}) RETURN p;"
+```
+
+→ Plan doit contenir **`NodeIndexSeek`** (✅) ou **`NodeIndexScan`** (✅)
+→ Si `NodeByLabelScan` (❌) → full-scan 8M nodes, manque l'index ou `upper()` runtime
+
+### 3. Vérifier qu'une nouvelle prop est posée après enrichment
+
+```bash
+docker exec demomea-neo4j cypher-shell -u neo4j -p "${NEO4J_PASSWORD:-demoema_neo4j_pass}" \
+  "MATCH (p:Person) WHERE p.MA_NOUVELLE_PROP IS NOT NULL RETURN count(p) AS flagged;"
+```
+
+→ Si `flagged = 0` après un run "DONE" → 99% du temps c'est un cast type bug (Decimal/Json/etc) qui a fait fail silencieusement le SET.
+
+### 4. Vérifier les counts globaux post-import
+
+```bash
+docker exec demomea-neo4j cypher-shell -u neo4j -p "${NEO4J_PASSWORD:-demoema_neo4j_pass}" \
+  "MATCH (c:Company) RETURN count(c) AS companies;
+   MATCH (p:Person) RETURN count(p) AS persons;
+   MATCH ()-[r:IS_DIRIGEANT]->() RETURN count(r) AS edges_dir;
+   MATCH ()-[r:CO_MANDATE]-() RETURN count(r)/2 AS edges_comand_pairs;"
+```
+
+→ Référence actuelle (2026-05-02) : `companies=10 540 094 · persons=8 105 252 · edges_dir=10 504 938 · edges_comand_pairs=7 727 436`. Une variation > 5% vs ces nombres = à investiguer.
+
+### 5. Vérifier qu'aucun anti-pattern Cypher ne traîne
+
+```bash
+# Doit retourner ZÉRO match — sinon il y a un full-scan latent
+grep -rn 'WHERE upper(p\.\|NULLS LAST' \
+  backend/routers/graph.py \
+  backend/routers/datalake.py \
+  infrastructure/agents/scripts/neo4j/
+```
+
+### 6. Vérifier que la matview osint_persons_enriched est populée
+
+```bash
+docker exec demomea-datalake-db psql -U postgres -d datalake -tAc \
+  "SELECT ispopulated, pg_size_pretty(pg_total_relation_size('silver.osint_persons_enriched'::regclass)) FROM pg_matviews WHERE matviewname='osint_persons_enriched';"
+# Expected: t|1288 kB (au moins)
+# Si f|40 kB → REFRESH manuellement OR vérifier que PR #95 est bien deployée
+```
+
+---
+
 ## Scope (ce que tu fais)
 
 - Concevoir/modifier les Cypher queries (avec attention aux indexes + NULL handling)
