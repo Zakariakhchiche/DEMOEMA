@@ -74,13 +74,18 @@ export function PersonGraphModal({ nom, prenom, fullName, onClose, onNavigate }:
   useEffect(() => {
     if (!containerRef.current || !data || !data.person) return;
 
+    // G6 v5 attend les styles INLINES par node (pas un callback `style` au
+    // niveau du `node:` config). On suit le pattern de
+    // components/graph/GraphCanvas.tsx qui marche en prod.
     const center = data.person;
     const centerLabel = center.full_name || `${center.prenom} ${center.nom}`;
-    const nodes: NodeDatum[] = [
+    const SIZE_SELF = 56;
+    const SIZE_COMAND = 36;
+    const styledNodes = [
       {
         id: "self",
         data: {
-          type: "self",
+          type: "self" as const,
           label: centerLabel,
           sub: center.n_mandats_actifs ? `${center.n_mandats_actifs} mandats` : undefined,
           nom: center.nom,
@@ -89,16 +94,22 @@ export function PersonGraphModal({ nom, prenom, fullName, onClose, onNavigate }:
           has_offshore: center.has_offshore,
           is_lobbyist: center.is_lobbyist,
         },
+        style: {
+          size: SIZE_SELF,
+          fill: colorForPerson({ type: "self" }),
+          stroke: "#5eead4",
+          lineWidth: 3,
+          labelText: centerLabel,
+          labelFill: "rgba(255,255,255,0.95)",
+          labelFontSize: 13,
+          labelFontWeight: "bold" as const,
+          labelOffsetY: SIZE_SELF / 2 + 10,
+        },
       },
-    ];
-    const edges: EdgeDatum[] = [];
-
-    data.top_co_mandataires.forEach((co, i) => {
-      const nodeId = `co_${i}_${co.nom}_${co.prenom}`;
-      nodes.push({
-        id: nodeId,
+      ...data.top_co_mandataires.map((co, i) => ({
+        id: `co_${i}_${co.nom}_${co.prenom}`,
         data: {
-          type: "comand",
+          type: "comand" as const,
           label: co.full_name,
           sub: `${co.n_shared} société${co.n_shared > 1 ? "s" : ""}`,
           nom: co.nom,
@@ -108,117 +119,86 @@ export function PersonGraphModal({ nom, prenom, fullName, onClose, onNavigate }:
           is_lobbyist: co.other_lobbyist,
           n_shared: co.n_shared,
         },
-      });
-      edges.push({
-        source: "self",
-        target: nodeId,
-        data: { label: `${co.n_shared}` },
-      });
-    });
+        style: {
+          size: SIZE_COMAND,
+          fill: colorForPerson({
+            is_sanctioned: co.other_sanctioned,
+            has_offshore: co.other_offshore,
+            is_lobbyist: co.other_lobbyist,
+          }),
+          stroke: "rgba(255,255,255,0.2)",
+          lineWidth: 1,
+          labelText: co.full_name,
+          labelFill: "rgba(255,255,255,0.85)",
+          labelFontSize: 11,
+          labelOffsetY: SIZE_COMAND / 2 + 8,
+        },
+      })),
+    ];
+    const styledEdges = data.top_co_mandataires.map((co, i) => ({
+      source: "self",
+      target: `co_${i}_${co.nom}_${co.prenom}`,
+      style: {
+        stroke: "rgba(255,255,255,0.22)",
+        lineWidth: 1.5,
+        labelText: String(co.n_shared),
+        labelFill: "rgba(255,255,255,0.55)",
+        labelFontSize: 10,
+        labelBackground: true,
+        labelBackgroundFill: "rgba(0,0,0,0.55)",
+        labelBackgroundRadius: 4,
+        labelPadding: [2, 4],
+      },
+    }));
 
-    let graph: G6Graph;
+    let graph: G6Graph | null = null;
     let cancelled = false;
 
     (async () => {
-      const { Graph } = await import("@antv/g6");
-      if (cancelled || !containerRef.current) return;
-      if (graphRef.current) {
-        graphRef.current.destroy();
-      }
-      // G6 v5 a des types stricts qui ne se prêtent pas bien aux callbacks
-      // dynamiques (NodeStyle/EdgeStyle exhaustifs). On utilise `any` sur
-      // les callbacks comme le fait déjà components/graph/GraphCanvas.tsx
-      // — éviter de fork les types G6 à chaque update mineure.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      graph = new Graph({
-        container: containerRef.current,
-        autoFit: "view",
-        padding: [40, 40, 40, 40],
-        theme: "dark",
-        data: { nodes, edges } as unknown as { nodes: NodeDatum[]; edges: EdgeDatum[] } & Record<string, unknown>,
-        layout: {
-          type: "force",
-          linkDistance: 130,
-          nodeStrength: -300,
-          preventOverlap: true,
-        },
-        node: {
-          type: "circle",
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          style: ((d: any) => {
-            const dd = d?.data as NodeDatum["data"] | undefined;
-            const isSelf = dd?.type === "self";
-            return {
-              size: isSelf ? 56 : 36,
-              fill: colorForPerson(dd || {}),
-              stroke: isSelf ? "#5eead4" : "rgba(255,255,255,0.18)",
-              lineWidth: isSelf ? 3 : 1,
-              labelText: dd?.label,
-              labelPlacement: "bottom",
-              labelMaxWidth: 140,
-              labelFontSize: isSelf ? 13 : 11,
-              labelFontWeight: isSelf ? 700 : 500,
-              labelFill: "rgba(255,255,255,0.92)",
-            };
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          }) as any,
-        },
-        edge: {
-          type: "line",
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          style: ((d: any) => ({
-            stroke: "rgba(255,255,255,0.18)",
-            lineWidth: 1.5,
-            labelText: d?.data?.label,
-            labelFill: "rgba(255,255,255,0.55)",
-            labelFontSize: 10,
-            labelBackground: true,
-            labelBackgroundFill: "rgba(0,0,0,0.55)",
-            labelBackgroundRadius: 4,
-            labelPadding: [2, 4],
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          })) as any,
-        },
-        behaviors: ["drag-canvas", "zoom-canvas", "drag-element"],
-        plugins: [
-          {
-            type: "tooltip",
-            key: "tip",
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            getContent: ((_: unknown, items: any[]) => {
-              if (!items || items.length === 0) return "";
-              const d = (items[0]?.data?.data ?? items[0]?.data) as NodeDatum["data"] | undefined;
-              if (!d) return "";
-              const flags: string[] = [];
-              if (d.is_sanctioned) flags.push("Sanctionné");
-              if (d.has_offshore) flags.push("Offshore");
-              if (d.is_lobbyist) flags.push("Lobbyiste");
-              return `
-                <div style="padding:10px 14px;background:#0a0a0a;border:1px solid rgba(255,255,255,0.12);border-radius:10px;font-family:Inter,sans-serif;color:#fff;">
-                  <div style="font-weight:700;font-size:13px;">${d.label}</div>
-                  ${d.sub ? `<div style="color:rgba(255,255,255,0.55);font-size:11px;margin-top:2px;">${d.sub}</div>` : ""}
-                  ${flags.length ? `<div style="color:#fb7185;font-size:11px;margin-top:4px;">⚠ ${flags.join(" · ")}</div>` : ""}
-                </div>
-              `;
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            }) as any,
-          },
-        ],
-        animation: { duration: 400 },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any);
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      graph.on("node:click", ((evt: any) => {
-        const dd = (evt?.itemData?.data ?? evt?.target?.data) as NodeDatum["data"] | undefined;
-        if (!dd || dd.type !== "comand" || !dd.nom || !dd.prenom) return;
-        if (onNavigate) {
-          onNavigate({ nom: dd.nom, prenom: dd.prenom, fullName: dd.label });
+      try {
+        const { Graph } = await import("@antv/g6");
+        if (cancelled || !containerRef.current) return;
+        if (graphRef.current) {
+          graphRef.current.destroy();
+          graphRef.current = null;
         }
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      }) as any);
+        graph = new Graph({
+          container: containerRef.current,
+          autoFit: "view",
+          padding: [40, 40, 40, 40],
+          theme: "dark",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          data: { nodes: styledNodes as any, edges: styledEdges as any },
+          layout: {
+            type: "force",
+            linkDistance: 140,
+            nodeStrength: -350,
+            preventOverlap: true,
+          },
+          node: { type: "circle" },
+          edge: { type: "line" },
+          behaviors: ["drag-canvas", "zoom-canvas", "drag-element"],
+          animation: { duration: 400 },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any);
 
-      graphRef.current = graph;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        graph.on("node:click", ((evt: any) => {
+          const dd = (evt?.itemData?.data ?? evt?.target?.data) as NodeDatum["data"] | undefined;
+          if (!dd || dd.type !== "comand" || !dd.nom || !dd.prenom) return;
+          if (onNavigate) {
+            onNavigate({ nom: dd.nom, prenom: dd.prenom, fullName: dd.label });
+          }
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        }) as any);
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (graph as any).render();
+        graphRef.current = graph;
+      } catch (e) {
+        console.error("[PersonGraphModal] G6 render failed:", e);
+      }
     })();
 
     return () => {
