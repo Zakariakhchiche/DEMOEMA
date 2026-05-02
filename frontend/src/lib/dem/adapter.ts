@@ -23,6 +23,41 @@ import type { Target, Person } from "./types";
  * (score/mandats/sci à 0). Le drawer Fiche lazy-load la richesse via
  * /api/datalake/dirigeant/{nom}/{prenom}.
  */
+/** Extrait la personne FOCUS d'une question utilisateur (pas d'une réponse LLM).
+ *
+ * Diffère de `extractDirigeantsFromText` qui exige "(XX ans)" — ici on matche
+ * juste le pattern "Prénom NOM" car l'utilisateur n'écrit pas l'âge :
+ *   - "Donne-moi la fiche de Bernard ARNAULT"
+ *   - "Profil compliance d'Éric BACONNIER"
+ *   - "Bernard ARNAULT et son réseau"
+ *   - "fiche LAURENT MIGNON"  (full caps : on accepte aussi)
+ *
+ * Renvoie la PREMIÈRE occurrence trouvée (= sujet principal). Si plusieurs
+ * personnes citées (rare), on prend la 1re — c'est presque toujours le sujet
+ * de la question, les autres sont des contextes ("X et Y").
+ *
+ * Utilise un lookbehind négatif Unicode-safe (sans \b qui foire sur les
+ * accents). Limite raisonnable sur la longueur des tokens pour éviter des
+ * faux positifs sur du texte long.
+ */
+export function extractFocusPersonFromQuery(text: string): { nom: string; prenom: string } | null {
+  if (!text || text.length < 5 || text.length > 500) return null;
+  // 1. "Prénom NOM" (1ère lettre cap + reste en minuscules pour le prénom,
+  //    nom en MAJUSCULES). Multi-mot lastname autorisé (DE SAINT, LE TALLEC).
+  const re1 = /(?<![A-Za-zÀ-ÿ])([A-ZÀ-ÖØ-Ý][a-zà-öø-ÿ\-']{1,30})\s+([A-ZÀ-ÖØ-Ý][A-ZÀ-ÖØ-Ý\-']{1,40}(?:\s+[A-ZÀ-ÖØ-Ý][A-ZÀ-ÖØ-Ý\-']{1,40}){0,3})(?![A-Za-zÀ-ÿ])/;
+  const m1 = re1.exec(text);
+  if (m1) {
+    const prenom = m1[1].trim();
+    const nom = m1[2].trim().replace(/\s+/g, " ");
+    // Filtres anti-faux-positifs : éviter de prendre un titre/site/header
+    // capitalisé comme nom.
+    const blacklist = ["Donne", "Liste", "Fiche", "Profil", "Recherche", "Cherche", "Trouve", "DEMOEMA", "Compare", "Bonjour"];
+    if (blacklist.includes(prenom)) return null;
+    return { nom, prenom };
+  }
+  return null;
+}
+
 export function extractDirigeantsFromText(text: string): Person[] {
   if (!text) return [];
   // Capture multi-mot lastname : 1 à 5 mots ALL CAPS séparés par espaces.

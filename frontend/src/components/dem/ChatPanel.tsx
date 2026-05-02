@@ -12,7 +12,7 @@ import { UserMessage, AiMessage } from "./ChatBubbles";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { formatSiren } from "@/lib/dem/format";
 import { SUGGESTIONS_INITIAL } from "@/lib/dem/data";
-import { fetchTargets, fetchPersons, extractDirigeantsFromText } from "@/lib/dem/adapter";
+import { fetchTargets, fetchPersons, extractDirigeantsFromText, extractFocusPersonFromQuery } from "@/lib/dem/adapter";
 import { streamCopilot } from "@/lib/api";
 import type { ChatMsg, AiMessageData, Target, Density, Person } from "@/lib/dem/types";
 
@@ -355,6 +355,19 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
     // précise (pas un sourcing M&A) → on désactive fetchTargets pour éviter
     // d'afficher des cards top-cibles hors sujet sous la réponse.
     const isComplianceOrNetwork = /\b(red ?flag|sanction|offshore|lobbying|lobbyist|associ[ée]s?|entourage|r[ée]seau|co-?mandataires?|connect[ée]|hop)\b/i.test(text);
+    // Focus person extraction : si la query mentionne "Prénom NOM" en début/milieu,
+    // c'est le sujet de la question — on remonte sa fiche en card sous la réponse.
+    const focusPersonRaw = extractFocusPersonFromQuery(text);
+    const focusPerson: Person | null = focusPersonRaw
+      ? {
+          id: `p_focus_${focusPersonRaw.nom.replace(/\s+/g, "_")}`,
+          nom: `${focusPersonRaw.prenom} ${focusPersonRaw.nom}`,
+          age: 0, score: 0, mandats: 0, sci: 0, entreprises: [],
+          event: null, dept: "",
+          nom_raw: focusPersonRaw.nom, prenom_raw: focusPersonRaw.prenom,
+          date_naissance: null,
+        }
+      : null;
 
     // Heuristique sourcing : on ne déclenche fetchTargets QUE si la query
     // ressemble à un sourcing M&A (mots-clés cibles/trouve/liste/recherche/secteur/dept).
@@ -483,6 +496,22 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
         role: "ai", kind: "persons", header: "Dirigeants",
         content: streamedText || "Croisement INPI dirigeants × patrimoine SCI :",
         persons: personsForCards,
+      };
+    } else if (focusPerson) {
+      // Question portant sur 1 personne précise (ex: "Bernard ARNAULT et son
+      // réseau", "compliance de Laurent MIGNON"). On remonte sa fiche en card
+      // sous la réponse — clic ouvre PersonSheet drawer (qui inclut Réseau Neo4j).
+      // Si le LLM a aussi cité d'autres personnes avec leur âge dans la réponse
+      // (ex: liste de co-mandataires), on les ajoute en plus.
+      const extracted = extractDirigeantsFromText(streamedText);
+      const focusKey = `${focusPerson.prenom_raw}|${focusPerson.nom_raw}`.toUpperCase();
+      const extras = extracted.filter(p =>
+        `${p.prenom_raw}|${p.nom_raw}`.toUpperCase() !== focusKey
+      ).slice(0, 7);
+      response = {
+        role: "ai", kind: "persons", header: "Profil dirigeant",
+        content: streamedText || `Profil de ${focusPerson.nom}.`,
+        persons: [focusPerson, ...extras],
       };
     } else if (isDD && cibles.length > 0) {
       response = {
