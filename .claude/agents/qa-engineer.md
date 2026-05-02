@@ -63,6 +63,16 @@ Charger le corpus baseline (`audit_demoema/AUDIT_QA_RAPPORT.md` §2), rejouer vi
 ### Playbook D — Audit datalake intégrité
 Gap silver→gold < 1 %, cohérence dashboard↔fiche < 1 % delta, freshness < 24 h sources quotidiennes, MV refresh à jour.
 
+## Cible de rigueur DEMOEMA : L4 minimum (décision 2026-05-02)
+
+Pas de release majeure investisseur ou prod payante sans **QCS ≥ 90 sur les 15 dimensions** + **14 axes Playbook E GO**. Plan d'adoption L2→L4 : 12 semaines / 6 sprints / 20 tickets `qa-l4-*` (cf. `docs/QA_PLAYBOOKS.md` §8).
+
+Le subagent qa-engineer doit, à chaque audit :
+1. Calculer le **QCS courant** (moyenne pondérée 15 dimensions normalisées 0-100)
+2. Reporter **delta vs sprint précédent** + alerter régression > 5 pp sur une dimension
+3. Identifier les disciplines L3/L4 manquantes (gap analysis vers L4)
+4. Bloquer toute mention "GO production" si QCS < 90
+
 ## Couverture maximale — exigence dure (cf. Playbook E §7)
 
 Mesurer et reporter **les 15 dimensions** de coverage à chaque audit minutieux :

@@ -972,7 +972,113 @@ Trend hebdo : courbe par dimension sur 12 semaines glissantes. Alerte Slack si u
 
 ---
 
-## 8. Sources état de l'art (référencées 2026-05-02)
+## 8. Plan d'adoption L2 → L4 — 12 semaines (2026-05-02 → 2026-07-25)
+
+**Décision stratégique (2026-05-02)** : DEMOEMA cible **L4 minimum** pour la prod payante. Pas de release majeure investisseur sans QCS ≥ 90 sur les 15 dimensions.
+
+**Effort estimé** : ~8-10 ingénieur-semaines réparties sur 6 sprints de 2 semaines (~1.5-2 dévs full-time, ou 3-4 dévs à 50 % focus QA).
+
+**Coût** : 0 € (tous outils OSS — Hypothesis, mutmut, Schemathesis, DeepEval, Soda Core, Pact, axe-core, Bandit, Semgrep, OWASP ZAP, TLA+, litmuschaos, etc.). Aucun SaaS payant sans approbation explicite Zak.
+
+### Sprint 1 (semaine 1-2 : 2026-05-04 → 2026-05-15) — Quick wins L3 fondations
+
+| Ticket | Discipline | Effort | Output |
+|---|---|---|---|
+| `qa-l4-01` | Hypothesis property-based scoring M&A | 2 j | `backend/tests/properties/test_scoring_invariants.py` (10+ propriétés) |
+| `qa-l4-02` | Boundary value tests SIREN/NAF/dates/CA | 1 j | `backend/tests/test_boundary_values.py` |
+| `qa-l4-03` | Golden dataset 50 fiches vérité terrain | 3 j | `backend/tests/fixtures/golden_50.json` annoté manuellement |
+
+**Verdict sprint 1** : `pytest -m "property or boundary or golden"` green + Hypothesis stats > 1000 inputs/test.
+
+### Sprint 2 (semaine 3-4 : 2026-05-18 → 2026-05-29) — Mutation + Differential
+
+| Ticket | Discipline | Effort | Output |
+|---|---|---|---|
+| `qa-l4-04` | mutmut baseline scoring/copilot/datalake | 2 j | mutation score baseline measured ; cible 80 % |
+| `qa-l4-05` | Differential SSE vs REST vs CSV vs PDF | 1 j | `backend/tests/test_differential_paths.py` |
+| `qa-l4-06` | Metamorphic tests (monotonie/idempotence) | 2 j | `backend/tests/properties/test_metamorphic.py` |
+
+**Verdict sprint 2** : mutation score ≥ 80 % sur 5 modules critiques (`backend/clients/deepseek.py`, `backend/main.py::copilot_*`, `backend/datalake.py::scoring*`, `backend/main.py::_PROMPT_INJECTION_PATTERNS`, `backend/routers/datalake.py::_fiche_entreprise_uncached`).
+
+### Sprint 3 (semaine 5-6 : 2026-06-01 → 2026-06-12) — Chaos + Endurance + Negative
+
+| Ticket | Discipline | Effort | Output |
+|---|---|---|---|
+| `qa-l4-07` | Chaos engineering Game Day | 3 j | `qa/chaos/litmuschaos-experiments.yaml` + 1ère exécution |
+| `qa-l4-08` | Endurance 24h + cron 7j | 2 j | GitHub Actions workflow `endurance.yml` + Grafana dashboard |
+| `qa-l4-09` | Negative testing exhaustif | 3 j | 50 cas négatifs / 10 endpoints critiques (≥ 500 tests) |
+| `qa-l4-10` | Fuzzing radamsa/atheris | 2 j | corpus fuzz + 24h CI cluster nightly |
+
+**Verdict sprint 3** : Game Day OK (système dégrade gracieusement, RTO < 15 min) + 0 OOM endurance + 0 vulnérabilité fuzz critique.
+
+### Sprint 4 (semaine 7-8 : 2026-06-15 → 2026-06-26) — Contracts + Fairness + Judge panel
+
+| Ticket | Discipline | Effort | Output |
+|---|---|---|---|
+| `qa-l4-11` | Contract testing Pact | 2 j | broker Pact local + 3 contrats (frontend↔backend↔datalake) |
+| `qa-l4-12` | Tests fairness/bias scoring | 2 j | `backend/tests/test_fairness.py` (aif360 ou fairlearn) |
+| `qa-l4-13` | LLM judge panel 3+ judges | 3 j | `backend/tests/eval/judge_panel.py` (Prometheus 2 OSS + 2 autres) |
+| `qa-l4-14` | Replay & event sourcing | 2 j | logs structurés JSON + replay harness staging |
+
+**Verdict sprint 4** : Contracts Pact green + 0 bias détecté (disparate impact < 0.8) + judge panel agree ≥ 80 % sur 100 réponses.
+
+### Sprint 5 (semaine 9-10 : 2026-06-29 → 2026-07-10) — Verification + Supply chain + SAST/DAST
+
+| Ticket | Discipline | Effort | Output |
+|---|---|---|---|
+| `qa-l4-15` | Verification formelle TLA+ légère | 3 j | `qa/tla/auth_state_machine.tla` + `qa/tla/scoring_monotone.tla` checked OK |
+| `qa-l4-16` | SBOM + sigstore + SLSA L3 | 2 j | CI génère SBOM par release + signature artefacts |
+| `qa-l4-17` | SAST + DAST + IAST | 3 j | Bandit + Semgrep + OWASP ZAP staging + alerting findings |
+| `qa-l4-18` | A/B shadow 1 % prod | 2 j | proxy nginx/caddy split traffic + diff log |
+
+**Verdict sprint 5** : TLA+ no deadlock + 0 finding SAST/DAST high+ + SBOM signé chaque release.
+
+### Sprint 6 (semaine 11-12 : 2026-07-13 → 2026-07-24) — Dashboard QCS + audit final L4
+
+| Ticket | Discipline | Effort | Output |
+|---|---|---|---|
+| `qa-l4-19` | Dashboard Grafana 15D + alerting | 3 j | dashboard JSON déployé + 15 alertes Slack |
+| `qa-l4-20` | Migration L4 finale + audit complet | 5 j | rapport `audit_demoema/AUDIT_L4_FINAL.md` + QCS ≥ 90 |
+
+**Verdict sprint 6** : QCS ≥ 90 calculé en automatique + tableau de bord live + audit complet 14 axes 100 % GO.
+
+### Métriques de progression hebdomadaires
+
+Chaque semaine, le qa-engineer subagent émet un rapport Slack auto avec :
+- **QCS courant** (0-100, baseline L2 ≈ 55, cible L4 = 90)
+- **Tickets QA L4** : open / in-progress / done sur les 20
+- **Coverage par dimension** : line %, branch %, mutation %, etc.
+- **Régressions vs baseline** : alerte si une dimension baisse > 5 pp
+- **CI time** : doit rester < 30 min (paralléliser si dépasse)
+
+### Risques & mitigations
+
+| Risque | Impact | Mitigation |
+|---|---|---|
+| Chaos Game Day révèle bugs critiques imprévus | sprint 3 retardé | Buffer 1 semaine sprint 3 ; prioriser fixes critiques avant continuer |
+| TLA+ courbe d'apprentissage | sprint 5 retardé | Réduire scope à 1 invariant (auth state) plutôt que 3 |
+| Mutation score < 80 % nécessite refactor majeur | sprint 2 retardé | Accepter 70 % temporairement, ticket dette tech pour Q4 |
+| LLM judges disagreement persistent | métrique faithfulness instable | Augmenter panel à 5 judges + références obligatoires |
+| Hypothesis trouve crash bugs nouveaux | sprint 1 dérive | Boucle short-fix : nouveau bug = nouveau ticket SCRUM, pas blocage sprint |
+
+### Critères GO production payante (post-sprint 6)
+
+- ✅ QCS ≥ 90 calculé en automatique
+- ✅ 14 axes Playbook E tous GO
+- ✅ 350-400+ éléments cliquables 100 % testés (axe 1.bis)
+- ✅ Mutation score ≥ 90 % sur les 5 modules critiques
+- ✅ 0 finding SAST/DAST high+
+- ✅ TLA+ vérification formelle invariants critiques OK
+- ✅ Bias / fairness audit OK (disparate impact < 0.8)
+- ✅ Chaos Game Day passé (RTO < 15 min)
+- ✅ Endurance 24h + 7j sans memory leak / MV drift
+- ✅ Dashboard Grafana 15D vert sur toutes dimensions
+
+Sans ces 10 critères → la release n'est pas prod-grade et reste en staging/beta.
+
+---
+
+## 9. Sources état de l'art (référencées 2026-05-02)
 
 ### Anthropic / Claude Code
 - [Subagents docs](https://code.claude.com/docs/en/sub-agents)
