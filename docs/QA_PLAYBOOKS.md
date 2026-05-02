@@ -671,7 +671,213 @@ for (const route of ROUTES) {
 - **Storybook 9 + addon-test** (chaque composant cliquable a une story testée en isolation, gain coverage)
 - **MemLab heap snapshot** post-clic (détecter detached nodes après ouverture/fermeture modal/drawer)
 
-**Verdict axe 1** : pass uniquement si Lighthouse perf > 80, a11y > 95, SW registered, 0 console error, **ET 100 % des éléments cliquables PASS dans clickables-exhaustive.spec.ts** (350-400+ éléments distincts sur les 14 routes).
+#### Sous-axe 1.ter — TESTS NAVIGATEUR EXHAUSTIFS (18 catégories)
+Au-delà des cliquables (1.bis), il faut tester **toutes les interactions navigateur** : clavier, souris, tactile, persistance, réseau, PWA, permissions, a11y, visuel, résilience, perf, cross-browser, cross-device. ~250 tests Playwright distincts.
+
+##### 1.ter.A — Navigation & Routing (10 tests)
+- **Browser back/forward** : `page.goBack()` / `goForward()` après nav `#dashboard → #chat → #explorer` → state correctement restauré
+- **Deep link / bookmark** : ouvrir `https://prod/?siren=333275774#fiche` directement → fiche EQUANS chargée
+- **Refresh F5** : sur `#chat` avec conversation en cours → state préservé (localStorage) ou rechargé proprement
+- **Multi-tab** : ouvrir 2 onglets connectés → auth partagée (cookie/JWT) + pas de conflit chat (chaque onglet sa session)
+- **Hash change manuel** : taper `#xxxxx` invalide dans URL bar → fallback 404 ou redirect dashboard
+- **Hash routing FR/EN** : `#graphe` → alias `#graph` rendu (regression G3)
+- **Anchor jumps** : `#audit?run=42` → scroll auto sur le run
+- **History.pushState** vs `replaceState` : SPA nav ne pollue pas l'historique inutilement
+- **Lien externe `target="_blank"`** : a `rel="noopener noreferrer"` (sécurité)
+- **Liens copier-coller** : URL de partage générée a tout le state (siren + filtres + tab actif)
+
+##### 1.ter.B — Interactions clavier (15 tests)
+- **Tab order** : Tab parcourt les éléments dans ordre logique (haut→bas, gauche→droite), pas de saut imprévu
+- **Shift+Tab** : ordre inverse cohérent
+- **Escape** : ferme modal/drawer/dropdown ouvert
+- **Enter/Space** : sur boutons/role=button → déclenche clic (a11y)
+- **Arrow keys** : navigation listbox/menu/tabs (role="listbox", role="tablist")
+- **Home/End** : début/fin de liste navigable
+- **Focus trap** : modal ouverte → Tab boucle dans la modal, ne sort pas
+- **Focus restoration** : modal fermée → focus retourne au trigger
+- **Skip link** : "Aller au contenu principal" présent en début de page (WCAG 2.4.1)
+- **Raccourcis** : Ctrl+K (CommandPalette), Ctrl+S (sauver), Esc, `/` (focus search) — testés
+- **Ctrl+F** : navigateur natif fonctionne (pas intercepté par app)
+- **Tab dans formulaires** : Enter dans input single-line submit le form
+- **Textarea** : Tab insère un Tab caractère ou navigue ? (configurable)
+- **Focus visible** : anneau de focus visible (`:focus-visible`, WCAG 2.4.7) sur tous éléments interactifs
+- **Pas de focus piégé** par un overlay invisible (z-index issues)
+
+##### 1.ter.C — Interactions souris avancées (8 tests)
+- **Double-click** : sur cell tableau → édition inline ? sur SIREN → navigation fiche ?
+- **Right-click context menu** : default browser respecté (pas intercepté sauf raison forte)
+- **Drag & drop** : pipeline kanban → déplacer carte entre colonnes (`page.dragAndDrop()`)
+- **Drag depuis OS** : drag fichier CSV depuis explorer → upload reconnu
+- **Hover preview** : tooltip après 500ms sur title/aria-describedby
+- **Hover delay** : pas d'over-fire (debounce sur hover si tooltip lourd)
+- **Click vs mousedown** : clic droit pas confondu avec clic gauche
+- **Wheel scroll** : sur graphe react-flow → zoom (pas page scroll)
+
+##### 1.ter.D — Interactions tactiles mobile (10 tests)
+- **Tap** : équivalent click sur touch screen
+- **Double-tap zoom** : désactivé pour PWA (`touch-action: manipulation`)
+- **Long press** : context menu mobile, pas conflit avec scroll
+- **Swipe horizontal** : drawer latéral ouvre/ferme
+- **Swipe vertical** : pull-to-refresh activé ou désactivé selon UX
+- **Pinch zoom** : graphe entreprises zoom avec 2 doigts
+- **Touch target ≥ 44×44 px** (Apple HIG) ou ≥ 24×24 px (WCAG 2.2 AA)
+- **Touch scroll momentum** : `-webkit-overflow-scrolling: touch` sur containers scrollables
+- **Touch + clavier virtuel** : input focus → clavier monte → layout pas cassé
+- **iOS Safari `100vh`** : correction nécessaire (toolbars dynamiques) → `--vh` custom property
+
+##### 1.ter.E — Copier / Coller / Clipboard (6 tests)
+- **Ctrl+C** sur cell SIREN → "333275774" copié (Clipboard API)
+- **Ctrl+V** dans search bar → query pasted
+- **Bouton "Copier" SIREN** → notification toast "Copié !"
+- **Paste image** depuis presse-papier → upload (si feature)
+- **Drag select texte** : sélection multi-cells tableau Explorer
+- **Permission Clipboard API** : prompt navigateur si requis (Firefox restrictive)
+
+##### 1.ter.F — File upload / download (8 tests)
+- **Upload single** : `<input type="file">` accepte un CSV
+- **Upload multi** : `multiple` attribute fonctionne
+- **Drag&drop upload zone** : visual feedback (`dragover` highlight)
+- **Validation taille** : > 10MB → message clair, pas crash
+- **Validation type MIME** : .exe rejeté, .csv accepté
+- **Preview** : avant submit, file name visible
+- **Progress bar upload** : si > 1MB, barre de progression
+- **Download** : export CSV → fichier nommé `targets_2026-05-02.csv`
+
+##### 1.ter.G — Print / PDF export (4 tests)
+- **Ctrl+P** : ouvre dialog print
+- **CSS `@media print`** : layout adapté (no nav, no buttons, fiche full-width)
+- **Page break control** : `page-break-after: avoid` sur tables longues
+- **Export PDF** : bouton "Exporter PDF" génère fichier valide via puppeteer/jsPDF backend
+
+##### 1.ter.H — Persistance (localStorage / sessionStorage / IndexedDB) (8 tests)
+- **localStorage écrit** après action user (chat conversation, filtres explorer)
+- **localStorage lu** au mount → state restauré
+- **Quota exhausted** : si > 5MB → catch error, message clair
+- **Clear via DevTools** → app continue fonctionner (graceful degradation)
+- **sessionStorage** vs localStorage : choix cohérent (session = volatil par tab, local = persistent)
+- **IndexedDB** : si utilisé pour PWA cache offline, test write/read/transactions
+- **Migration version** : si schema localStorage change, migration du data ancien
+- **Pas de PII en localStorage** : RGPD — emails, JWT (si stockés) doivent expirer
+
+##### 1.ter.I — Cookies / Auth lifecycle (6 tests)
+- **JWT cookie SameSite=Strict** : test cross-site → cookie pas envoyé
+- **Cookie expiry** : 1h → après expiry, 401 + redirect login
+- **CSRF token double-submit** : si cookie auth, CSRF header obligatoire
+- **Logout** : cookie effacé proprement
+- **Refresh token rotation** : silent refresh avant expiry access token
+- **Third-party cookies blocked** (Safari ITP) : app fonctionne quand même
+
+##### 1.ter.J — Network conditions (PWA + résilience) (8 tests)
+- **Offline complet** (`context.setOffline(true)`) : SW sert le cache, page offline propre
+- **Slow 3G** (Chrome DevTools throttle) : Lighthouse mobile reste perf > 70
+- **Packet loss 5%** : retry automatique sur fetch failed
+- **Timeout long** : DeepSeek 90s → loading indicator + abort possible
+- **API down** : message dégradé clair, pas de spinner infini
+- **Reconnect** : après offline → online, SSE reprend automatiquement
+- **Cache stale** : SW invalide cache après deploy (versioning hash dans nom)
+- **Background sync** : actions user offline rejouées au retour online (PWA)
+
+##### 1.ter.K — PWA spécifique (8 tests)
+- **`beforeinstallprompt`** intercepté → bouton "Installer" affiché (Chrome Android)
+- **Install** : app installée → ouvre en standalone (pas dans Chrome tab)
+- **Manifest** : `name`, `short_name`, `theme_color`, `background_color`, icons toutes tailles
+- **Icons** : 192x192 + 512x512 + maskable
+- **Splash screen** : généré depuis icons + theme_color
+- **Push notifications** : permission demandée au bon moment, pas au mount
+- **iOS Safari Add to Home** : meta tags `apple-touch-icon` + `apple-mobile-web-app-capable`
+- **Standalone detection** : `window.matchMedia('(display-mode: standalone)')` → UI adaptée
+
+##### 1.ter.L — Permissions navigateur (4 tests)
+- **Geolocation** : si utilisé pour filtrer cibles → permission demandée explicitement, pas au mount
+- **Notifications** : permission demandée après action user (pas auto)
+- **Clipboard read** : permission API Clipboard
+- **Permission denied** : fallback graceful (pas d'erreur red)
+
+##### 1.ter.M — Accessibilité avancée (12 tests)
+- **axe-core 4.11.4 scan** sur 14 routes → 0 violation `serious`/`critical`
+- **WCAG 2.2 AA** : 50 critères (incluant touch target 24×24, focus visible enhanced, drag movement alt)
+- **Screen reader (NVDA/VoiceOver via Guidepup)** : structure landmarks (header, nav, main, footer)
+- **`aria-live="polite/assertive"`** sur toast notifications, status messages
+- **`aria-busy`** sur regions en cours de loading
+- **`role="alert"`** pour erreurs critiques
+- **Skip links** : "Aller au contenu", "Aller à la nav"
+- **Headings hierarchy** : 1× h1, h2 logiques, pas de saut (h2 → h4)
+- **Form labels** : chaque input a `<label for>` ou `aria-labelledby`
+- **Error messages associés** : `aria-describedby` sur input invalide
+- **Color contrast** : 4.5:1 texte normal, 3:1 texte large (WCAG AA)
+- **Pas de info véhiculée par couleur seule** : icône + texte si rouge = erreur
+
+##### 1.ter.N — Tests visuels & visual regression (8 tests)
+- **Screenshot par route** : `toHaveScreenshot()` Playwright avec `maxDiffPixelRatio: 0.02`
+- **Dark mode** : `colorScheme: 'dark'` → contraste OK, lisible
+- **Light mode** : default
+- **High contrast Windows** : `forced-colors: active` → lisible
+- **Zoom 200%** : layout pas cassé (WCAG 1.4.4)
+- **Zoom 400%** : reflow OK (mobile width)
+- **`prefers-reduced-motion`** : animations désactivées si OS demande
+- **`prefers-color-scheme`** : auto-switch dark/light selon OS
+
+##### 1.ter.O — Résilience aux manipulations (5 tests)
+- **DOM tampering** : user supprime un `disabled` via DevTools console → action backend rejette quand même (sécurité côté serveur, pas frontend trust)
+- **JS désactivé** : page basique fonctionne (au moins liens HTML standards)
+- **Browser extensions** : test avec uBlock activé → pas de blocage des assets propres
+- **CSP strict** : `Content-Security-Policy` empêche inline scripts non autorisés
+- **Console manipulation** : user tape `window.user.role = 'admin'` → backend ignore, vrai role dans JWT signé
+
+##### 1.ter.P — Performance & Memory (6 tests)
+- **INP** (Interaction to Next Paint) < 200ms via web-vitals attribution build
+- **LCP** < 2.5s sur les 14 routes
+- **CLS** < 0.1
+- **Memory leaks via MemLab** : after open/close modal 100× → 0 detached DOM nodes
+- **Animation perf** : `requestAnimationFrame` 60fps, pas de jank > 16ms
+- **Page Visibility API** : tab inactive → pause polling, animations
+
+##### 1.ter.Q — Window / Tab management (6 tests)
+- **Window resize live** : drag corner → layout responsive sans flash
+- **Multi-window** : 2 fenêtres détachées → état chacune indépendant
+- **`beforeunload`** : si modifs non sauvées → confirmation "Voulez-vous quitter?"
+- **Tab close** : event handler clean (no zombies)
+- **Window focus/blur** : pause animations + cancel pending requests
+- **Cross-tab communication** : `BroadcastChannel` ou storage events si auth synchronisée
+
+##### 1.ter.R — Cross-browser & Cross-device matrix (4 tests + matrice)
+- **Playwright project matrix** :
+  ```typescript
+  // playwright.config.ts
+  projects: [
+    { name: 'chromium-desktop', use: devices['Desktop Chrome'] },
+    { name: 'firefox-desktop', use: devices['Desktop Firefox'] },
+    { name: 'webkit-desktop', use: devices['Desktop Safari'] },
+    { name: 'msedge', use: { ...devices['Desktop Edge'], channel: 'msedge' } },
+    { name: 'iphone-15', use: devices['iPhone 15'] },
+    { name: 'pixel-8', use: devices['Pixel 8'] },
+    { name: 'ipad', use: devices['iPad Pro'] },
+    { name: 'desktop-4k', use: { viewport: { width: 3840, height: 2160 } } },
+  ]
+  ```
+- Run `playwright test --project=chromium-desktop,firefox-desktop,webkit-desktop,msedge,iphone-15,pixel-8,ipad,desktop-4k` en CI nightly
+- **Verdict cross-device** : 100 % tests verts sur 8 projets (4 navigateurs × 4+ devices)
+
+#### Outils browser à activer (versions stables 2026-05)
+
+- **Playwright 1.59.1** (`browser.bind()` + `--debug=cli` agentic auto-repair)
+- **`@axe-core/playwright`** + axe-core 4.11.4 (a11y scan automatique)
+- **MemLab** (Meta) — heap snapshots before/after pour memory leaks
+- **web-vitals 5+ attribution build** — INP avec `interactionTarget` debug
+- **Lighthouse-CI v12** — performance + a11y + best practices + SEO + PWA
+- **Guidepup** (OSS) — pilote NVDA/VoiceOver depuis Playwright
+- **MSW** (Mock Service Worker) — mock SSE + fetch sans flakiness
+- **chrome-devtools-mcp 0.23.0** — Lighthouse MCP + memory leak skill
+- **Chromatic-equivalent OSS** : `playwright toHaveScreenshot()` natif (gratuit)
+
+**Verdict axe 1 final** : pass uniquement si :
+- Lighthouse perf > 80, a11y > 95, SW registered, 0 console error
+- 100 % éléments cliquables PASS (1.bis, 350-400+)
+- 100 % tests navigateur exhaustifs PASS (1.ter, ~250 tests sur les 18 catégories)
+- Cross-browser matrix verte (4 navigateurs × 4+ devices = 8 projets Playwright)
+- 0 violation axe-core `serious`/`critical` sur 14 routes
+- INP < 200ms, LCP < 2.5s, CLS < 0.1
+- 0 memory leak détecté MemLab après 100 cycles modal/drawer
 
 ### Axe 2 — Backend API MINUTIEUX (FastAPI / SSE / async / contracts)
 

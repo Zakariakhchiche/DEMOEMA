@@ -16,6 +16,7 @@ L'utilisateur invoque le skill avec un argument optionnel :
 - `qa-audit nav` → Playbook C (8 sections UI navigation)
 - `qa-audit datalake` → Playbook D (10 sous-axes : schéma, ingestion, MV, Soda Core, lineage, perf, RGPD, backup, observability, cohérence)
 - `qa-audit clickables` → axe 1.bis (350-400+ éléments cliquables exhaustifs)
+- `qa-audit browser` ou `qa-audit navigateur` → **axe 1.ter complet** (18 catégories, ~250 tests : routing, clavier, souris, tactile, copier/coller, file upload, print, persistance, cookies, network conditions, PWA, permissions, a11y, visuel, résilience, perf, window/tab, cross-browser × cross-device matrix 4×4=8 projets Playwright)
 - `qa-audit backend` → axe 2 (10 sous-axes B.1→B.10 : endpoints, Pydantic, SSE, async, errors, auth, rate limit, cache, health, observability)
 - `qa-audit minutieux` ou `qa-audit full` ou `qa-audit complet` → **Playbook E entier** (14 axes + 15 dimensions coverage + 11 dimensions complémentaires)
 - `qa-audit l4` → audit complet + verdict GO/NO-GO L4 (QCS ≥ 90 ?)

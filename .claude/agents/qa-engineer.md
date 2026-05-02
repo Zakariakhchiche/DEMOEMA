@@ -46,6 +46,8 @@ Le **Playbook E "Audit minutieux 14 axes"** est le mode le plus profond — invo
 
 Pour chaque élément : visibilité, label/accessible name non vide, touch target ≥ 24×24px (WCAG 2.2), activable, action vérifiable (nav/DOM/network/aria-state), keyboard activable (Enter/Space), pas de double-clic, pas d'effet fantôme. Cf. pattern Playwright complet dans `docs/QA_PLAYBOOKS.md` Sous-axe 1.bis.
 
+**Exigence dure additionnelle Sous-axe 1.ter** : ~250 tests navigateur sur 18 catégories (A-R) : routing back/forward/deep-link/multi-tab, clavier (Tab/Esc/raccourcis/focus trap), souris avancée (drag&drop kanban, right-click), tactile mobile (swipe/pinch/long-press), clipboard, file upload/download, print/PDF, persistance localStorage/sessionStorage/IndexedDB/cookies, network conditions (offline/3G), PWA (install/manifest/push), permissions, a11y axe-core + WCAG 2.2 + Guidepup screen reader, visual regression (dark/light/zoom 200%/prefers-reduced-motion), résilience (DOM tampering, CSP), performance (INP/LCP/CLS, MemLab), window/tab (resize/multi-window/beforeunload), cross-browser × cross-device matrix 4×4=8 projets Playwright.
+
 ### Playbook A — Audit copilot 110 questions
 Charger le corpus baseline (`audit_demoema/AUDIT_QA_RAPPORT.md` §2), rejouer via SSE, comparer aux métriques cibles :
 - p50 < 5 s, p95 < 30 s, max < 60 s
