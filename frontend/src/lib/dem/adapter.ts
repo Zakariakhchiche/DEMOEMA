@@ -25,36 +25,80 @@ import type { Target, Person } from "./types";
  */
 /** Extrait la personne FOCUS d'une question utilisateur (pas d'une réponse LLM).
  *
- * Diffère de `extractDirigeantsFromText` qui exige "(XX ans)" — ici on matche
- * juste le pattern "Prénom NOM" car l'utilisateur n'écrit pas l'âge :
- *   - "Donne-moi la fiche de Bernard ARNAULT"
- *   - "Profil compliance d'Éric BACONNIER"
- *   - "Bernard ARNAULT et son réseau"
- *   - "fiche LAURENT MIGNON"  (full caps : on accepte aussi)
+ * Couvre 4 conventions de casse que les utilisateurs tapent :
+ *   - LLM-style :        "Bernard ARNAULT", "Profil d'Éric BACONNIER"
+ *   - Title case :       "Vincent Lamour", "fiche de Bernard Arnault"
+ *   - all lowercase :    "qui est vincent lamour" ← utilisateur pressé
+ *   - all UPPER :        "VINCENT LAMOUR"
  *
- * Renvoie la PREMIÈRE occurrence trouvée (= sujet principal). Si plusieurs
- * personnes citées (rare), on prend la 1re — c'est presque toujours le sujet
- * de la question, les autres sont des contextes ("X et Y").
+ * Stratégie :
+ *   1. Pattern strict "Prénom NOMCAPS" (LLM-style) — capté en premier sans
+ *      ambiguïté.
+ *   2. Sinon, on cherche un marqueur d'intention ("qui est", "fiche de",
+ *      "profil de", "infos sur", etc.) et on extrait les 2-3 mots qui suivent
+ *      comme candidat nom — peu importe la casse.
+ *   3. Sinon, fallback sur 2 mots Title/Title ("Vincent Lamour" sans intent).
  *
- * Utilise un lookbehind négatif Unicode-safe (sans \b qui foire sur les
- * accents). Limite raisonnable sur la longueur des tokens pour éviter des
- * faux positifs sur du texte long.
+ * Returns la 1re personne détectée. Backend route `/api/datalake/dirigeant/`
+ * normalise déjà côté Python (UPPER + strip accents), donc on renvoie la
+ * casse originale ; PersonSheet drawer fera le reste.
  */
 export function extractFocusPersonFromQuery(text: string): { nom: string; prenom: string } | null {
   if (!text || text.length < 5 || text.length > 500) return null;
-  // 1. "Prénom NOM" (1ère lettre cap + reste en minuscules pour le prénom,
-  //    nom en MAJUSCULES). Multi-mot lastname autorisé (DE SAINT, LE TALLEC).
-  const re1 = /(?<![A-Za-zÀ-ÿ])([A-ZÀ-ÖØ-Ý][a-zà-öø-ÿ\-']{1,30})\s+([A-ZÀ-ÖØ-Ý][A-ZÀ-ÖØ-Ý\-']{1,40}(?:\s+[A-ZÀ-ÖØ-Ý][A-ZÀ-ÖØ-Ý\-']{1,40}){0,3})(?![A-Za-zÀ-ÿ])/;
-  const m1 = re1.exec(text);
-  if (m1) {
-    const prenom = m1[1].trim();
-    const nom = m1[2].trim().replace(/\s+/g, " ");
-    // Filtres anti-faux-positifs : éviter de prendre un titre/site/header
-    // capitalisé comme nom.
-    const blacklist = ["Donne", "Liste", "Fiche", "Profil", "Recherche", "Cherche", "Trouve", "DEMOEMA", "Compare", "Bonjour"];
-    if (blacklist.includes(prenom)) return null;
-    return { nom, prenom };
+
+  const blacklist = new Set([
+    "donne", "liste", "fiche", "profil", "recherche", "cherche", "trouve",
+    "demoema", "compare", "bonjour", "merci", "salut", "explique", "voici",
+    "qui", "est", "sont", "le", "la", "les", "un", "une", "des", "de", "du",
+    "pour", "avec", "sans", "sur", "sous", "dans", "par", "mon", "ma", "mes",
+    "tu", "tes", "ton", "ta", "il", "elle", "on", "nous", "vous", "ils",
+    "ce", "cet", "cette", "ces", "moi", "toi", "et", "ou", "mais", "donc",
+    "au", "aux", "que", "qui", "comment", "pourquoi", "quand", "où",
+  ]);
+
+  const isPersonName = (prenom: string, nom: string): boolean => {
+    if (prenom.length < 2 || prenom.length > 30) return false;
+    if (nom.length < 2 || nom.length > 60) return false;
+    if (blacklist.has(prenom.toLowerCase())) return false;
+    if (blacklist.has(nom.toLowerCase().split(" ")[0])) return false;
+    // Nom doit contenir uniquement lettres/-/'/espace
+    if (!/^[A-Za-zÀ-ÿ\-' ]+$/.test(prenom)) return false;
+    if (!/^[A-Za-zÀ-ÿ\-' ]+$/.test(nom)) return false;
+    return true;
+  };
+
+  // 1. LLM-style strict : "Prénom NOMCAPS" — peut apparaître au milieu d'une
+  //    phrase ("Profil compliance et reseau de Bernard ARNAULT").
+  const reLLM = /(?<![A-Za-zÀ-ÿ])([A-ZÀ-ÖØ-Ý][a-zà-öø-ÿ\-']{1,30})\s+([A-ZÀ-ÖØ-Ý][A-ZÀ-ÖØ-Ý\-']{1,40}(?:\s+[A-ZÀ-ÖØ-Ý][A-ZÀ-ÖØ-Ý\-']{1,40}){0,3})(?![A-Za-zÀ-ÿ])/;
+  const mLLM = reLLM.exec(text);
+  if (mLLM) {
+    const prenom = mLLM[1].trim();
+    const nom = mLLM[2].trim().replace(/\s+/g, " ");
+    if (isPersonName(prenom, nom)) return { nom, prenom };
   }
+
+  // 2. Intent-based : extraction après marqueur d'intention (case-insensitive).
+  //    Couvre "qui est vincent lamour", "fiche de Bernard Arnault", "profil
+  //    d'Éric Baconnier", "le dirigeant Roland Favier", etc.
+  const reIntent = /(?:qui\s+(?:est|sont)|fiche\s+(?:de|du|d'|détaillée\s+de)|profil\s+(?:de|du|d'|complet\s+de|compliance\s+(?:de|d'))|(?:le\s+)?dirigeant|infos?\s+sur|recherche|cherche|trouve|donne[ -]moi(?:\s+(?:la\s+fiche|le\s+profil|les?\s+infos))?\s+(?:de|sur|pour|du|d')|montre[ -]moi(?:\s+la\s+fiche)?\s+(?:de|d')|parle[ -]moi\s+de|connais|associes?\s+(?:de|d')|reseau\s+(?:de|d')|r[éeèê]seau\s+(?:de|d')|entourage\s+(?:de|d'))\s+(?:l['ea]\s+)?([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\-']{1,30})\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\-']{1,40}(?:\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\-']{1,40}){0,2})(?![A-Za-zÀ-ÿ])/i;
+  const mIntent = reIntent.exec(text);
+  if (mIntent) {
+    const prenom = mIntent[1].trim();
+    const nom = mIntent[2].trim().replace(/\s+/g, " ");
+    if (isPersonName(prenom, nom)) return { nom, prenom };
+  }
+
+  // 3. Fallback : 2 mots Title-case consécutifs (Vincent Lamour) sans intent.
+  //    Plus risqué de faux-positif → on n'autorise QUE Title+Title (pas
+  //    lowercase pure car ambigu : "il pense que" matcherait).
+  const reTitle = /(?<![A-Za-zÀ-ÿ])([A-ZÀ-ÖØ-Ý][a-zà-öø-ÿ\-']{2,30})\s+([A-ZÀ-ÖØ-Ý][a-zà-öø-ÿ\-']{2,40})(?![A-Za-zÀ-ÿ])/;
+  const mTitle = reTitle.exec(text);
+  if (mTitle) {
+    const prenom = mTitle[1].trim();
+    const nom = mTitle[2].trim();
+    if (isPersonName(prenom, nom)) return { nom, prenom };
+  }
+
   return null;
 }
 
