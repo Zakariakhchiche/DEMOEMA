@@ -19,6 +19,21 @@ dev = [
     "freezegun>=1.5.0",
 ]
 
+# QA L4 tooling — adoption plan (cf. docs/QA_PLAYBOOKS.md §8, epic SCRUM-136)
+# Sprint QA-1 (semaines 1-2 : 2026-05-04 → 2026-05-15)
+# Install : pip install -e ".[qa-l4]"
+qa-l4 = [
+    "hypothesis>=6.151.0",        # property-based testing (SCRUM-137)
+    "schemathesis>=4.17.0",       # OpenAPI fuzz stateful (st fuzz)
+    "mutmut>=2.5.0",              # mutation testing (SCRUM-140)
+    "deepeval>=3.9.9",            # LLM eval (ToolCorrectness, TaskCompletion)
+    "soda-core-postgres>=3.5.0",  # data quality (silver/gold checks)
+    "pip-audit>=2.7.0",           # supply chain scan
+    "bandit>=1.7.0",              # SAST Python
+    "presidio-analyzer>=2.2.0",   # PII detection (RGPD)
+    "splink>=4.0.0",              # entity resolution dirigeants/SIREN
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

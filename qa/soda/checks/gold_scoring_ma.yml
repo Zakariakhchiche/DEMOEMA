@@ -1,0 +1,10 @@
+# Soda Core checks — gold.scoring_ma (411k rows baseline)
+checks for gold.scoring_ma:
+  - row_count > 400000
+  - missing_count(deal_score) = 0
+  - invalid_count(deal_score) = 0:
+      valid min: 0
+      valid max: 100
+  - missing_count(siren) = 0
+  - duplicate_count(siren) = 0   # 1 row par SIREN
+  - freshness(updated_at) < 24h

@@ -9,6 +9,15 @@
     "lint": "eslint",
     "lint:design": "npx --yes @google/design.md lint ../DESIGN.md",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:clickables": "playwright test clickables-exhaustive.spec.ts",
+    "test:e2e:browser": "playwright test browser-18cat.spec.ts --project=chromium-desktop",
+    "test:e2e:matrix": "playwright test --project=chromium-desktop,firefox-desktop,webkit-desktop,iphone-15,pixel-8",
+    "test:a11y": "playwright test a11y.spec.ts",
+    "test:visual": "playwright test visual.spec.ts",
+    "knip": "knip --reporter=compact",
+    "size": "size-limit",
     "cf:build": "opennextjs-cloudflare build",
     "cf:preview": "opennextjs-cloudflare preview",
     "cf:deploy": "opennextjs-cloudflare deploy"
@@ -48,6 +57,15 @@
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.4",
-    "wrangler": "^4.0.0"
+    "wrangler": "^4.0.0",
+    "@playwright/test": "^1.59.1",
+    "@axe-core/playwright": "^4.11.0",
+    "axe-core": "^4.11.4",
+    "@vitest/coverage-v8": "^4.1.4",
+    "@vitest/browser": "^4.1.4",
+    "playwright": "^1.59.1",
+    "knip": "^5.40.0",
+    "size-limit": "^11.1.6",
+    "@size-limit/preset-next": "^11.1.6"
   }
 }

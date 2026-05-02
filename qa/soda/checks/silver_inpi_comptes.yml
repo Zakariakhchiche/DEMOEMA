@@ -1,0 +1,19 @@
+# Soda Core checks — silver.inpi_comptes (~6.3M rows baseline)
+# Cf. docs/QA_PLAYBOOKS.md Sous-axe D.4 (Data Quality framework)
+
+checks for silver.inpi_comptes:
+  - row_count > 6000000
+  - missing_count(siren) = 0
+  - duplicate_count(siren, year) = 0
+  - invalid_count(siren) = 0:
+      valid regex: '^[0-9]{9}$'
+  - invalid_count(ca) = 0:
+      valid min: 0
+      valid max: 1e12
+  - freshness(ingested_at) < 24h
+  - schema:
+      fail:
+        when wrong column type:
+          siren: varchar(9)
+          ca: numeric(18,2)
+          ingested_at: timestamptz

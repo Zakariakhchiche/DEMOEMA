@@ -1,0 +1,6 @@
+# Soda Core checks — silver.inpi_dirigeants (~8.1M rows baseline)
+checks for silver.inpi_dirigeants:
+  - row_count > 8000000
+  - missing_count(siren) = 0
+  - missing_count(nom) < 10000   # tolérance entités morales sans nom
+  - freshness(ingested_at) < 24h
