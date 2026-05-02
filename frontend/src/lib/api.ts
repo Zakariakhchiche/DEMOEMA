@@ -159,6 +159,63 @@ export const datalakeApi = {
     }>(path);
   },
 
+  /** Graphe Neo4j dirigeant : flags risque + top co-mandataires + companies.
+   * Données issues du sync 18.6M nodes (silver.inpi_dirigeants + bronze.inpi_*). */
+  personGraph: (nom: string, prenom: string, topN: number = 10) => {
+    const path = `/api/graph/person/${encodeURIComponent(nom)}/${encodeURIComponent(prenom)}?top_n=${topN}`;
+    return jget<{
+      person: {
+        uid: string;
+        nom: string;
+        prenom: string;
+        full_name: string;
+        date_naissance: string | null;
+        age_2026: number | null;
+        n_mandats_actifs: number | null;
+        is_sanctioned: boolean;
+        is_lobbyist: boolean;
+        has_offshore: boolean;
+        n_sci: number;
+        total_capital_sci: number;
+        sci_denominations: string[] | null;
+        linkedin_url: string | null;
+        github_username: string | null;
+        twitter_handle: string | null;
+        n_total_social: number | null;
+        wikidata_qid: string | null;
+        wikidata_birth_year: number | null;
+        wikidata_occupation: string | null;
+        icij_leaks: string[] | null;
+        icij_node_ids: string[] | null;
+        icij_countries: string[] | null;
+        sanctions_topics: string[] | null;
+        sanctions_programs: string[] | null;
+        sanctions_countries: string[] | null;
+        lobby_denominations: string[] | null;
+        lobby_categories: string[] | null;
+      } | null;
+      top_co_mandataires: {
+        full_name: string;
+        nom: string;
+        prenom: string;
+        n_shared: number;
+        via_sirens: string[];
+        other_sanctioned: boolean;
+        other_offshore: boolean;
+        other_lobbyist: boolean;
+      }[];
+      companies: {
+        siren: string;
+        denomination: string;
+        forme_juridique: string;
+        capital: number | null;
+        code_postal: string;
+        role: string;
+        actif: boolean;
+      }[];
+    }>(path);
+  },
+
   /** Scoring v3 PRO : 4 axes business + tier + percentile + EV estimée */
   scoringDetail: (siren: string) =>
     jget<{
