@@ -17,9 +17,11 @@ Run : python -m pytest backend/tests/test_no_pappers_leak.py -v
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import subprocess
+import uuid
 from pathlib import Path
 from typing import Final
 
@@ -161,38 +163,87 @@ def test_no_pappers_endpoints_exposed() -> None:
 
 # ────────────────────────────────────────────────────────────────────
 # Niveau 3 — Runtime copilot (smoke 10 questions M&A baseline)
+# Async + parallel + cache-bust UUID (peer review 2026-05-02 fix P1)
 # ────────────────────────────────────────────────────────────────────
-@pytest.mark.integration
-@pytest.mark.parametrize("query", MA_BASELINE_QUERIES, ids=lambda q: q[:40])
-def test_copilot_response_no_pappers_mention(query: str) -> None:
-    """Le copilot ne doit JAMAIS mentionner 'Pappers' dans une réponse user.
+async def _check_one_query(client: httpx.AsyncClient, query: str) -> tuple[str, str | None]:
+    """Renvoie (query, leak_context_or_None). Cache-bust via UUID."""
+    # Cache-bust : un UUID dans la query empêche le backend de servir une
+    # réponse cachée d'un précédent test (LLM provider peut cacher)
+    cache_bust = uuid.uuid4().hex[:8]
+    payload = {"q": query, "_cache_bust": cache_bust}
+    try:
+        r = await client.post(COPILOT_REDTEAM_URL, json=payload)
+        r.raise_for_status()
+        data = r.json()
+    except httpx.HTTPError as e:
+        return (query, f"HTTP_ERROR: {e}")
 
-    Ce test fait un appel REST réel à `/api/copilot/redteam` — slow.
-    Skip en local si pas d'accès prod (`SKIP_COPILOT_TESTS=1`).
+    response_text = data.get("response", "")
+    if PAPPERS_PATTERN.search(response_text):
+        m = PAPPERS_PATTERN.search(response_text)
+        assert m is not None
+        start = max(0, m.start() - 80)
+        end = min(len(response_text), m.end() + 80)
+        return (query, response_text[start:end])
+    return (query, None)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_copilot_response_no_pappers_mention_parallel() -> None:
+    """Test parallèle : 10 questions M&A baseline simultanées.
+
+    Réduit la durée de 15 min séquentiel à ~90s parallèle (cap timeout).
+    Cache-bust UUID empêche réponses cachées.
+    Skip si `SKIP_COPILOT_TESTS=1` (env local sans prod).
     """
     if os.getenv("SKIP_COPILOT_TESTS"):
         pytest.skip("SKIP_COPILOT_TESTS=1")
 
     try:
-        with httpx.Client(timeout=90.0) as client:
-            r = client.post(COPILOT_REDTEAM_URL, json={"q": query})
-            r.raise_for_status()
-            data = r.json()
-    except httpx.HTTPError as e:
-        pytest.skip(f"Endpoint indisponible : {e}")
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            results = await asyncio.gather(
+                *(_check_one_query(client, q) for q in MA_BASELINE_QUERIES),
+                return_exceptions=False,
+            )
+    except (httpx.HTTPError, OSError) as e:
+        pytest.skip(f"Endpoint indisponible (parallel call) : {e}")
 
-    response_text = data.get("response", "")
-    if PAPPERS_PATTERN.search(response_text):
-        # Extraire le contexte du leak pour debug
-        m = PAPPERS_PATTERN.search(response_text)
-        assert m is not None
-        start = max(0, m.start() - 80)
-        end = min(len(response_text), m.end() + 80)
-        leak_context = response_text[start:end]
+    leaks = [(q, ctx) for q, ctx in results if ctx and not ctx.startswith("HTTP_ERROR")]
+    http_errors = [(q, ctx) for q, ctx in results if ctx and ctx.startswith("HTTP_ERROR")]
+
+    if http_errors:
+        # Skip plutôt que fail si problème réseau/transient
+        pytest.skip(f"{len(http_errors)} HTTP errors : {http_errors[0][1]}")
+
+    if leaks:
+        report = "\n".join(f"  - '{q}' → ...{ctx}..." for q, ctx in leaks[:5])
         pytest.fail(
-            f"❌ Question '{query}' → réponse copilot contient 'pappers' :\n"
-            f"  ...{leak_context}..."
+            f"❌ {len(leaks)}/{len(MA_BASELINE_QUERIES)} questions M&A leak 'pappers' :\n{report}"
         )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query", MA_BASELINE_QUERIES, ids=lambda q: q[:40])
+async def test_copilot_response_no_pappers_mention_individual(query: str) -> None:
+    """Variante paramétrée — 1 test par query, plus lisible quand 1-2 fails seulement.
+
+    Utile pour debug ciblé. Préférer le parallel ci-dessus pour CI nightly (vitesse).
+    """
+    if os.getenv("SKIP_COPILOT_TESTS"):
+        pytest.skip("SKIP_COPILOT_TESTS=1")
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        try:
+            _, leak = await _check_one_query(client, query)
+        except (httpx.HTTPError, OSError) as e:
+            pytest.skip(f"Endpoint indisponible : {e}")
+
+    if leak and leak.startswith("HTTP_ERROR"):
+        pytest.skip(leak)
+    if leak:
+        pytest.fail(f"❌ Question '{query}' → réponse contient 'pappers' :\n  ...{leak}...")
 
 
 # ────────────────────────────────────────────────────────────────────

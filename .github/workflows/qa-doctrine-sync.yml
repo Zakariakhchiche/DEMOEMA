@@ -1,0 +1,35 @@
+name: QA Doctrine Sync Check
+
+on:
+  pull_request:
+    paths:
+      - 'docs/QA_PLAYBOOKS.md'
+      - '.claude/skills/qa-audit/SKILL.md'
+      - '.claude/agents/qa-engineer.md'
+      - 'scripts/check_doctrine_sync.py'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/QA_PLAYBOOKS.md'
+      - '.claude/skills/qa-audit/SKILL.md'
+      - '.claude/agents/qa-engineer.md'
+      - 'scripts/check_doctrine_sync.py'
+
+jobs:
+  sync-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pyyaml (optional fallback parser)
+        run: pip install pyyaml
+
+      - name: Run doctrine sync check
+        run: python scripts/check_doctrine_sync.py
+        env:
+          PYTHONIOENCODING: utf-8
