@@ -89,15 +89,31 @@ export function PersonSheet({ person, onClose }: Props) {
             }}>
               {person.nom || `${prenom} ${nom}`.trim() || "—"}
             </div>
-            <div style={{
-              display: "flex", gap: 14, marginTop: 6, fontSize: 12,
-              color: "var(--text-secondary)", flexWrap: "wrap", alignItems: "center",
-            }}>
-              {person.age != null && <span>{person.age} ans</span>}
-              <span><span style={{ color: "var(--text-muted)" }}>Mandats</span> <span className="dem-mono">{person.mandats}</span></span>
-              <span><span style={{ color: "var(--text-muted)" }}>SCI</span> <span className="dem-mono">{person.sci}</span></span>
-              {person.dept && <span>dept {person.dept}</span>}
-            </div>
+            {/* Header stats — préfère les valeurs API (data.identity / data.graph)
+              quand chargées plutôt que les placeholders du PersonCard. Cas
+              focus person : la card est créée avec age=0, mandats=0, sci=0
+              car on n'a pas encore l'info — on utilise les vraies dès que dispo. */}
+            {(() => {
+              const ident = data?.identity as Record<string, unknown> | null;
+              const g = data?.graph as Record<string, unknown> | null;
+              const age = (ident?.age as number | null) ?? person.age;
+              const mandats = (ident?.n_mandats_actifs as number | null)
+                ?? (g?.n_mandats_actifs as number | null) ?? person.mandats;
+              const nSci = (g?.n_sci as number | null)
+                ?? (data?.sci_patrimoine as { n_sci?: number } | null)?.n_sci
+                ?? person.sci;
+              return (
+                <div style={{
+                  display: "flex", gap: 14, marginTop: 6, fontSize: 12,
+                  color: "var(--text-secondary)", flexWrap: "wrap", alignItems: "center",
+                }}>
+                  {age != null && age > 0 && <span>{age} ans</span>}
+                  <span><span style={{ color: "var(--text-muted)" }}>Mandats</span> <span className="dem-mono">{mandats ?? 0}</span></span>
+                  <span><span style={{ color: "var(--text-muted)" }}>SCI</span> <span className="dem-mono">{nSci ?? 0}</span></span>
+                  {person.dept && <span>dept {person.dept}</span>}
+                </div>
+              );
+            })()}
             {person.entreprises.length > 0 && (
               <div style={{ marginTop: 4, fontSize: 11.5, color: "var(--text-tertiary)" }}>
                 {person.entreprises.slice(0, 4).join(" · ")}

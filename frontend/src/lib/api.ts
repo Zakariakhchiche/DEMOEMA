@@ -156,6 +156,10 @@ export const datalakeApi = {
       osint_raw: Record<string, unknown> | null;
       sanctions: Record<string, unknown>[];
       dvf_zones: Record<string, unknown> | null;
+      // Bloc Neo4j ajouté par PR #94 (`fetch_person_graph_summary_sync`).
+      // Null si Neo4j down. Sinon contient flags compliance + top
+      // co-mandataires + n_red_1hop.
+      graph: Record<string, unknown> | null;
     }>(path);
   },
 

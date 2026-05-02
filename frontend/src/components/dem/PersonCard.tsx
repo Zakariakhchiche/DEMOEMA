@@ -30,8 +30,12 @@ export function PersonCard({ person, onOpen }: Props) {
           <ScoreBadge value={person.score} size="sm" />
         </div>
         <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-secondary)", display: "flex", gap: 14, flexWrap: "wrap" }}>
-          <span><span style={{ color: "var(--text-muted)" }}>Mandats</span> <span className="dem-mono">{person.mandats}</span></span>
-          <span><span style={{ color: "var(--text-muted)" }}>SCI</span> <span className="dem-mono">{person.sci}</span></span>
+          {/* Stats : 0 = placeholder (cas focus person extrait du query / LLM
+            qui n'a pas encore les vraies valeurs). Affiche "—" plutôt que "0"
+            pour ne pas afficher d'info trompeuse — la fiche drawer chargera
+            les vraies stats au clic. */}
+          <span><span style={{ color: "var(--text-muted)" }}>Mandats</span> <span className="dem-mono">{person.mandats > 0 ? person.mandats : "—"}</span></span>
+          <span><span style={{ color: "var(--text-muted)" }}>SCI</span> <span className="dem-mono">{person.sci > 0 ? person.sci : "—"}</span></span>
           {person.entreprises.length > 0 && (
             <span>
               <span style={{ color: "var(--text-muted)" }}>Entreprises </span>
