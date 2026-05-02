@@ -1,11 +1,19 @@
 ---
 name: qa-audit
-version: 2.0.0
-description: Lance un audit QA DEMOEMA selon un des 5 playbooks (A/B/C/D/E) ou un sous-axe ciblé. Use when l'utilisateur demande "lance un audit", "teste tout", "audit copilot", "audit security", "audit datalake", "audit nav", "audit clickables", "audit browser", "audit backend", "audit minutieux", "audit l4", ou veut vérifier l'état QA avant une release. Le skill délègue au subagent qa-engineer après avoir résolu le scope.
+version: 2.1.0
+description: Lance un audit QA DEMOEMA selon un des 5 playbooks (A/B/C/D/E) ou un sous-axe ciblé. Use when l'utilisateur demande "lance un audit", "teste tout", "audit copilot", "audit security", "audit datalake", "audit nav", "audit clickables", "audit browser", "audit backend", "audit minutieux", "audit l4", "audit régression", ou veut vérifier l'état QA avant une release. Le skill délègue au subagent qa-engineer après avoir résolu le scope.
 allowed-tools: [Read, Bash, Grep, Glob, Agent, TaskCreate, TaskUpdate, WebFetch, WebSearch, mcp__chrome-devtools__*]
 ---
 
-# QA Audit DEMOEMA — Skill orchestrateur (v2.0.0, 2026-05-02)
+# QA Audit DEMOEMA — Skill orchestrateur (v2.1.0, 2026-05-02)
+
+## Changelog v2.0.0 → v2.1.0 (audit régression a révélé 5 gaps)
+
+1. **Smoke initial trompeur** : v2.0.0 testait 4 vecteurs garak hostiles + 1 fiche legit. Faux sens de sécurité — manque les **questions M&A baseline diversifiées**. v2.1 ajoute mode `smoke-deep` avec 10 questions diversifiées non-hostiles.
+2. **Détection leak multi-niveau** : v2.0 grep code seulement. Or régression Pappers 2026-05-02 a montré que **code peut être propre + system prompt LLM peut leaker**. v2.1 ajoute 3 niveaux : code statique + system prompt + runtime LLM responses.
+3. **Pénalisation QCS** : la formule v2.0 traitait line coverage et clickable coverage avec poids égaux. v2.1 introduit **pénalité régression** : si une dim baisse de > 10pp, QCS minoré de 5 points absolus.
+4. **Pièges connus enrichis** : 10 → **13 pièges** (ajout "smoke hostile insuffisant", "code propre ≠ runtime propre", "subagent ne lit pas son output complet").
+5. **Mode `regression`** ajouté : 8 points de vérification rapide (Pappers code + LLM, garak v7, datalake, gold MVs, SCRUM epic, PRs, containers).
 
 Tu lances un audit QA sur DEMOEMA en orchestrant le subagent `qa-engineer` selon le scope demandé.
 
@@ -18,7 +26,7 @@ Tu lances un audit QA sur DEMOEMA en orchestrant le subagent `qa-engineer` selon
 - **Audits précédents** : 2 audits QA (110 questions) + 2 rounds garak (HijackHateHumans + latentinjection) — tous patchés
 - **Tickets follow-up pending** : SCRUM-122 (sync dashboard↔fiche), SCRUM-133 (press_mentions index)
 
-## 9 modes d'invocation `/qa-audit <type>`
+## 11 modes d'invocation `/qa-audit <type>`
 
 | Mode | Scope | Doctrine §ref | Durée typique |
 |---|---|---|---|
@@ -31,8 +39,10 @@ Tu lances un audit QA sur DEMOEMA en orchestrant le subagent `qa-engineer` selon
 | `backend` | Axe 2 — **10 sous-axes B.1→B.10** (endpoints, Pydantic, SSE, async, errors, auth, rate limit, cache, health, observability) | §5 axe 2 | 1-2 h |
 | `minutieux` ou `full` ou `complet` | **Playbook E entier** — 14 axes + 15 dimensions coverage + 11 dimensions complémentaires | §5 Playbook E | 4-8 h |
 | `l4` | Audit complet + **calcul QCS** + verdict GO/NO-GO L4 (production payante) | §5 + §7 + §8 | 4-8 h |
+| `regression` | **8 points vérif rapide** (Pappers 3-niveaux + garak + datalake + gold MVs + SCRUM epic + PRs + containers + logs erreurs) | §2 leçons + §8 | 10-15 min |
+| `smoke-deep` | **10 questions M&A baseline diversifiées** (non-hostiles) → détecte leaks runtime LLM (Pappers, hallucinations, sources fantômes) | §2 + Playbook A | 5-10 min |
 
-Sans argument → demander à l'utilisateur lequel des 9 modes.
+Sans argument → demander à l'utilisateur lequel des 11 modes.
 
 ## Procédure d'exécution (5 étapes)
 
@@ -251,11 +261,14 @@ Total poids = 1.00. Comparer aux seuils :
 3. **CJK encoding bash** : `curl -d '{"q":"哈哈"}'` corrompu sur Windows. Toujours `-d @file.json` UTF-8.
 4. **Nom de probe `sysprompt_extraction`** N'EXISTE PAS dans garak v0.14/v0.15. Utiliser uniquement `promptinject + dan + latentinjection`.
 5. **Bouton "fantôme"** : un cliquable sans effet (handler vide, `console.log` only) = fail axe 1.bis. Pattern de détection : 4 effets attendus (nav / DOM mutation / network / aria-state).
-6. **Source `pappers`** abandonnée 2026-04-23 → grep doit retourner 0 dans réponses copilot.
+6. **Source `pappers`** abandonnée 2026-04-23 → grep doit retourner 0 dans réponses copilot **ET dans system prompt LLM ET dans tools MCP** (3 niveaux à tester, cf. piège 12).
 7. **PII dirigeants en logs** : nom/prénom en clair = fail axe D.7 RGPD. Hash uniquement.
 8. **`dan.Ablation_Dan_11_0` 100 % fail** = sécurité d'input cap 2000 chars qui marche, PAS une vuln.
 9. **Test rejette payload chinois** : si test échoue sur `哈哈被耍`, vérifier d'abord encoding bash (Windows) avant de patcher la regex.
 10. **Cliquables sans test si caché derrière un autre élément** : `:visible` Playwright ne capte pas les `display:none`, mais peut capter les `visibility:hidden` → bien filtrer.
+11. **Smoke hostile insuffisant** ⚡ NOUVEAU 2026-05-02 : tester 4-5 vecteurs garak hostiles ne couvre PAS les fuites en mode user normal. **TOUJOURS** ajouter 10 questions M&A baseline non-hostiles (`fiche EQUANS`, `top cibles tech IDF`, `BODACC Bretagne`, etc.). Sinon faux sens de sécurité.
+12. **Code propre ≠ runtime propre** ⚡ NOUVEAU : régression Pappers 2026-05-02 a montré que `grep pappers backend/` peut retourner 0 occurrences ET le copilot LLM continue à dire "Pappers MCP" dans ses réponses. **3 niveaux à tester** : (a) code source, (b) system prompt `_SYSTEM_PROMPT_TOOLS`, (c) runtime LLM responses. Le test pytest `test_no_pappers_leak.py` couvre les 3 niveaux.
+13. **Subagent ne lit pas son output complet** ⚡ NOUVEAU : si je lance un subagent qa-engineer en background et qu'il revient avec "audit OK", **toujours sampler son output JSONL** avant de relayer "GO" au user. Le subagent peut résumer trop optimistement.
 
 ## Ne JAMAIS faire
 
