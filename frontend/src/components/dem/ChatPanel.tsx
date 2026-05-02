@@ -350,6 +350,11 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
     const isSiren = /^\d{8,9}$/.test(text.trim());
     const isDirigeants = /dirigeant|holding|patrimoine/i.test(text);
     const isDD = /\bdd\b|compliance|due diligence/i.test(lower);
+    // Compliance/network query : red flag, sanctions, offshore, lobbying, réseau,
+    // entourage, associé(s), co-mandataires. Réponse LLM porte sur 1 personne
+    // précise (pas un sourcing M&A) → on désactive fetchTargets pour éviter
+    // d'afficher des cards top-cibles hors sujet sous la réponse.
+    const isComplianceOrNetwork = /\b(red ?flag|sanction|offshore|lobbying|lobbyist|associ[ée]s?|entourage|r[ée]seau|co-?mandataires?|connect[ée]|hop)\b/i.test(text);
 
     // Heuristique sourcing : on ne déclenche fetchTargets QUE si la query
     // ressemble à un sourcing M&A (mots-clés cibles/trouve/liste/recherche/secteur/dept).
@@ -370,8 +375,10 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
       wordCount <= 5 && hasCapName && !ACTION_WORDS.test(text) &&
       !SOURCING_KEYWORDS.test(text);
 
-    const isSourcingIntent = isSiren || isCompare || isCompanyLookup ||
-      SOURCING_KEYWORDS.test(text) || HAS_DEPT.test(text);
+    const isSourcingIntent = !isComplianceOrNetwork && (
+      isSiren || isCompare || isCompanyLookup ||
+      SOURCING_KEYWORDS.test(text) || HAS_DEPT.test(text)
+    );
 
     // Extraction simple : si dept détecté on l'envoie en filtre. Le mot-clé secteur
     // (premier match SOURCING_KEYWORDS) sert de q ILIKE. Pour SIREN explicite, q = siren.
