@@ -289,7 +289,217 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY gold.sanctions_master;
 - **Core Web Vitals** : INP (Interaction to Next Paint), LCP, CLS via Lighthouse-CI sur les 14 routes principales
 - **Service Worker** : `navigator.serviceWorker.getRegistrations().length > 0` + cache strategy assertion (Serwist v9 Strategy instances, pas string handlers)
 - **SSE robustness** : 10 questions consécutives en 20 s → 10 blocs `<summary>` rendus (regression test du bug G5)
-- **Verdict** : pass si Lighthouse perf > 80, a11y > 95, SW registered, 0 console error
+
+#### Sous-axe 1.bis — TEST EXHAUSTIF DE CHAQUE ÉLÉMENT CLIQUABLE (zéro élément non testé)
+**Exigence dure** : 100 % des éléments cliquables du frontend doivent être testés individuellement. Pas seulement les `<button>` — TOUT élément cliquable : liens, `role="button"`, `role="tab"`, `role="menuitem"`, `role="checkbox"`, `role="switch"`, inputs (checkbox/radio/submit), `<select>`, `<summary>` (details), `<div onClick>`, `<span onClick>`, drag handles, resize handles, éléments avec `tabindex` focusables. Aucun fantôme, aucun handler vide, aucun "Coming soon".
+
+**Inventaire automatique exhaustif** (à lancer en début d'audit) :
+```bash
+# Tous patterns de clickables qu'on cherche dans le repo (référence)
+cd frontend
+grep -rEn '<(button|Button)\b' src --include='*.tsx' | wc -l   # ~144
+grep -rEn '<a\s+href' src --include='*.tsx' | wc -l           # ~50
+grep -rEn 'onClick=' src --include='*.tsx' | wc -l            # ~120
+grep -rEn 'role="(button|tab|menuitem|switch|checkbox|radio|link)"' \
+  src --include='*.tsx' | wc -l                                # ~30
+grep -rEn '<input\s+type="(checkbox|radio|submit|button|range)"' \
+  src --include='*.tsx' | wc -l                                # ~20
+grep -rEn '<(select|summary|details)\b' src --include='*.tsx' | wc -l  # ~10
+grep -rEn 'tabIndex=\{?[0-9]+' src --include='*.tsx' | wc -l           # ~15
+
+# = 350-400+ éléments interactifs distincts sur 14 routes
+```
+
+**Test par élément cliquable** (Playwright auto-discovery + assertions) :
+1. **Visibilité** : rendu dans le DOM (`isVisible() === true`)
+2. **Label / nom accessible non vide** : `accessibleName()` non vide via `aria-label`, `aria-labelledby`, `textContent`, ou `<label>` lié pour les inputs
+3. **Touch target** : `boundingBox().width >= 24 && height >= 24` (WCAG 2.2 AA, sauf inputs natifs où 20×20 toléré)
+4. **Activable** : `isEnabled()` ou état `disabled`/`aria-disabled` justifié
+5. **Focusable au clavier** : `tabIndex` >= 0 (`Tab` peut atteindre l'élément, sauf décoration)
+6. **Action vérifiable** : après `click()` (ou `check()` pour checkbox, `selectOption` pour select), un des effets :
+   - **Navigation** (`page.url()` change) — `<a href>`, boutons-link
+   - **Mutation DOM** (innerText length delta > seuil) — modals, drawers, toggles, tabs
+   - **Network** (request capté via `page.on('request')`) — fetch API
+   - **State** (input value change, classe CSS active, `aria-expanded` toggle, `aria-selected` change) — toggles, accordeons, tabs
+   - **Form submit** (pour `<input type="submit">`) — assertion sur action
+7. **PAS d'effet "fantôme"** : zéro élément qui n'a aucun des 4 effets ci-dessus (handler vide, TODO, console.log only)
+8. **Anti-double-clic** : 2 clics rapides ne déclenchent pas 2 fetchs identiques (debounce ou disabled pendant pending)
+9. **Keyboard activable** : `Enter`/`Space` sur l'élément focusé déclenche le même effet que clic souris (a11y critique)
+10. **Hover preview** : si `title` ou tooltip → s'affiche au hover (pas tooltip vide)
+
+**Sélecteur Playwright unifié** (capture TOUS les cliquables) :
+```typescript
+const CLICKABLE_SELECTOR = [
+  // Boutons & liens HTML natifs
+  'button:visible',
+  'a[href]:visible',
+  // ARIA roles interactifs (div/span déguisés en bouton)
+  '[role="button"]:visible',
+  '[role="link"]:visible',
+  '[role="menuitem"]:visible',
+  '[role="tab"]:visible',
+  '[role="switch"]:visible',
+  '[role="checkbox"]:visible',
+  '[role="radio"]:visible',
+  '[role="option"]:visible',
+  '[role="treeitem"]:visible',
+  // Inputs cliquables
+  'input[type="checkbox"]:visible',
+  'input[type="radio"]:visible',
+  'input[type="submit"]:visible',
+  'input[type="button"]:visible',
+  'input[type="reset"]:visible',
+  'input[type="image"]:visible',
+  // Form controls cliquables
+  'select:visible',
+  // Details/summary
+  'summary:visible',
+  // onClick sur n'importe quoi (div/span/li/td...)
+  '[onclick]:visible',
+  // Tabindex focusables (drag handles, custom widgets)
+  '[tabindex]:not([tabindex="-1"]):visible',
+  // Labels liés à inputs
+  'label[for]:visible',
+].join(', ');
+```
+
+**Pattern de test Playwright complet** :
+```typescript
+// frontend/tests/clickables-exhaustive.spec.ts
+import { test, expect } from '@playwright/test';
+const ROUTES = ['/#dashboard', '/#chat', '/#explorer', '/#pipeline', '/#audit',
+                '/#graph', '/#compare', '/#signals',
+                '/targets', '/targets/[id]', '/signals', '/explorer',
+                '/pipeline', '/graph']; // 14 routes principales
+
+const CLICKABLE_SELECTOR = `button:visible, a[href]:visible,
+  [role="button"]:visible, [role="link"]:visible, [role="menuitem"]:visible,
+  [role="tab"]:visible, [role="switch"]:visible, [role="checkbox"]:visible,
+  [role="radio"]:visible, [role="option"]:visible, [role="treeitem"]:visible,
+  input[type="checkbox"]:visible, input[type="radio"]:visible,
+  input[type="submit"]:visible, input[type="button"]:visible,
+  input[type="reset"]:visible, input[type="image"]:visible,
+  select:visible, summary:visible, [onclick]:visible,
+  [tabindex]:not([tabindex="-1"]):visible, label[for]:visible`;
+
+for (const route of ROUTES) {
+  test(`clickables exhaustifs sur ${route}`, async ({ page }) => {
+    await page.goto(`http://localhost:3000${route}`);
+    await page.waitForLoadState('networkidle');
+
+    const els = await page.locator(CLICKABLE_SELECTOR).all();
+    const failures: Array<{selector:string, reason:string}> = [];
+    const passes: string[] = [];
+
+    for (const el of els) {
+      const tag = await el.evaluate((e:Element) => e.tagName.toLowerCase());
+      const role = await el.getAttribute('role') ?? '';
+      const type = await el.getAttribute('type') ?? '';
+      const text = ((await el.textContent()) ?? '').trim().slice(0, 60);
+      const aria = (await el.getAttribute('aria-label')) ?? '';
+      const ariaLabelledBy = (await el.getAttribute('aria-labelledby')) ?? '';
+      const id = `[${tag}${role?` role=${role}`:''}${type?` type=${type}`:''}] "${text || aria}"`;
+      const box = await el.boundingBox();
+      const accessibleName = await el.evaluate((e:any) => e.ariaLabel
+        || e.getAttribute('aria-labelledby')
+        || e.textContent?.trim()
+        || e.getAttribute('title')
+        || '');
+
+      // 1. Label / nom accessible
+      if (!accessibleName) {
+        failures.push({selector: id, reason: 'accessibleName vide'});
+        continue;
+      }
+      // 2. Touch target
+      const minSize = (tag === 'input') ? 20 : 24;
+      if (box && (box.width < minSize || box.height < minSize)) {
+        failures.push({selector: id,
+                       reason: `target ${Math.round(box.width)}x${Math.round(box.height)} < ${minSize}x${minSize}`});
+      }
+      // 3. Disabled justifié OK
+      if (await el.isDisabled()) { passes.push(id + ' [disabled-OK]'); continue; }
+
+      // 4. Snapshot avant
+      const urlBefore = page.url();
+      const sigBefore = await page.evaluate(() => document.body.innerText.length);
+      let networkFired = false;
+      const reqHandler = () => { networkFired = true; };
+      page.on('request', reqHandler);
+
+      // 5. Click selon type
+      try {
+        if (type === 'checkbox' || type === 'radio' || role === 'checkbox' || role === 'switch') {
+          await el.check({timeout: 2000});
+        } else if (tag === 'select') {
+          const opts = await el.locator('option').all();
+          if (opts.length > 1) await el.selectOption({index: 1});
+        } else {
+          await el.click({timeout: 2000});
+        }
+        await page.waitForTimeout(300);
+      } catch (e) {
+        page.off('request', reqHandler);
+        failures.push({selector: id, reason: `interaction failed: ${(e as Error).message.slice(0,80)}`});
+        continue;
+      }
+      page.off('request', reqHandler);
+
+      // 6. Assertion d'effet
+      const urlAfter = page.url();
+      const sigAfter = await page.evaluate(() => document.body.innerText.length);
+      const navigated = urlBefore !== urlAfter;
+      const domChanged = Math.abs(sigBefore - sigAfter) > 5;
+      const ariaExpandedChanged = await el.evaluate((e:any) =>
+        e.getAttribute('aria-expanded') !== null);
+      const ariaCheckedChanged = await el.evaluate((e:any) =>
+        e.getAttribute('aria-checked') !== null || e.checked === true);
+
+      if (!navigated && !domChanged && !networkFired
+          && !ariaExpandedChanged && !ariaCheckedChanged) {
+        failures.push({selector: id, reason: 'aucun effet (nav/DOM/network/aria)'});
+      } else {
+        passes.push(id);
+      }
+
+      // 7. Reset après nav
+      if (navigated) await page.goto(`http://localhost:3000${route}`);
+    }
+
+    // Rapport JSON dump
+    await page.evaluate((data) => console.log('CLICKABLES_REPORT', JSON.stringify(data)),
+                       {route, total: els.length, pass: passes.length, fail: failures});
+    expect(failures, `\n${failures.map(f => '  - '+f.selector+' → '+f.reason).join('\n')}\n`)
+      .toEqual([]);
+  });
+}
+```
+
+**Output rapport consolidé** : `audit_demoema/clickables_audit_<date>.md`
+
+| Route | Total cliquables | PASS | FAIL | Skip (disabled OK) | Couverture | Notes |
+|---|---|---|---|---|---|---|
+| #dashboard | 28 | 28 | 0 | 0 | 100 % | OK |
+| #chat | 42 | 41 | 1 | 0 | 97 % ⚠ | "Sauver" handler vide |
+| #explorer | 38 | 38 | 0 | 2 | 100 % | 2 boutons "future feature" disabled |
+| #graph | 22 | 22 | 0 | 0 | 100 % | OK |
+| ... | ... | ... | ... | ... | ... | ... |
+| **TOTAL** | **350-400** | **?** | **?** | **?** | **objectif 100 %** | |
+
+**Cas FAIL historiques à ne PAS reproduire** (regression tests obligatoires) :
+- Liens nav `Graphe`/`Comparer` qui changent l'URL hash mais pas le H1 (bug G3, patché — assert H1 ≠ "Bonjour Anne" sur ces routes)
+- Bouton "Sauver cible" → side effect `targets_updated` non désiré (bug G2, patché — désormais bouton dédié, pas implicite via SIREN lookup)
+- Bouton "Send" copilot disabled après 5 envois rapides (bug G5 — race SSE, patché via flushSync + streamId)
+- Quick replies Copilot affichés hors-contexte (bug G7, patché — conditionner sur `kind === 'sourcing' && cibles.length > 3`)
+- `<details><summary>` sur les blocs "X outils utilisés" du copilot — vérifier expand/collapse fonctionnel (regression du bug perte SSE)
+
+**Outils à activer** (versions stables 2026-05) :
+- **Playwright 1.59.1** (`browser.bind()` + `--debug=cli` pour auto-repair)
+- **@axe-core/playwright** (touch targets WCAG 2.2 + accessible names automatiques)
+- **Storybook 9 + addon-test** (chaque composant cliquable a une story testée en isolation, gain coverage)
+- **MemLab heap snapshot** post-clic (détecter detached nodes après ouverture/fermeture modal/drawer)
+
+**Verdict axe 1** : pass uniquement si Lighthouse perf > 80, a11y > 95, SW registered, 0 console error, **ET 100 % des éléments cliquables PASS dans clickables-exhaustive.spec.ts** (350-400+ éléments distincts sur les 14 routes).
 
 ### Axe 2 — Backend API (FastAPI / SSE / contracts)
 - **OpenAPI fuzz** : Schemathesis sur `/openapi.json` (couvre tous les endpoints en 1 commande)

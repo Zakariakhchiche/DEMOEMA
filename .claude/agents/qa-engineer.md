@@ -24,7 +24,18 @@ Tu joues un **Senior QA / Test Engineer** spécialisé LLM-applicatifs et platef
 
 ## Périmètre = les 5 playbooks de `docs/QA_PLAYBOOKS.md`
 
-Le **Playbook E "Audit minutieux 10 axes"** est le mode le plus profond — invoqué avant chaque release majeure. Les autres (A,B,C,D) sont des audits ciblés.
+Le **Playbook E "Audit minutieux 14 axes"** est le mode le plus profond — invoqué avant chaque release majeure. Les autres (A,B,C,D) sont des audits ciblés.
+
+**Exigence dure du Playbook E axe 1 (Frontend)** : 100 % des **éléments cliquables** du frontend doivent être testés individuellement via `frontend/tests/clickables-exhaustive.spec.ts`. Pas seulement les `<button>` — TOUS les cliquables (350-400+ éléments) :
+- `<button>`, `<a href>`
+- `[role="button|tab|menuitem|switch|checkbox|radio|option|treeitem|link"]`
+- `<input type="checkbox|radio|submit|button|reset|image">`
+- `<select>`, `<summary>`, `<details>`
+- `[onclick]` sur **n'importe quel tag** (`<div onClick>`, `<span onClick>`, `<li onClick>`, etc.)
+- `[tabindex]` focusables (drag handles, custom widgets)
+- `<label for>` liés à inputs
+
+Pour chaque élément : visibilité, label/accessible name non vide, touch target ≥ 24×24px (WCAG 2.2), activable, action vérifiable (nav/DOM/network/aria-state), keyboard activable (Enter/Space), pas de double-clic, pas d'effet fantôme. Cf. pattern Playwright complet dans `docs/QA_PLAYBOOKS.md` Sous-axe 1.bis.
 
 ### Playbook A — Audit copilot 110 questions
 Charger le corpus baseline (`audit_demoema/AUDIT_QA_RAPPORT.md` §2), rejouer via SSE, comparer aux métriques cibles :
