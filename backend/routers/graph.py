@@ -38,6 +38,84 @@ def _get_driver():
     return _driver
 
 
+# ─── Reusable helper used by routers/datalake.py:_dirigeant_full ──────────
+# Renvoie un payload compact (flags + top co-mandataires + counts) à
+# merger dans la réponse `get_dirigeant`, pour que TOUTES les questions LLM
+# touchant un dirigeant gagnent en network awareness sans nouveau tool.
+_GRAPH_SUMMARY_CYPHER = """
+MATCH (p:Person {nom: $nom, prenom: $prenom})
+WITH p LIMIT 1
+CALL {
+    WITH p
+    OPTIONAL MATCH (p)-[r:CO_MANDATE]-(q:Person)
+    RETURN q, r ORDER BY coalesce(r.n_shared_companies, 1) DESC LIMIT 10
+}
+WITH p, collect(CASE WHEN q IS NULL THEN NULL ELSE {
+    full_name: q.full_name,
+    nom: q.nom,
+    prenom: q.prenom,
+    n_shared: coalesce(r.n_shared_companies, 1),
+    is_sanctioned: coalesce(q.is_sanctioned, false),
+    has_offshore: coalesce(q.has_offshore, false),
+    is_lobbyist: coalesce(q.is_lobbyist, false)
+} END) AS top_unfiltered
+WITH p, [x IN top_unfiltered WHERE x IS NOT NULL] AS top_co_mandataires
+CALL {
+    WITH p
+    OPTIONAL MATCH (p)-[:CO_MANDATE]-(q2:Person)
+    WHERE coalesce(q2.is_sanctioned, false)
+       OR coalesce(q2.has_offshore, false)
+       OR coalesce(q2.is_lobbyist, false)
+    RETURN count(DISTINCT q2) AS n_red_1hop
+}
+RETURN
+    coalesce(p.is_sanctioned, false) AS is_sanctioned,
+    coalesce(p.is_lobbyist, false)   AS is_lobbyist,
+    coalesce(p.has_offshore, false)  AS has_offshore,
+    coalesce(p.n_sci, 0)             AS n_sci,
+    coalesce(p.total_capital_sci, 0.0) AS total_capital_sci,
+    p.sci_denominations              AS sci_denominations,
+    p.linkedin_url                   AS linkedin_url,
+    p.github_username                AS github_username,
+    p.twitter_handle                 AS twitter_handle,
+    p.n_total_social                 AS n_total_social,
+    p.wikidata_qid                   AS wikidata_qid,
+    p.wikidata_birth_year            AS wikidata_birth_year,
+    p.wikidata_occupation            AS wikidata_occupation,
+    p.icij_leaks                     AS icij_leaks,
+    p.lobby_denominations            AS lobby_denominations,
+    p.sanctions_programs             AS sanctions_programs,
+    top_co_mandataires,
+    n_red_1hop
+"""
+
+
+def fetch_person_graph_summary_sync(nom: str, prenom: str) -> dict | None:
+    """Sync helper — a wrapper async appellera via asyncio.to_thread.
+
+    Renvoie None si Neo4j indispo / dirigeant introuvable. Le caller doit
+    tolérer cette absence (sortie cleanly avec graph: None dans le JSON
+    de _dirigeant_full).
+    """
+    nom_uc = (nom or "").strip().upper()
+    prenom_uc = (prenom or "").strip().upper()
+    if not nom_uc or not prenom_uc:
+        return None
+    try:
+        driver = _get_driver()
+        with driver.session() as s:
+            r = s.run(
+                _GRAPH_SUMMARY_CYPHER,
+                nom=nom_uc,
+                prenom=prenom_uc,
+            ).single()
+            return dict(r) if r else None
+    except Exception:
+        # Neo4j down ou indisponible : on dégrade gracieusement.
+        # Le caller voit None et continue avec juste les data SQL.
+        return None
+
+
 @router.get("/person/{nom}/{prenom}")
 async def person_graph(nom: str, prenom: str, top_n: int = 10):
     """Retourne les enrichissements + top co-mandataires d'un dirigeant.
@@ -157,6 +235,142 @@ async def person_graph(nom: str, prenom: str, top_n: int = 10):
         "person": flags,
         "top_co_mandataires": comandates,
         "companies": companies,
+    }
+
+
+@router.get("/red_flags/{nom}/{prenom}")
+async def red_flags_network(nom: str, prenom: str, hops: int = 2, limit: int = 50):
+    """Liste les red flags (sanctions / offshore / lobbying) à N hops dans
+    le réseau co-mandataires d'un dirigeant. Killer DD M&A : avant de
+    pitcher une cible, vérifier qui dans son réseau étendu a un risque.
+
+    `hops` clamped 1..3 (au-delà = explosion combinatoire 7.7M edges).
+    `limit` clamped 10..200.
+    """
+    driver = _get_driver()
+    nom_uc = (nom or "").strip().upper()
+    prenom_uc = (prenom or "").strip().upper()
+    hops = max(1, min(3, int(hops)))
+    limit = max(10, min(200, int(limit)))
+
+    if not nom_uc or not prenom_uc:
+        raise HTTPException(status_code=400, detail="nom + prenom requis")
+
+    # Cypher : on collecte les paths jusqu'à hops, on filtre sur les flags
+    # red sur le NOEUD FINAL (q), on retourne triplé (q, distance, path).
+    # variable-length pattern *1..N supporté natif Neo4j 5.
+    query = f"""
+    MATCH (p:Person {{nom: $nom_uc, prenom: $prenom_uc}})
+    WITH p LIMIT 1
+    MATCH path=(p)-[:CO_MANDATE*1..{hops}]-(q:Person)
+    WHERE q <> p
+      AND (coalesce(q.is_sanctioned, false)
+           OR coalesce(q.has_offshore, false)
+           OR coalesce(q.is_lobbyist, false))
+    WITH q, length(path) AS hops_distance,
+         [n IN nodes(path) | {{full_name: n.full_name, nom: n.nom, prenom: n.prenom}}] AS via_persons
+    RETURN
+        q.full_name AS full_name,
+        q.nom AS nom,
+        q.prenom AS prenom,
+        min(hops_distance) AS hops,
+        coalesce(q.is_sanctioned, false) AS is_sanctioned,
+        coalesce(q.has_offshore, false) AS has_offshore,
+        coalesce(q.is_lobbyist, false) AS is_lobbyist,
+        coalesce(q.sanctions_programs, []) AS sanctions_programs,
+        coalesce(q.icij_leaks, []) AS icij_leaks,
+        coalesce(q.lobby_denominations, []) AS lobby_denominations,
+        collect(via_persons)[0] AS sample_path
+    ORDER BY hops, full_name
+    LIMIT $limit
+    """
+
+    try:
+        with driver.session() as s:
+            rows = [dict(r) for r in s.run(query, nom_uc=nom_uc, prenom_uc=prenom_uc, limit=limit)]
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Neo4j: {type(e).__name__}: {e}")
+
+    # Bucket par hop pour l'affichage LLM
+    by_hop = {}
+    for r in rows:
+        by_hop.setdefault(r["hops"], []).append(r)
+
+    return {
+        "person": {"nom": nom_uc, "prenom": prenom_uc},
+        "max_hops": hops,
+        "n_red_flags": len(rows),
+        "red_flags": rows,
+        "by_hop": {str(k): v for k, v in sorted(by_hop.items())},
+    }
+
+
+@router.get("/path/{nom_a}/{prenom_a}/{nom_b}/{prenom_b}")
+async def path_between(
+    nom_a: str, prenom_a: str, nom_b: str, prenom_b: str,
+    max_hops: int = 4,
+):
+    """Trouve le chemin le plus court entre 2 personnes via co-mandats.
+    Use case : warm intro mapping, investigation network, "comment X
+    est-il connecté à Y".
+
+    `max_hops` clamped 1..6 — au-delà la query explose.
+    """
+    driver = _get_driver()
+    nom_a_uc = (nom_a or "").strip().upper()
+    prenom_a_uc = (prenom_a or "").strip().upper()
+    nom_b_uc = (nom_b or "").strip().upper()
+    prenom_b_uc = (prenom_b or "").strip().upper()
+    max_hops = max(1, min(6, int(max_hops)))
+
+    if not (nom_a_uc and prenom_a_uc and nom_b_uc and prenom_b_uc):
+        raise HTTPException(status_code=400, detail="(nom_a, prenom_a, nom_b, prenom_b) requis")
+
+    query = f"""
+    MATCH (a:Person {{nom: $nom_a, prenom: $prenom_a}})
+    MATCH (b:Person {{nom: $nom_b, prenom: $prenom_b}})
+    WITH a, b LIMIT 1
+    MATCH path = shortestPath((a)-[:CO_MANDATE*1..{max_hops}]-(b))
+    RETURN
+        length(path) AS hops,
+        [n IN nodes(path) | {{
+            full_name: n.full_name,
+            nom: n.nom,
+            prenom: n.prenom,
+            is_sanctioned: coalesce(n.is_sanctioned, false),
+            has_offshore: coalesce(n.has_offshore, false),
+            is_lobbyist: coalesce(n.is_lobbyist, false)
+        }}] AS persons,
+        [r IN relationships(path) | coalesce(r.via_sirens, [])] AS via_sirens_per_edge
+    LIMIT 1
+    """
+
+    try:
+        with driver.session() as s:
+            rec = s.run(
+                query,
+                nom_a=nom_a_uc, prenom_a=prenom_a_uc,
+                nom_b=nom_b_uc, prenom_b=prenom_b_uc,
+            ).single()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Neo4j: {type(e).__name__}: {e}")
+
+    if rec is None:
+        return {
+            "found": False,
+            "from": {"nom": nom_a_uc, "prenom": prenom_a_uc},
+            "to": {"nom": nom_b_uc, "prenom": prenom_b_uc},
+            "max_hops_searched": max_hops,
+            "hint": "Pas de connexion via co-mandats à cette profondeur.",
+        }
+
+    return {
+        "found": True,
+        "from": {"nom": nom_a_uc, "prenom": prenom_a_uc},
+        "to": {"nom": nom_b_uc, "prenom": prenom_b_uc},
+        "hops": rec["hops"],
+        "persons": rec["persons"],
+        "via_sirens_per_edge": rec["via_sirens_per_edge"],
     }
 
 

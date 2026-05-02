@@ -161,7 +161,16 @@ COPILOT_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_dirigeant",
-            "description": "Profil complet dirigeant: identité INPI (mandats, formes, rôles), patrimoine SCI (capital + valeur bilan), OSINT (LinkedIn, GitHub, Twitter, emails), sanctions personne, DVF zones.",
+            "description": (
+                "Profil complet dirigeant: identité INPI (mandats, formes, rôles), "
+                "patrimoine SCI (capital + valeur bilan), OSINT (LinkedIn, GitHub, "
+                "Twitter, emails), sanctions personne, DVF zones, ET réseau co-mandats "
+                "Neo4j (graph.top_co_mandataires = top 10 associés, "
+                "graph.n_red_1hop = nb sanctionnés/offshore/lobbyistes à 1 hop, "
+                "graph.is_sanctioned/has_offshore/is_lobbyist = flags compliance). "
+                "Utilise pour répondre 'liste les associés de X', 'profil compliance "
+                "de X', 'qui dans son réseau direct a un red flag'."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -452,6 +461,61 @@ COPILOT_TOOLS = [
                     "siren": {"type": "string", "description": "SIREN 9 chiffres"},
                 },
                 "required": ["siren"],
+            },
+        },
+    },
+    # ====== Graph network tools (Neo4j 18.6M nodes + 7.7M CO_MANDATE) =====
+    {
+        "type": "function",
+        "function": {
+            "name": "graph_red_flags_network",
+            "description": (
+                "DD M&A multi-hop : liste les sanctionnés / offshore / lobbyistes "
+                "dans le réseau co-mandataires d'un dirigeant à 1, 2 ou 3 hops. "
+                "Pour chaque red flag trouvé : nom, distance (hops), type de flag "
+                "(sanctioned/offshore/lobbyist), programmes/leaks/lobbies, et un "
+                "sample_path qui montre la chaîne de connexion. Utilise pour "
+                "'qui dans son entourage a un red flag', 'risques cachés dans le "
+                "réseau étendu de X', 'red flags dirigeants à 2 hops'. "
+                "Cypher multi-hop sur 7.7M edges — UNIQUEMENT possible via Neo4j, "
+                "pas en SQL."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "nom": {"type": "string", "description": "Nom de famille en MAJUSCULES (ex: 'ARNAULT')"},
+                    "prenom": {"type": "string", "description": "Prénom en MAJUSCULES (ex: 'BERNARD')"},
+                    "hops": {"type": "integer", "description": "Profondeur réseau 1-3 (default 2). 1=associés directs uniquement, 2=associés des associés, 3=très étendu."},
+                    "limit": {"type": "integer", "description": "Nb max red flags retournés (default 50, max 200)"},
+                },
+                "required": ["nom", "prenom"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "graph_connection_path",
+            "description": (
+                "Trouve le chemin le plus court entre 2 personnes via le graphe "
+                "des co-mandats. Use case M&A : warm intro mapping ('comment je "
+                "passe de X à Y via mes contacts'), investigation network "
+                "('comment X est-il connecté à Y'), structure groupe family-office. "
+                "Retourne {found: bool, hops: N, persons: [chain]} ou hint si "
+                "pas de connexion à profondeur max_hops. Utilise pour 'comment X "
+                "est-il connecté à Y', 'qui peut introduire X auprès de Y'. "
+                "Shortest path Cypher — IMPOSSIBLE en SQL sur graphe 7.7M edges."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "nom_a": {"type": "string", "description": "Nom personne A en MAJUSCULES"},
+                    "prenom_a": {"type": "string", "description": "Prénom personne A en MAJUSCULES"},
+                    "nom_b": {"type": "string", "description": "Nom personne B en MAJUSCULES"},
+                    "prenom_b": {"type": "string", "description": "Prénom personne B en MAJUSCULES"},
+                    "max_hops": {"type": "integer", "description": "Profondeur max recherche (default 4, max 6). Plus grand = plus lent mais plus de chances de trouver."},
+                },
+                "required": ["nom_a", "prenom_a", "nom_b", "prenom_b"],
             },
         },
     },
@@ -928,6 +992,42 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
                     return r.json()
                 return {"error": f"HTTP {r.status_code}"}
 
+        # ====== Neo4j graph tools (multi-hop network) ==================
+        elif name == "graph_red_flags_network":
+            nom = (args.get("nom") or "").upper()
+            prenom = (args.get("prenom") or "").upper()
+            if not nom or not prenom:
+                return {"error": "nom + prenom requis"}
+            params = {
+                "hops": min(3, max(1, int(args.get("hops") or 2))),
+                "limit": min(200, max(10, int(args.get("limit") or 50))),
+            }
+            async with httpx.AsyncClient(timeout=20) as client:
+                r = await client.get(
+                    f"{datalake_base}/api/graph/red_flags/{nom}/{prenom}",
+                    params=params,
+                )
+                if r.status_code == 200:
+                    return r.json()
+                return {"error": f"HTTP {r.status_code}: {r.text[:200]}"}
+
+        elif name == "graph_connection_path":
+            nom_a = (args.get("nom_a") or "").upper()
+            prenom_a = (args.get("prenom_a") or "").upper()
+            nom_b = (args.get("nom_b") or "").upper()
+            prenom_b = (args.get("prenom_b") or "").upper()
+            if not (nom_a and prenom_a and nom_b and prenom_b):
+                return {"error": "(nom_a, prenom_a, nom_b, prenom_b) requis"}
+            params = {"max_hops": min(6, max(1, int(args.get("max_hops") or 4)))}
+            async with httpx.AsyncClient(timeout=20) as client:
+                r = await client.get(
+                    f"{datalake_base}/api/graph/path/{nom_a}/{prenom_a}/{nom_b}/{prenom_b}",
+                    params=params,
+                )
+                if r.status_code == 200:
+                    return r.json()
+                return {"error": f"HTTP {r.status_code}: {r.text[:200]}"}
+
         return {"error": f"Tool {name} inconnu"}
     except Exception as e:
         return {"error": f"{type(e).__name__}: {str(e)[:200]}"}
@@ -936,7 +1036,7 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
 _SYSTEM_PROMPT_TOOLS = (
     "Tu es le Copilot IA d'EdRCF 6.0, plateforme M&A pour Edmond de Rothschild Corporate Finance.\n"
     "Réponds en français, concis et professionnel, en markdown.\n\n"
-    "Tu as accès au datalake DEMOEMA (107M rows silver) via 16 tools :\n"
+    "Tu as accès au datalake DEMOEMA (107M rows silver) + Neo4j graphe (18.6M nodes, 7.7M relations CO_MANDATE) via 18 tools :\n"
     "**Identité & sourcing** :\n"
     "- search_cibles : cibles M&A par texte/dept/score\n"
     "- get_fiche_entreprise : fiche complète par SIREN\n"
@@ -960,7 +1060,10 @@ _SYSTEM_PROMPT_TOOLS = (
     "- get_lei_code : code LEI international (filiales étrangères)\n"
     "- search_dvf_zones : transactions immobilières par CP/dept\n"
     "**Structure groupe** :\n"
-    "- get_groupe_filiation : filiales + maison mère (GLEIF + INPI PM + BODACC fusions)\n\n"
+    "- get_groupe_filiation : filiales + maison mère (GLEIF + INPI PM + BODACC fusions)\n"
+    "**Network graph (Neo4j multi-hop)** — questions IMPOSSIBLES en SQL :\n"
+    "- graph_red_flags_network : sanctionnés/offshore/lobbyistes à 1-3 hops dans le réseau co-mandats d'une personne (DD M&A killer)\n"
+    "- graph_connection_path : chemin le plus court entre 2 personnes via co-mandats (warm intro, investigation)\n\n"
     "**RÈGLE ANTI-HALLUCINATION LABELS** : si la query commence par un identifiant interne "
     "(ex: DL12, DL28-, Q5/55, UI3, BUG-42, TEST-7), IGNORE totalement ce label. Ne l'interprète "
     "PAS comme code département FR, code postal, montant, NAF ou tout autre signal métier — "
