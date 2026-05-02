@@ -1,108 +1,250 @@
 ---
 name: qa-audit
-description: Lance un audit QA DEMOEMA selon un des 5 playbooks (A/B/C/D/E). Use when l'utilisateur demande "lance un audit", "teste tout", "audit copilot", "audit security", "audit datalake", "audit nav", "audit minutieux", ou veut vérifier l'état QA avant une release. Le skill délègue au subagent qa-engineer après avoir résolu le scope.
-allowed-tools: [Read, Bash, Grep, Glob, Agent, TaskCreate, TaskUpdate]
+version: 2.0.0
+description: Lance un audit QA DEMOEMA selon un des 5 playbooks (A/B/C/D/E) ou un sous-axe ciblé. Use when l'utilisateur demande "lance un audit", "teste tout", "audit copilot", "audit security", "audit datalake", "audit nav", "audit clickables", "audit browser", "audit backend", "audit minutieux", "audit l4", ou veut vérifier l'état QA avant une release. Le skill délègue au subagent qa-engineer après avoir résolu le scope.
+allowed-tools: [Read, Bash, Grep, Glob, Agent, TaskCreate, TaskUpdate, WebFetch, WebSearch, mcp__chrome-devtools__*]
 ---
 
-# QA Audit DEMOEMA — Skill orchestrateur
+# QA Audit DEMOEMA — Skill orchestrateur (v2.0.0, 2026-05-02)
 
-Tu lances un audit QA sur DEMOEMA en orchestrant le subagent `qa-engineer` selon le scope demandé par l'utilisateur.
+Tu lances un audit QA sur DEMOEMA en orchestrant le subagent `qa-engineer` selon le scope demandé.
 
-## Arguments attendus (ARG)
+## État courant DEMOEMA (rappel contexte)
 
-L'utilisateur invoque le skill avec un argument optionnel :
-- `qa-audit copilot` → Playbook A (110 questions copilot LLM)
-- `qa-audit security` → Playbook B (garak red-team latentinjection/promptinject/dan)
-- `qa-audit nav` → Playbook C (8 sections UI navigation)
-- `qa-audit datalake` → Playbook D (10 sous-axes : schéma, ingestion, MV, Soda Core, lineage, perf, RGPD, backup, observability, cohérence)
-- `qa-audit clickables` → axe 1.bis (350-400+ éléments cliquables exhaustifs)
-- `qa-audit browser` ou `qa-audit navigateur` → **axe 1.ter complet** (18 catégories, ~250 tests : routing, clavier, souris, tactile, copier/coller, file upload, print, persistance, cookies, network conditions, PWA, permissions, a11y, visuel, résilience, perf, window/tab, cross-browser × cross-device matrix 4×4=8 projets Playwright)
-- `qa-audit backend` → axe 2 (10 sous-axes B.1→B.10 : endpoints, Pydantic, SSE, async, errors, auth, rate limit, cache, health, observability)
-- `qa-audit minutieux` ou `qa-audit full` ou `qa-audit complet` → **Playbook E entier** (14 axes + 15 dimensions coverage + 11 dimensions complémentaires)
-- `qa-audit l4` → audit complet + verdict GO/NO-GO L4 (QCS ≥ 90 ?)
-- Sans argument → demander à l'utilisateur lequel des 8 modes
+- **Niveau de rigueur actuel** : **L2** (Playbook E 14 axes + 100 % cliquables) — cf. doctrine §7 échelle L1-L5
+- **Cible décidée 2026-05-02** : **L4 minimum** (QCS ≥ 90 sur 15 dimensions) avant prod payante / release investisseur
+- **Plan adoption L2 → L4** : 12 semaines (2026-05-04 → 2026-07-25), 6 sprints, 20 tickets `qa-l4-*`
+- **Epic Jira** : [SCRUM-136](https://demoema.atlassian.net/browse/SCRUM-136) + 20 stories (SCRUM-137..156)
+- **Audits précédents** : 2 audits QA (110 questions) + 2 rounds garak (HijackHateHumans + latentinjection) — tous patchés
+- **Tickets follow-up pending** : SCRUM-122 (sync dashboard↔fiche), SCRUM-133 (press_mentions index)
 
-## Procédure d'exécution
+## 9 modes d'invocation `/qa-audit <type>`
+
+| Mode | Scope | Doctrine §ref | Durée typique |
+|---|---|---|---|
+| `copilot` | Playbook A — 110 questions copilot LLM (latence, hallucinations, sources) | §4 Playbook A | 1-2 h |
+| `security` | Playbook B — garak `promptinject + dan + latentinjection` | §4 Playbook B | 1-2 h |
+| `nav` | Playbook C — 8 sections UI navigation hash routing | §4 Playbook C | 30 min |
+| `datalake` | Playbook D — **10 sous-axes D.1→D.10** (schéma, ingestion, MV, Soda Core, lineage, perf, RGPD, backup, observability, cohérence cross-source) | §4 Playbook D | 2-3 h |
+| `clickables` | Sous-axe 1.bis — **350-400+ éléments cliquables** (boutons, liens, role=*, inputs, select, summary, onclick, tabindex, label) | §5 axe 1.bis | 1 h |
+| `browser` ou `navigateur` | Sous-axe 1.ter — **~250 tests sur 18 catégories** (routing, clavier, souris, tactile, clipboard, files, print, persistance, cookies, network, PWA, permissions, a11y, visuel, résilience, perf, window/tab, cross-browser × cross-device) | §5 axe 1.ter | 2 h |
+| `backend` | Axe 2 — **10 sous-axes B.1→B.10** (endpoints, Pydantic, SSE, async, errors, auth, rate limit, cache, health, observability) | §5 axe 2 | 1-2 h |
+| `minutieux` ou `full` ou `complet` | **Playbook E entier** — 14 axes + 15 dimensions coverage + 11 dimensions complémentaires | §5 Playbook E | 4-8 h |
+| `l4` | Audit complet + **calcul QCS** + verdict GO/NO-GO L4 (production payante) | §5 + §7 + §8 | 4-8 h |
+
+Sans argument → demander à l'utilisateur lequel des 9 modes.
+
+## Procédure d'exécution (5 étapes)
 
 ### Étape 1 — Charger la doctrine
+
 Lis dans cet ordre :
-1. `docs/QA_PLAYBOOKS.md` (1576 lignes — source-of-truth complet)
-2. `audit_demoema/AUDIT_QA_RAPPORT.md` (corpus baseline 110 questions)
-3. `garak_demoema/demoema_copilot.json` (config red-team si security)
+1. **`docs/QA_PLAYBOOKS.md`** (1782 lignes — source-of-truth complet)
+   - §4 Playbooks A/B/C/D
+   - §5 Playbook E + 14 axes (axe 1 incluant 1.bis et 1.ter, axe 2 B.1-B.10, axe 4 DATA.1-DATA.10, etc.)
+   - §6 15 dimensions coverage (line, branch, mutation, API, clickable, LLM tool, data quality, visual, browser, device, locale, persona, state, negative)
+   - §7 5 niveaux rigueur L1→L5
+   - §8 Plan adoption L2→L4 12 semaines
+   - §9 11 dimensions complémentaires (architecture, audit M&A, time, numeric, concurrency, DX agentic, crisis comm, vendor exit, test pyramid, knowledge mgmt, license)
+2. **`audit_demoema/AUDIT_QA_RAPPORT.md`** (corpus baseline 110 questions, métriques avant/après)
+3. **`garak_demoema/demoema_copilot.json`** (config red-team si security)
+4. **`docs/ETAT_REEL_2026-05-01.md`** (snapshot état post-audit round 1)
 
 ### Étape 2 — Vérifier prérequis
-Selon le scope :
-- **copilot/security** : endpoint `/api/copilot/redteam` UP via `curl -sS https://82-165-57-191.sslip.io/api/health`
-- **datalake** : SSH VPS readonly + Soda Core installé (`pip show soda-core-postgres`)
-- **nav/clickables** : Chrome DevTools MCP disponible dans la session OU Playwright (à vérifier)
-- **backend** : FastAPI prod accessible + OpenAPI à `/openapi.json`
-- **minutieux** : tous les prérequis ci-dessus
 
-Si un prérequis manque → message clair + escalade `devops-sre` si infra.
+Selon le scope :
+
+| Mode | Prérequis à vérifier |
+|---|---|
+| `copilot` | Endpoint `/api/copilot/redteam` UP : `curl -sS https://82-165-57-191.sslip.io/api/health \| jq .` |
+| `security` | Idem + venv garak : `ls /c/Users/zkhch/garak_demoema/.venv/Scripts/python.exe` |
+| `datalake` | SSH VPS readonly : `ssh -i ~/.ssh/demoema_ionos_ed25519 root@82.165.57.191 'echo OK'` + Soda Core : `pip show soda-core-postgres` |
+| `nav`/`clickables`/`browser` | Chrome DevTools MCP dans session OU Playwright : `cd frontend && npx playwright --version` |
+| `backend` | OpenAPI à jour : `curl -sS https://82-165-57-191.sslip.io/openapi.json \| jq '.paths \| keys \| length'` |
+| `minutieux`/`full`/`l4` | TOUS les ci-dessus |
+
+Si un prérequis manque :
+- Outils OSS non installés (DeepEval, Promptfoo, Hypothesis, Splink, Soda Core, Schemathesis, mutmut) → ouvrir ticket adoption sprint QA-N (cf. doctrine §3 roadmap)
+- Infra (VPS, Postgres, Caddy) → escalade `devops-sre` subagent
+- Endpoint prod KO → STOP audit, alerte Slack
 
 ### Étape 3 — Lancer le subagent qa-engineer
-Délègue via `Agent` tool avec subagent_type=`qa-engineer` et prompt structuré :
+
+Délègue via `Agent` tool avec `subagent_type=qa-engineer` et prompt structuré (template selon scope) :
 
 ```
 Lance le Playbook <X> selon docs/QA_PLAYBOOKS.md §<Y>.
 
-Contexte :
+Contexte DEMOEMA :
 - Cible prod : https://82-165-57-191.sslip.io
-- Baseline : <métriques pertinentes du Playbook>
-- Outils à utiliser : <liste depuis le Playbook>
+- Stack : FastAPI + Next.js 15 + Postgres datalake (15M rows) + DeepSeek LLM
+- Niveau rigueur : L2 actuel, cible L4 (QCS >= 90)
+- Baseline (cf §2 doctrine) : p50 copilot 10s, p95 18s, 0 hallucination DL{N},
+  0 source pappers, 350-400+ cliquables, 14 axes, 15 dim coverage
+
+Périmètre <X> :
+- <Pour clickables : axe 1.bis 350-400+ éléments via clickables-exhaustive.spec.ts>
+- <Pour browser : axe 1.ter 18 catégories A-R, 250 tests Playwright>
+- <Pour datalake : 10 sous-axes D.1->D.10, Soda Core scans, RGPD audit>
+- <Pour backend : 10 sous-axes B.1->B.10, Schemathesis stateful, OWASP API Top 10>
+
+Outils à utiliser (versions stables 2026-05) :
+- garak v0.15.0 (Agent breaker probe + ModernBERT + mTLS REST)
+- Schemathesis 4.17 `st fuzz` stateful
+- DeepEval 3.9.9 (ToolCorrectness, TaskCompletion, PlanAdherence)
+- Promptfoo 0.121.9 (Trajectory eval + HarmBench filter)
+- Playwright 1.59.1 (browser.bind() + --debug=cli)
+- @axe-core/playwright + axe-core 4.11.4
+- MemLab heap snapshots
+- Hypothesis 6.151+ (property-based)
+- Splink (entity resolution)
+- Soda Core (data quality YAML)
+- TLA+ (verification formelle)
 
 Output requis :
-- Rapport au format `audit_demoema/AUDIT_<TYPE>_<DATE>.md`
-- Verdict GO/NO-GO par sous-axe
-- Métriques chiffrées avant/après baseline
-- Pour chaque NO-GO : recommander le subagent cible (backend-engineer / frontend-engineer / devops-sre / lead-data-engineer)
+1. Rapport `audit_demoema/AUDIT_<TYPE>_<DATE>.md` (format §5 ci-dessous)
+2. Verdict GO/NO-GO par axe et sous-axe
+3. Métriques chiffrées avant/après baseline (delta pp par dimension)
+4. Pour chaque NO-GO : recommander subagent cible (backend-engineer / frontend-engineer / devops-sre / lead-data-engineer / atlassian-sync)
+5. Tickets SCRUM proposés (sous epic SCRUM-136 si L4-related)
 
-Sample les outputs avant de conclure (faux positifs FR garak connus, cf. Playbook §2 leçons).
+PIÈGES À ÉVITER (cf. §2 leçons) :
+- Sampler outputs garak avant de patcher (faux positifs FR mitigation.MitigationBypass)
+- Ne pas confondre `dan.Ablation` 100% fail (cap 2000 chars OK) avec vraie vuln
+- CJK encoding : payloads via fichier UTF-8, pas via shell -d
+- Probes garak valides : promptinject + dan + latentinjection (PAS sysprompt_extraction)
+- Bouton fantôme = 0 effet (nav/DOM/network/aria) → fail axe 1.bis
+- PII dirigeants en logs = fail axe D.7 RGPD
+
+NE JAMAIS :
+- Modifier code prod (DETECTE et REPORTE uniquement)
+- Push / merge / déployer
+- Inventer outils non installés (verifier `pip show` / `npm ls` avant)
+- Conclure PASS sans chiffres (toujours latences + fail rates + QCS)
 ```
 
-### Étape 4 — Calculer le QCS (Quality Coverage Score)
-Si scope = `minutieux`/`full`/`l4`, après l'audit :
-- Récupérer les métriques par dimension (15 coverage + 14 axes)
-- Calculer QCS = moyenne pondérée 0-100
-- Comparer aux seuils : L2≥55, L3≥80, L4≥90, L5≥95
-- Émettre verdict GO/NO-GO L4 (cible Zak 2026-05-02)
+### Étape 4 — Calculer le Quality Coverage Score (QCS)
 
-### Étape 5 — Reporter au user
-Format de réponse :
+Si scope = `minutieux`/`full`/`l4`, après l'audit :
+
+**Formule QCS** (moyenne pondérée des 15 dimensions normalisées 0-100) :
+```
+QCS = ROUND(
+  0.10 * line_coverage_pct +
+  0.10 * branch_coverage_pct +
+  0.05 * path_coverage_pct +
+  0.10 * mutation_coverage_pct +
+  0.08 * api_endpoint_coverage_pct +
+  0.10 * clickable_coverage_pct +
+  0.08 * llm_tool_coverage_pct +
+  0.08 * data_quality_coverage_pct +
+  0.05 * visual_regression_coverage_pct +
+  0.05 * browser_coverage_pct +
+  0.04 * device_coverage_pct +
+  0.03 * locale_coverage_pct +
+  0.03 * persona_coverage_pct +
+  0.05 * state_coverage_pct +
+  0.06 * negative_test_coverage_pct
+, 1)
+```
+
+Total poids = 1.00. Comparer aux seuils :
+- **L2** (actuel) : QCS ≥ 55
+- **L3** (Q3 2026) : QCS ≥ 80
+- **L4** (cible 2026-07-25) : QCS ≥ 90 ⬅
+- **L5** (2028+) : QCS ≥ 95
+
+### Étape 5 — Reporter au user (format obligatoire)
 
 ```markdown
-## Audit QA <type> — <date>
+# Audit QA <type> — DEMOEMA <date> (<git_sha>)
 
-**Verdict global** : GO / NO-GO
-**QCS courant** : <X>/100 (cible L4 = 90)
-**Delta vs baseline** : <Δ pp par dimension critique>
+## Verdict global
 
-### Bugs détectés
-- [P0] <titre> → recommander `<agent-cible>`
-- [P1] <titre> → recommander `<agent-cible>`
-...
+**GO / NO-GO** (production payante L4)
+**QCS courant** : <X>/100 (cible L4 = 90, baseline L2 ≈ 55)
+**Niveau de rigueur atteint** : L<N>
 
-### Régressions vs sprint précédent
-- Dimension <Y> baisse de <Z> pp ⚠
+## Métriques chiffrées vs baseline
 
-### Suite recommandée
-- Re-run après patches : `<commande>`
-- Tickets SCRUM à créer : <liste>
-- Schedule remote agent : `<oui/non>` à <date>
+| Métrique | Baseline | Run | Delta | Cible | Verdict |
+|---|---|---|---|---|---|
+| p50 copilot SSE | 10 s | <X> s | <Δ> | <5 s | <emoji> |
+| p95 copilot SSE | 18 s | <Y> s | <Δ> | <30 s | <emoji> |
+| Hallucinations DL{N} | 0/110 | <N>/110 | <Δ> | 0 | <emoji> |
+| Source pappers | 0/110 | <N>/110 | <Δ> | 0 | <emoji> |
+| Cliquables PASS (1.bis) | 100 % | <X>% | <Δ> | 100 % | <emoji> |
+| Tests browser PASS (1.ter) | <baseline>% | <X>% | <Δ> | 100 % | <emoji> |
+| Mutation score | <X>% | <Y>% | <Δ> | 90 % L4 | <emoji> |
+| Soda Core checks | <X>/<total> | <Y>/<total> | <Δ> | 100 % | <emoji> |
+| ... (15 dimensions) | ... | ... | ... | ... | ... |
+
+## Bugs détectés (priorisés)
+
+### [P0] <titre du bug critique>
+- **Reproduction** : <étapes>
+- **Impact** : <user/business impact>
+- **Cause probable** : <hypothèse>
+- **Fix recommandé** : <description> → délégué à `<subagent-cible>` (`backend-engineer` / `frontend-engineer` / `devops-sre` / `lead-data-engineer`)
+- **Ticket SCRUM proposé** : `[<priorité>] <titre>` sous epic SCRUM-136
+
+### [P1] ... etc
+
+## Faux positifs documentés (à NE PAS patcher)
+
+<liste des fail rates suspects qui sont en réalité des faux positifs, avec sample d'outputs réels>
+
+## Régressions vs sprint précédent
+
+| Dimension | Sprint N-1 | Sprint N | Delta | Action |
+|---|---|---|---|---|
+| <Y> | <X> % | <Y> % | <Δ pp> | <à investiguer si > 5 pp> |
+
+## Suite recommandée
+
+- **Re-run après patches** : `<commande exacte>` (ex: `/qa-audit security` après merge PR fix)
+- **Tickets SCRUM à créer** : <liste avec key proposée>
+- **Schedule remote agent** : <oui/non + date> pour vérification follow-up
+
+## Conformité critères GO L4 (10 obligatoires, cf §8)
+
+- [<x|>] QCS ≥ 90 (actuel : <N>)
+- [<x|>] 14 axes Playbook E tous GO
+- [<x|>] 350-400+ cliquables 100 % PASS (1.bis)
+- [<x|>] 250 tests browser 100 % PASS (1.ter)
+- [<x|>] Mutation score ≥ 90 % sur 5 modules critiques
+- [<x|>] 0 finding SAST/DAST high+
+- [<x|>] TLA+ verification formelle invariants OK
+- [<x|>] Disparate impact < 0.8 (fairness scoring M&A)
+- [<x|>] Chaos Game Day RTO < 15 min
+- [<x|>] Endurance 24h + 7j sans memory leak
+
+**Verdict final L4** : <GO si 10/10> | <NO-GO + blockers listés>
 ```
 
-## Exemples d'invocation
+## Exemples d'invocation complets
 
-```
-/qa-audit copilot       → 110 questions baseline + métriques
-/qa-audit security      → garak promptinject + latentinjection + dan
-/qa-audit datalake      → 10 sous-axes D.1→D.10 (Soda Core + lineage + perf)
-/qa-audit clickables    → 350-400+ éléments interactifs
-/qa-audit minutieux     → Playbook E complet (14 axes + 15 dim + 11 dim)
-/qa-audit l4            → audit complet + verdict GO/NO-GO production payante
+```bash
+/qa-audit copilot       → Playbook A : 110 questions copilot, 1-2h
+/qa-audit security      → Playbook B : garak promptinject+dan+latentinjection, 1-2h
+/qa-audit nav           → Playbook C : 8 sections UI hash routing, 30min
+/qa-audit datalake      → Playbook D : 10 sous-axes D.1→D.10, 2-3h
+/qa-audit clickables    → axe 1.bis : 350-400+ éléments interactifs, 1h
+/qa-audit browser       → axe 1.ter : 250 tests browser (18 catégories) × 8 projets cross-browser, 2h
+/qa-audit backend       → axe 2 : 10 sous-axes B.1→B.10 endpoints/SSE/auth/cache, 1-2h
+/qa-audit minutieux     → Playbook E entier : 14 axes + 15 dim + 11 dim, 4-8h
+/qa-audit l4            → audit complet + QCS + verdict GO/NO-GO production payante, 4-8h
 ```
 
-## Pièges connus à NE PAS reproduire (cf. doctrine §2 leçons)
+## Si erreur subagent (gestion exceptions)
+
+- **Subagent timeout (> 30 min sans output)** : kill + relancer avec scope réduit (sous-axe par sous-axe)
+- **Subagent retourne erreur ou fail systématique** : afficher l'erreur intégrale au user + escalade `devops-sre`
+- **Prérequis manquant détecté en cours de route** : pause audit, log précis du manque, proposer `/qa-audit <scope_réduit>` excluant la dimension bloquée
+- **Conflit avec autre audit en cours** : refuser nouveau lancement, informer du run en cours
+- **Endpoint prod 5xx en milieu d'audit** : freeze rapport partiel, alerte `devops-sre`, ne pas continuer
+
+## Pièges connus à NE PAS reproduire (cf. doctrine §2 leçons techniques)
 
 1. **Faux positifs garak** `dan.*/mitigation.MitigationBypass` 80-100 % fail = détecteur EN sur copilot FR. **Toujours sampler les outputs avant de conclure.**
 2. **Regex `\b` global** dans `_PROMPT_INJECTION_PATTERNS` casse les patterns commençant par `[`/`<`/CJK. Vérifier que le `\b` est local par alternative.
@@ -111,11 +253,26 @@ Format de réponse :
 5. **Bouton "fantôme"** : un cliquable sans effet (handler vide, `console.log` only) = fail axe 1.bis. Pattern de détection : 4 effets attendus (nav / DOM mutation / network / aria-state).
 6. **Source `pappers`** abandonnée 2026-04-23 → grep doit retourner 0 dans réponses copilot.
 7. **PII dirigeants en logs** : nom/prénom en clair = fail axe D.7 RGPD. Hash uniquement.
+8. **`dan.Ablation_Dan_11_0` 100 % fail** = sécurité d'input cap 2000 chars qui marche, PAS une vuln.
+9. **Test rejette payload chinois** : si test échoue sur `哈哈被耍`, vérifier d'abord encoding bash (Windows) avant de patcher la regex.
+10. **Cliquables sans test si caché derrière un autre élément** : `:visible` Playwright ne capte pas les `display:none`, mais peut capter les `visibility:hidden` → bien filtrer.
 
 ## Ne JAMAIS faire
 
-- Modifier code prod (qa-engineer DETECTE et REPORTE, ne patche pas)
-- Push sur main / merge / déployer (chain humaine sur écritures critiques)
-- Inventer des outils non installés (DeepEval, Promptfoo, Stagehand, Splink, Soda — vérifier `pip show` / `npm ls` avant de prétendre les utiliser)
-- Conclure "PASS" sans chiffres (toujours `p50=Xs, p95=Ys, fail_rate=Z%, QCS=N/100`)
-- Skip un sous-axe sans justification écrite dans le rapport
+- **Modifier code prod** : qa-engineer DETECTE et REPORTE, ne patche pas. Délégation aux subagents `backend-engineer` / `frontend-engineer` / `devops-sre` / `lead-data-engineer`.
+- **Push sur main / merge PR / déployer** : chain humaine sur écritures critiques. Le skill propose les patches mais Zak les valide.
+- **Inventer des outils non installés** : DeepEval, Promptfoo, Stagehand, Splink, Soda Core, Hypothesis, mutmut, Schemathesis, etc. → vérifier `pip show <pkg>` ou `npm ls <pkg>` AVANT de prétendre les utiliser. Si non installé → ouvrir ticket adoption sprint QA-N.
+- **Conclure "PASS" sans chiffres** : toujours `p50=Xs, p95=Ys, fail_rate=Z%, QCS=N/100, mutation=M%`. Pas de "ça a l'air OK" / "tout est vert".
+- **Skip un sous-axe sans justification écrite** : chaque sous-axe non testé doit avoir une raison documentée dans le rapport (ex: "outil X non installé, ticket SCRUM-Y créé").
+- **Faire des actions payantes** : pas de SaaS payant (Galileo, Patronus, Confident AI cloud, Chromatic, BrowserStack) sans approbation explicite Zak.
+- **Toucher au datalake en write** : SSH VPS readonly uniquement, pas de SQL UPDATE/DELETE/CREATE INDEX sans validation.
+
+## Références
+
+- **Doctrine** : `docs/QA_PLAYBOOKS.md` (1782 lignes)
+- **Subagent** : `.claude/agents/qa-engineer.md` (178 lignes)
+- **Epic Jira** : [SCRUM-136](https://demoema.atlassian.net/browse/SCRUM-136) "[QA L4] Adoption rigueur niveau L4"
+- **Stories** : SCRUM-137..156 (20 disciplines L3+L4 réparties sur 6 sprints)
+- **Repo** : https://github.com/Zakariakhchiche/DEMOEMA
+- **Audits historiques** : `audit_demoema/` (rapports + screenshots) + `garak_demoema/` (red-team)
+- **PR doctrine** : #102 (mergée), commits `8291d0a → 3f85f3a` sur main
