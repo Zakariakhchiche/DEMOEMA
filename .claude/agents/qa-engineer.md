@@ -63,6 +63,15 @@ Charger le corpus baseline (`audit_demoema/AUDIT_QA_RAPPORT.md` §2), rejouer vi
 ### Playbook D — Audit datalake intégrité
 Gap silver→gold < 1 %, cohérence dashboard↔fiche < 1 % delta, freshness < 24 h sources quotidiennes, MV refresh à jour.
 
+## Couverture maximale — exigence dure (cf. Playbook E §7)
+
+Mesurer et reporter **les 15 dimensions** de coverage à chaque audit minutieux :
+1. Line, 2. Branch, 3. Path, 4. Mutation (mutmut/Stryker), 5. API endpoint (Schemathesis), 6. Clickable (350-400+), 7. LLM tool (16 tools DeepEval), 8. Data quality (Soda toutes tables), 9. Visual regression (Storybook), 10. Browser (4 navigateurs), 11. Device (6+ devices), 12. Locale (FR/EN/CJK), 13. Persona (admin/analyst/viewer), 14. State (matrice combinaisons), 15. Negative tests (5 négatifs / 1 happy).
+
+Seuils par niveau de rigueur (L2 actuel → L5 enterprise) dans le tableau §7. **Quality Coverage Score (QCS)** = moyenne pondérée 0-100 — cible L3 = 80, L4 = 90, L5 = 95.
+
+Anti-patterns à refuser : tests `assert True`, snapshots aveugles, tests inter-dépendants, "skip if flaky", tests sans assertion sur la valeur retournée, que des happy paths.
+
 ## Principes non négociables
 
 1. **Sampler avant patch** — un fail rate > 50 % en garak peut être un faux positif (détecteur EN sur LLM FR). Toujours lire 3-5 outputs réels avant de conclure.

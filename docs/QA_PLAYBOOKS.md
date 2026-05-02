@@ -675,7 +675,304 @@ Il NE peut PAS : modifier code prod, push, merge, déployer (chain humaine sur �
 
 ---
 
-## 7. Sources état de l'art (référencées 2026-05-02)
+## 7. Échelle de rigueur QA — 5 niveaux progressifs
+
+Le Playbook E (14 axes + 100 % cliquables) place DEMOEMA en **L2 "Audit systématique"**. Pour aller au-delà, voici les disciplines à activer par niveau. Cible long-terme : **L4 "Engineering rigoureux"** (équivalent banques tier-1 / aérospatial light).
+
+### L1 — Tests fonctionnels basiques (avant audit QA round 1)
+- pytest happy path uniquement, vitest unit, audits manuels ad-hoc
+- Coverage non mesurée, flakiness toléré
+- **DEMOEMA état avant 2026-05-01**.
+
+### L2 — Audit systématique (Playbook E actuel ⬅ DEMOEMA aujourd'hui)
+- 14 axes minutieux + 100 % éléments cliquables testés
+- Coverage line ≥ 70 %, garak red-team hebdo, Schemathesis fuzz
+- Métriques chiffrées avant/après chaque release
+
+### L3 — Robustesse + propriétés invariantes (cible Q3 2026)
+**+10 disciplines à ajouter** :
+
+1. **Property-based testing systématique** (Hypothesis)
+   - Invariants sur scoring : `0 ≤ deal_score ≤ 100`, `tier monotone(CA)`, `EBITDA ≤ CA`, `effectif ≥ 0`
+   - `RuleBasedStateMachine` sur le pipeline kanban : chaque transition d'état doit être réversible ou marquée irréversible
+   - 1000+ inputs générés par test (vs ~5 cas connus actuellement)
+
+2. **Boundary value testing** systématique
+   - Pour chaque seuil business : tester exactement à la frontière (CA = 0, CA = 1€, CA = 1 Md€, CA = float infinity, CA = NaN, CA = -1)
+   - Dates : 1900-01-01, 1970-01-01, 2038-01-19 (Unix timestamp overflow), 2100-01-01, dates futures impossibles
+   - Chaînes : 0 char, 1 char, 1999 chars, 2000 chars (limite), 2001 chars (over-limit), 1MB string
+
+3. **Negative testing exhaustif**
+   - Chaque endpoint : null, tableau vide, type incorrect (str au lieu de int), encoding cassé (latin-1 au lieu UTF-8), SQL injection, XSS, path traversal, command injection
+   - Codes erreurs cohérents : 400 vs 422 vs 500 selon classe d'erreur
+
+4. **Fuzzing applicatif** (radamsa, AFL++, atheris pour Python)
+   - SIREN, NAF, queries copilot — détecte buffer overflow, regex DoS (ReDoS), unicode tricks
+   - 24h de fuzzing par release sur les 10 endpoints les plus exposés
+
+5. **Chaos engineering**
+   - Toolkit `litmuschaos` ou simple `tc qdisc` (Linux)
+   - Simuler : latency 100-500ms, packet loss 5 %, DB down, DeepSeek timeout, OpenSanctions 503, OOM container
+   - Vérifier : dégradation gracieuse (429 plutôt que 5xx), retries OK, fallbacks actifs, alertes émises
+   - Quarterly "Game Day" : 1 demi-journée de chaos prod-like
+
+6. **Endurance / soak tests**
+   - 24h continu sous charge moyenne (10 VUs) sur staging → memory leaks (RSS stable < +5 %), connection pool stable, MV freshness pas de drift > 1h
+   - 7j cron continu pour détecter régressions lentes (DB bloat, log file rotation, secrets expiry, certificat TLS expiry)
+
+7. **Mutation testing** (mutmut Python, Stryker pour TS)
+   - Mutmut modifie aléatoirement le code (`+` → `-`, `<` → `>`, `True` → `False`, etc.)
+   - Si tests passent malgré mutation → tests faibles
+   - **Cible : mutation score ≥ 80 %** sur modules critiques (scoring, copilot, datalake whitelist)
+   - Run hebdo, pas par PR (coût élevé)
+
+8. **Differential testing**
+   - Comparer 2 implémentations qui devraient être équivalentes :
+     - Fiche via SSE copilot vs `/api/datalake/fiche/{siren}` direct → mêmes valeurs canoniques
+     - Calcul EBITDA proxy en SQL gold vs en Python backend → delta < 0.01 %
+     - Export CSV vs export PDF d'un même deal → mêmes 19 colonnes, mêmes valeurs
+
+9. **Metamorphic testing**
+   - Règles métamorphiques (relations entre inputs/outputs sans connaître la valeur exacte) :
+     - Si on enrichit une cible avec MORE data, le `deal_score` ne doit JAMAIS baisser (monotonie)
+     - Si on traduit une question copilot FR → EN → FR, la réponse doit être sémantiquement équivalente
+     - Si on duplique un SIREN dans la query, la réponse doit être identique (idempotence)
+
+10. **Golden datasets / vérité terrain**
+    - Corpus annoté manuellement : 50 fiches "vérité terrain" (CA, EBITDA, dirigeants, scoring expert)
+    - Test régression : ces 50 fiches doivent toujours produire les mêmes réponses canoniques
+    - Mise à jour annuelle (sources INPI changent → re-annoter)
+
+### L4 — Engineering rigoureux (cible 2027)
+**+10 disciplines avancées** :
+
+11. **Mutation score ≥ 90 %** sur modules critiques (vs 80 % en L3)
+
+12. **Branch + path coverage** (vs juste line coverage)
+    - `pytest --cov-branch` + `Hypothesis` pour générer paths spécifiques
+    - **Cible : 90 % branch, 80 % path** sur scoring/auth/copilot
+
+13. **Verification formelle légère** (TLA+ ou Alloy)
+    - Spécifier formellement les invariants critiques : auth state machine, transitions kanban, monotonie scoring
+    - Modèle TLA+ checké pour ABSENCE de deadlock + safety properties
+    - Sortie : preuve mathématique (pas juste tests qui passent)
+
+14. **Contract testing** (Pact, consumer-driven)
+    - Frontend déclare son contrat sur backend → backend doit respecter
+    - Datalake déclare son contrat avec downstream consumers
+    - Brisure de contrat = fail-build automatique
+
+15. **A/B shadow testing** (production silent compare)
+    - Déployer 2 versions en parallèle (legacy + new) sur 1 % traffic
+    - Comparer outputs en temps réel sans impacter user
+    - Détecter régressions subtiles invisibles en staging
+
+16. **Replay & event sourcing testing**
+    - Logs structurés tous événements user → replay sur staging
+    - Idempotence : rejouer 1000× le même event → state final identique
+    - Time-travel : reconstituer le state à n'importe quel moment passé
+
+17. **Tests de fairness / bias**
+    - Particulier pour scoring M&A : un dirigeant nom à consonance étrangère (Aïcha, Mamadou, Wei) doit être scoré IDENTIQUEMENT à un nom français équivalent (toutes choses égales par ailleurs)
+    - Toolkit : `aif360` (IBM), `fairlearn` (Microsoft) — métriques disparate impact, demographic parity
+    - Audit annuel obligatoire (AI Act EU)
+
+18. **LLM judge panel** (vs single judge)
+    - 3+ LLMs jugent indépendamment chaque réponse copilot (Prometheus 2 + Claude + GPT-4 ou similaire)
+    - Agrégation : majority vote ou moyenne pondérée
+    - Détecte position bias, verbosity bias, self-preference bias
+
+19. **SBOM + supply chain attestation**
+    - `cyclonedx-bom` génère SBOM par release
+    - Sigstore signature des artefacts container
+    - SLSA Level 3 attestation provenance build
+    - Vérification automatique des deps : pas de package compromis (cf. litellm backdoor 2026-03)
+
+20. **SAST + DAST + IAST combinés**
+    - SAST : Bandit (Python), ESLint security, Semgrep custom rules DEMOEMA
+    - DAST : OWASP ZAP automatisé sur staging
+    - IAST : Contrast Security ou Aikido (open-source) en runtime staging
+    - Triangulation des findings → 0 faux positif
+
+### L5 — Continuous quality observability (cible 2028+)
+**+10 disciplines top-tier** :
+
+21. **Quality dashboard temps réel** (Grafana)
+    - Flake rate, test duration p95, coverage trend, mutation score, hallucination rate copilot live, fail rate par axe Playbook E
+    - Alerting si métrique dégrade > seuil
+
+22. **Regression budget**
+    - Budget formel : "max 0.1 % régression p95 latency par release"
+    - Si dépassé → release bloquée jusqu'à fix
+
+23. **Post-mortem culture stricte**
+    - Chaque bug en prod → un nouveau test reproduit le bug AVANT le fix
+    - Anti-régression garantie + base de connaissance SCRUM avec catégorisation root-cause
+
+24. **Continuous evaluation prod**
+    - Langfuse/Opik trace 100 % des appels LLM → score auto continu (faithfulness, relevance, hallucination)
+    - Déclenche audit profond si dégradation > seuil
+
+25. **Visual regression 100 %**
+    - Storybook 9 + Chromatic-equivalent OSS (Loki/Playwright snapshots) sur 100 % composants
+    - Pixel-diff < 0.1 % vs baseline, 0 régression visuelle non intentionnelle
+
+26. **Tests de récupération désastres**
+    - Trimestriel : simulation perte totale datalake → restore from backup en < 4h
+    - Tests bascule région (si multi-région un jour) en < 30 min RTO
+
+27. **Bug bounty / red team externe**
+    - Programme bug bounty payant (HackerOne / YesWeHack) — bloqué par no_paid_actions sans approbation Zak
+    - 1× par an : red team externe (pentest agréé ANSSI) — idem
+
+28. **Fuzzing continu cloud** (OSS-Fuzz style)
+    - Cluster dédié 24/7 fuzzing les inputs critiques
+    - Coverage-guided + dictionnaire personnalisé (SIREN format, dates FR, NAF codes)
+
+29. **Compliance audits récurrents**
+    - RGPD : test droit à l'oubli (DELETE user → vérifier downstream caches/logs/exports purgés)
+    - AI Act EU : audit annuel "système IA à risque limité" — transparence, traçabilité, supervision humaine
+    - SOC 2 / ISO 27001 si DEMOEMA vise grands comptes
+
+30. **Heuristic evaluation périodique**
+    - Audit UX selon 10 heuristiques Nielsen + accessibility WCAG 2.2 par expert externe annuel
+    - Comparaison concurrentielle (Mergermarket, PitchBook, Capital IQ) — gap analysis trimestriel
+
+---
+
+### Comment passer L2 → L3 (priorité Q3 2026)
+
+**Quick wins (1 sprint chacun)** :
+1. **Hypothesis sur scoring** (1 j) → property-based testing sur `compute_deal_score`, `compute_tier`, `extract_dirigeants_from_text`
+2. **Boundary tests SIREN/NAF/dates** (1 j) → cas limites systématiques
+3. **Golden dataset 50 fiches** (3 j) → annotation manuelle + corpus versionné `backend/tests/fixtures/golden_50.json`
+4. **mutmut sur 5 modules critiques** (2 j) → mutation score baseline + cible 80 %
+5. **Differential SSE vs REST** (1 j) → assertion CA/EBITDA identiques entre les 2 chemins
+
+**Effort important** :
+6. **Chaos engineering quarterly Game Day** (5 j initial + 0.5 j/q) → toolkit + 1ère exécution
+7. **Endurance 24h soak test** (3 j initial + cron) → CI nightly extended
+8. **Negative testing exhaustif** (5 j) → décliner les 10 endpoints critiques avec ~50 negative cases each
+
+**Mesures à dashboard immédiat** :
+- `mutation_score` : objectif → 80 % L3, 90 % L4
+- `branch_coverage` : objectif → 80 % L3, 90 % L4
+- `flake_rate` : objectif → < 1 % L3, < 0.1 % L4
+- `MTTR_audit_to_patch` : objectif → < 24h L3, < 4h L4
+
+### COUVERTURE MAXIMALE — 15 dimensions de coverage
+
+La rigueur QA exige de mesurer **toutes** les dimensions de couverture, pas juste line coverage. Une suite "à 95 % ligne" peut avoir 30 % branch et 0 % mutation = passoire. Voici les 15 dimensions à dashboarder, chacune avec commande et seuils par niveau.
+
+| # | Dimension | Outil | Seuil L2 | Seuil L3 | Seuil L4 | Seuil L5 | Commande mesure |
+|---|---|---|---|---|---|---|---|
+| 1 | **Line coverage** | `pytest --cov=backend` + `vitest --coverage` | 70 % | 85 % | 95 % | 98 % | `pytest --cov=backend --cov-fail-under=95 --cov-report=html` |
+| 2 | **Branch coverage** | `pytest --cov-branch` | 60 % | 80 % | 90 % | 95 % | `pytest --cov-branch --cov-report=term-missing` |
+| 3 | **Path coverage** | `coverage.py` paths + Hypothesis | non mesuré | 70 % | 80 % | 90 % | `coverage report --show-missing --include="backend/*"` |
+| 4 | **Mutation coverage** | `mutmut` (Python), `Stryker` (TS) | non mesuré | 80 % | 90 % | 95 % | `mutmut run --paths-to-mutate=backend/clients/deepseek.py` |
+| 5 | **API endpoint coverage** | Schemathesis stateful + OpenAPI introspection | 100 % path | 100 % path × 5 méthodes | 100 % × tous query params | 100 % × params × auth scopes | `st fuzz https://api/openapi.json --report=allure-results` |
+| 6 | **Clickable coverage** | Playwright auto-discovery (cf. §5 axe 1.bis) | 100 % visibles | 100 % × 3 breakpoints | 100 % × 3 BP × 3 themes × 2 connectivity | 100 % × matrice complète | `playwright test clickables-exhaustive.spec.ts` |
+| 7 | **LLM tool coverage** | DeepEval `ToolCorrectness` sur les 16 tools | 100 % tools individuels | 100 % × parallel calls | 100 % × multi-turn × 3 ordres | 100 % × pass^k=3 | `deepeval test run backend/tests/eval/tool_correctness.py` |
+| 8 | **Data quality coverage** | Soda Core scans toutes tables `silver.*`+`gold.*` | 80 % tables | 100 % tables × not_null | 100 % tables × 5 checks (null, unique, range, regex, fk) | 100 % × drift detection whylogs | `soda scan -d demoema -c configuration.yml checks.yml` |
+| 9 | **Visual regression coverage** | Storybook 9 + Playwright `toHaveScreenshot()` | 30 % composants | 70 % | 100 % composants `dem/*` | 100 % × 4 themes × 3 breakpoints | `playwright test visual --update-snapshots` |
+| 10 | **Browser coverage** | Playwright cross-browser | 1 (Chromium) | 2 (Chrome+Firefox) | 4 (Chromium, Firefox, WebKit, MS Edge) | 4 × matrix versions (3 derniers majeurs) | `playwright test --project=chromium,firefox,webkit,msedge` |
+| 11 | **Device / responsive coverage** | Playwright `device` emulation + Lighthouse mobile | desktop 1080p | + iPhone 15 + Pixel 8 | + iPad + desktop 4K + ultrawide (6 devices) | + folding + watch (8 devices) | `playwright test --project=mobile,tablet,desktop` |
+| 12 | **Locale coverage** | Tests payloads multilingues + accents | FR ASCII | FR + accents éà ç | FR + EN + CJK + RTL ar/he | + emoji 4-byte + NFC/NFD | `pytest backend/tests/test_i18n_payloads.py` |
+| 13 | **Persona / role coverage** | Tests par rôle utilisateur | 1 (admin) | 2 (admin, analyst) | 3 (admin, analyst, viewer) | 5 (+ guest, super-admin) | `pytest -m "role_admin or role_analyst" backend/tests/` |
+| 14 | **State coverage** (matrice combinaisons) | Tests par combinaison d'états | 1 state | 4 (logged in/out × empty/full data) | 16 (+ online/offline × dark/light) | 64 (+ persona × locale × device) | matrix dans `playwright.config.ts` |
+| 15 | **Negative test coverage** | Pour chaque happy path, N tests négatifs | 1 négatif / 1 happy | 3 / 1 | 5 / 1 | 10 / 1 | `pytest -m "negative" --collect-only \| wc -l` |
+
+#### Commandes "audit couverture maximale" à lancer en CI nightly
+
+```bash
+# Backend Python — coverage maximale
+pytest backend/tests/ \
+  --cov=backend \
+  --cov-branch \
+  --cov-report=term-missing \
+  --cov-report=html:htmlcov \
+  --cov-report=xml \
+  --cov-fail-under=95 \
+  --hypothesis-show-statistics \
+  -m "not slow"
+
+# Mutation testing weekly (long, lance dimanche)
+mutmut run --paths-to-mutate=backend/clients/deepseek.py,backend/main.py
+mutmut results
+mutmut html
+
+# Frontend — vitest coverage + Playwright clickables
+cd frontend
+pnpm vitest run --coverage --coverage.thresholds.lines=85 \
+  --coverage.thresholds.branches=80 --coverage.thresholds.functions=85
+pnpm playwright test --project=chromium,firefox,webkit,msedge \
+  clickables-exhaustive.spec.ts visual.spec.ts
+
+# API contract fuzz (Schemathesis stateful)
+st fuzz https://82-165-57-191.sslip.io/openapi.json \
+  --auth-type=bearer --hypothesis-deadline=600000 \
+  --report=allure-results
+
+# LLM eval (DeepEval)
+deepeval test run backend/tests/eval/
+
+# Data quality (Soda Core)
+soda scan -d demoema_prod -c qa/soda/configuration.yml qa/soda/checks/
+
+# Visual regression (Playwright snapshots)
+pnpm playwright test visual --reporter=html
+
+# A11y (axe-core sur 14 routes)
+pnpm playwright test a11y --reporter=html
+
+# Bundle / dead code
+pnpm size-limit
+pnpm knip --reporter=compact
+```
+
+#### Dashboard "Quality Coverage 15D" (Grafana à construire)
+
+Une page Grafana avec 15 jauges (une par dimension), seuils par couleur :
+- 🟢 Vert : ≥ seuil L4
+- 🟡 Jaune : ≥ seuil L3
+- 🟠 Orange : ≥ seuil L2
+- 🔴 Rouge : < L2 (régression critique)
+
+Trend hebdo : courbe par dimension sur 12 semaines glissantes. Alerte Slack si une dimension passe rouge.
+
+#### Métriques agrégées long-terme
+
+- **Quality Coverage Score (QCS)** : moyenne pondérée des 15 dimensions normalisées 0-100. Cible L3 = 80, L4 = 90, L5 = 95.
+- **Test Pyramid Health** : ratio unit / integration / E2E doit être 70/20/10 (pas inversé)
+- **CI Time vs Coverage** : courbe coût/bénéfice — si CI > 30 min, paralléliser ou skip slow tests sur PRs non-prod
+- **Flake Rate par dimension** : aucune dimension ne doit dépasser 1 % flake (un flake = vrai bug à fixer)
+- **Coverage Velocity** : Δ coverage par sprint — doit augmenter de 1-2 pp jusqu'à atteindre cible L4
+
+#### Outils OSS pour le dashboard quality
+
+- **Codecov** ou **Coveralls** (gratuit pour repos publics, payant privés) — ou **alternative OSS auto-hébergée** : `codecov-action` GitHub stocke en repo
+- **dorny/test-reporter** GitHub Action — agrège jUnit/pytest XML
+- **Allure Report** — rapport HTML interactif Schemathesis + Playwright
+- **mutmut** results en HTML hosté GitHub Pages
+- **Storybook 9 test runner report** — visual regression diff dans PR
+
+### Anti-pattern : la rigueur n'est PAS le volume
+
+⚠️ Avoir 10 000 tests qui passent ≠ tests rigoureux. Signes d'une suite faible :
+- Tests qui ne fail jamais (mutation score < 50 %)
+- Coverage gonflée par tests `assert True`
+- Snapshots aveugles ("le test passe parce qu'on a regénéré la golden snapshot")
+- Tests dépendant les uns des autres (ordre d'exécution matters)
+- "Skip if flaky" — vrai flakiness = vrai bug à fixer
+- Tests qui se contentent de "ne pas crasher" sans assertion sur la valeur retournée
+- Pas de tests négatifs (que des happy paths)
+- Tests qui re-testent ce que le framework garantit déjà (FastAPI valide pydantic, pas besoin de re-tester ça)
+
+**Règle** : un test rigoureux fail si on casse INTENTIONNELLEMENT le code qu'il vérifie. Sinon il est inutile.
+
+---
+
+## 8. Sources état de l'art (référencées 2026-05-02)
 
 ### Anthropic / Claude Code
 - [Subagents docs](https://code.claude.com/docs/en/sub-agents)
