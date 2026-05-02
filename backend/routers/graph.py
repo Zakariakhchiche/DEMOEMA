@@ -127,7 +127,7 @@ async def person_graph(nom: str, prenom: str, top_n: int = 10):
         c.code_postal AS code_postal,
         coalesce(r.role, '') AS role,
         coalesce(r.actif, false) AS actif
-    ORDER BY c.capital DESC NULLS LAST
+    ORDER BY coalesce(c.capital, -1) DESC
     LIMIT 50
     """
 
