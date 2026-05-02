@@ -1,8 +1,9 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { Icon } from "./Icon";
 import type { datalakeApi } from "@/lib/api";
+import { PersonGraphModal } from "./PersonGraphModal";
 
 type GraphData = Awaited<ReturnType<typeof datalakeApi.personGraph>>;
 
@@ -10,6 +11,10 @@ interface Props {
   graph: GraphData | null;
   loading: boolean;
   error: string | null;
+  /** Pour ouvrir la modal graphe interactif. Issus de PersonSheet (split du person.nom). */
+  nom?: string;
+  prenom?: string;
+  fullName?: string;
 }
 
 const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
@@ -54,7 +59,15 @@ const fmtCapital = (v: unknown) => {
   return `${n.toFixed(0)} €`;
 };
 
-export function PersonGraphSection({ graph, loading, error }: Props) {
+export function PersonGraphSection({ graph, loading, error, nom, prenom, fullName }: Props) {
+  const [graphOpen, setGraphOpen] = useState(false);
+  // Permet la navigation récursive : click sur un co-mandataire dans la modal
+  // re-cible la modal sur cette personne (sans fermer la PersonSheet en arrière).
+  const [navTarget, setNavTarget] = useState<{ nom: string; prenom: string; fullName: string } | null>(null);
+  const effectiveNom = navTarget?.nom ?? nom ?? "";
+  const effectivePrenom = navTarget?.prenom ?? prenom ?? "";
+  const effectiveFullName = navTarget?.fullName ?? fullName ?? `${effectivePrenom} ${effectiveNom}`;
+  const canOpenGraph = !!nom && !!prenom && graph != null && (graph.top_co_mandataires?.length ?? 0) > 0;
   if (loading) {
     return (
       <Section title="Réseau · Neo4j (graphe complet)">
@@ -83,7 +96,33 @@ export function PersonGraphSection({ graph, loading, error }: Props) {
     p.is_sanctioned || p.is_lobbyist || p.has_offshore || (p.n_sci ?? 0) > 0;
 
   return (
-    <Section title="Réseau · Neo4j (graphe complet 18,6 M nodes)">
+    <>
+      <Section title="Réseau · Neo4j (graphe complet 18,6 M nodes)">
+      {/* CTA visualisation graphe */}
+      {canOpenGraph && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+          <button
+            type="button"
+            onClick={() => { setNavTarget(null); setGraphOpen(true); }}
+            style={{
+              fontSize: 11.5,
+              padding: "6px 12px",
+              borderRadius: 8,
+              border: "1px solid var(--border-subtle)",
+              background: "color-mix(in srgb, var(--accent-teal) 14%, transparent)",
+              color: "var(--accent-teal)",
+              fontWeight: 600,
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+            title="Voir le réseau co-mandataires en graphe interactif"
+          >
+            <Icon name="network" size={11} /> Voir le graphe
+          </button>
+        </div>
+      )}
       {/* Flags compliance */}
       {hasFlags && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
@@ -213,7 +252,18 @@ export function PersonGraphSection({ graph, loading, error }: Props) {
           </div>
         </div>
       )}
-    </Section>
+      </Section>
+
+      {graphOpen && effectiveNom && effectivePrenom && (
+        <PersonGraphModal
+          nom={effectiveNom}
+          prenom={effectivePrenom}
+          fullName={effectiveFullName}
+          onClose={() => { setGraphOpen(false); setNavTarget(null); }}
+          onNavigate={(t) => setNavTarget(t)}
+        />
+      )}
+    </>
   );
 }
 
