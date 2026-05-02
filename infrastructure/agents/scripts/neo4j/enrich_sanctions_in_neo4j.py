@@ -78,33 +78,47 @@ LIMIT %s
 # Pas de subquery imbriquée : un seul row par sanctioned name + on garde
 # directement le 1er topics/programs/countries (la plupart des persons n'ont
 # qu'1 entry sanctions de toute façon).
+#
+# On split aussi le name en (prenom_uc, nom_uc) pour pouvoir matcher Neo4j
+# avec un index sur p.nom (sinon Cypher fait full-scan 8M nodes par batch).
 PICK_SQL_SIMPLE = """
--- DISTINCT ON (name) garde 1 row par sanctioned name (le 1er trouvé).
--- Plus simple et rapide que array_agg sur des cols arrays nestées.
-SELECT DISTINCT ON (upper(unaccent(name)))
-  upper(unaccent(name)) AS name_uc,
+WITH src AS (
+  SELECT DISTINCT ON (upper(unaccent(name)))
+    upper(unaccent(name)) AS name_uc,
+    regexp_split_to_array(upper(unaccent(trim(name))), '\s+') AS parts,
+    entity_id,
+    caption,
+    coalesce(topics, ARRAY[]::text[]) AS topics,
+    coalesce(sanctions_programs, ARRAY[]::text[]) AS programs,
+    coalesce(countries, ARRAY[]::text[]) AS countries
+  FROM silver.opensanctions
+  WHERE schema = 'Person'
+    AND name IS NOT NULL
+    AND length(name) > 4
+  ORDER BY upper(unaccent(name)), entity_id
+)
+SELECT
+  parts[array_upper(parts, 1)] AS nom_uc,    -- dernier token = nom
+  parts[1] AS prenom_uc,                      -- 1er token = prenom
+  name_uc,
   ARRAY[entity_id] AS entity_ids,
   ARRAY[caption] AS captions,
-  coalesce(topics, ARRAY[]::text[]) AS topics,
-  coalesce(sanctions_programs, ARRAY[]::text[]) AS programs,
-  coalesce(countries, ARRAY[]::text[]) AS countries
-FROM silver.opensanctions
-WHERE schema = 'Person'
-  AND name IS NOT NULL
-  AND length(name) > 4
-ORDER BY upper(unaccent(name)), entity_id
+  topics,
+  programs,
+  countries
+FROM src
+WHERE array_length(parts, 1) >= 2
+  AND parts[1] != parts[array_upper(parts, 1)]
 LIMIT %s
 """
 
 
-# Cypher : pour chaque sanctioned name, MATCH les Persons dont
-# upper(unaccent(prenom + ' ' + nom)) ou (nom + ' ' + prenom) match le name.
-# On stocke en property tableau (multi-leak possible).
+# Cypher : on match via l'index `person_nom` en passant nom_uc en clé directe.
+# Le data dans le graphe est déjà en uppercase (silver.inpi_dirigeants stocke
+# nom/prenom en majuscules). Pas besoin de upper() runtime → l'index sert.
 ENRICH_CYPHER = """
 UNWIND $rows AS row
-MATCH (p:Person)
-WHERE upper(p.nom + ' ' + p.prenom) = row.name_uc
-   OR upper(p.prenom + ' ' + p.nom) = row.name_uc
+MATCH (p:Person {nom: row.nom_uc, prenom: row.prenom_uc})
 SET p.is_sanctioned = true,
     p.sanctions_entity_ids = coalesce(p.sanctions_entity_ids, []) + row.entity_ids,
     p.sanctions_captions = coalesce(p.sanctions_captions, []) + row.captions,
@@ -138,26 +152,36 @@ def main():
         rows = cur.fetchall()
         print(f"[sanctions→neo4j] {len(rows)} sanctioned names à matcher", file=sys.stderr)
 
+        n_errors = 0
         with driver.session() as s:
             for i in range(0, len(rows), BATCH):
                 chunk = rows[i:i + BATCH]
                 params = [
                     {
-                        "name_uc": r[0],
-                        "entity_ids": r[1] or [],
-                        "captions": r[2] or [],
-                        "topics": r[3] or [],
-                        "programs": r[4] or [],
-                        "countries": r[5] or [],
+                        "nom_uc": r[0],
+                        "prenom_uc": r[1],
+                        "name_uc": r[2],
+                        "entity_ids": r[3] or [],
+                        "captions": r[4] or [],
+                        "topics": r[5] or [],
+                        "programs": r[6] or [],
+                        "countries": r[7] or [],
                     }
                     for r in chunk
                 ]
-                result = s.run(ENRICH_CYPHER, rows=params).single()
-                n_flagged += int(result["persons_flagged"]) if result else 0
+                try:
+                    result = s.run(ENRICH_CYPHER, rows=params).single()
+                    n_flagged += int(result["persons_flagged"]) if result else 0
+                except Exception as e:
+                    n_errors += 1
+                    if n_errors <= 5:
+                        print(f"  batch {i} ERROR: {type(e).__name__}: {str(e)[:200]}",
+                              file=sys.stderr, flush=True)
                 n_processed += len(params)
-                if n_processed % 5000 == 0:
-                    print(f"  [{n_processed}/{len(rows)}] flagged: {n_flagged}",
-                          file=sys.stderr)
+                # Progress every 5 batches (= 2500 rows) — fast feedback.
+                if (i // BATCH) % 5 == 0:
+                    print(f"  [{n_processed}/{len(rows)}] flagged: {n_flagged} errors: {n_errors}",
+                          file=sys.stderr, flush=True)
 
     driver.close()
     print({

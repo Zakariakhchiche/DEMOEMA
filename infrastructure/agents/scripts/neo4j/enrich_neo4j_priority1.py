@@ -53,10 +53,7 @@ GROUP BY dirigeant_nom, dirigeant_prenom
 
 HATVP_CYPHER = """
 UNWIND $rows AS row
-MATCH (p:Person)
-WHERE upper(p.nom) = row.nom_uc
-  AND (upper(p.prenom) = row.prenom_uc
-       OR row.prenom_uc IN [x IN p.prenoms | upper(x)])
+MATCH (p:Person {nom: row.nom_uc, prenom: row.prenom_uc})
 SET p.is_lobbyist = true,
     p.lobby_denominations = row.lobby_denoms,
     p.lobby_categories = row.lobby_categories,
@@ -84,10 +81,7 @@ WHERE nom IS NOT NULL AND prenom IS NOT NULL
 
 SCI_CYPHER = """
 UNWIND $rows AS row
-MATCH (p:Person)
-WHERE upper(p.nom) = row.nom_uc
-  AND (upper(p.prenom) = row.prenom_uc
-       OR row.prenom_uc IN [x IN p.prenoms | upper(x)])
+MATCH (p:Person {nom: row.nom_uc, prenom: row.prenom_uc})
 SET p.n_sci = row.total_n_sci,
     p.total_capital_sci = toFloat(row.total_capital),
     p.sci_denominations = row.sci_denos,
@@ -111,10 +105,7 @@ WHERE nom IS NOT NULL AND prenoms IS NOT NULL AND array_length(prenoms, 1) > 0
 
 OSINT_CYPHER = """
 UNWIND $rows AS row
-MATCH (p:Person)
-WHERE upper(p.nom) = row.nom_uc
-  AND (upper(p.prenom) = row.prenom_uc
-       OR row.prenom_uc IN [x IN p.prenoms | upper(x)])
+MATCH (p:Person {nom: row.nom_uc, prenom: row.prenom_uc})
 SET p.linkedin_url = row.linkedin,
     p.github_username = row.github,
     p.twitter_handle = row.twitter,
@@ -139,10 +130,7 @@ WHERE birth_year IS NOT NULL
 
 WIKIDATA_CYPHER = """
 UNWIND $rows AS row
-MATCH (p:Person)
-WHERE upper(p.nom) = row.nom_uc
-  AND (upper(p.prenom) = row.prenom_uc
-       OR row.prenom_uc IN [x IN p.prenoms | upper(x)])
+MATCH (p:Person {nom: row.nom_uc, prenom: row.prenom_uc})
 SET p.wikidata_qid = row.qid,
     p.wikidata_birth_year = row.birth_year,
     p.wikidata_occupation = row.occupation
@@ -161,18 +149,27 @@ def _run_enrich(name, conn, driver, sql, cypher, key_func=None):
     print(f"[{name}] {len(rows)} rows to process", file=sys.stderr)
 
     n_flagged = 0
+    n_errors = 0
     if not rows:
         return 0
     with driver.session() as s:
         for i in range(0, len(rows), BATCH):
             chunk = rows[i:i + BATCH]
             params = [dict(zip(columns, r)) for r in chunk]
-            result = s.run(cypher, rows=params).single()
-            n_flagged += int(result["flagged"]) if result else 0
-            if (i // BATCH) % 20 == 0 and i > 0:
-                print(f"  [{name}] {i+BATCH}/{len(rows)} flagged so far: {n_flagged}",
-                      file=sys.stderr)
-    print(f"[{name}] DONE — {n_flagged} Persons flagged", file=sys.stderr)
+            try:
+                result = s.run(cypher, rows=params).single()
+                n_flagged += int(result["flagged"]) if result else 0
+            except Exception as e:
+                n_errors += 1
+                if n_errors <= 5:
+                    print(f"  [{name}] batch {i} ERROR: {type(e).__name__}: {str(e)[:200]}",
+                          file=sys.stderr, flush=True)
+            # Progress every 5 batches (= 2500 rows) for fast feedback.
+            if (i // BATCH) % 5 == 0:
+                print(f"  [{name}] {min(i+BATCH, len(rows))}/{len(rows)} flagged: {n_flagged} errors: {n_errors}",
+                      file=sys.stderr, flush=True)
+    print(f"[{name}] DONE — {n_flagged} Persons flagged, {n_errors} batch errors",
+          file=sys.stderr, flush=True)
     return n_flagged
 
 

@@ -29,6 +29,11 @@ NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://neo4j:7687")
 NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "demoema_neo4j_pass")
 
+# Resume mode : skip cleanup and resume from chunk N. Set when restarting after
+# an interrupted run — MERGE is idempotent so re-doing chunks is safe but slow.
+RESUME_SKIP = int(os.environ.get("RESUME_SKIP", "0"))
+SKIP_CLEANUP = os.environ.get("SKIP_CLEANUP", "0") == "1" or RESUME_SKIP > 0
+
 
 # Cleanup avant rebuild (idempotent).
 CLEANUP_CYPHER = """
@@ -118,16 +123,20 @@ def main():
     print(f"[co-mandate] APOC available: {apoc}", file=sys.stderr)
 
     with driver.session() as s:
-        print("[co-mandate] Cleanup existing CO_MANDATE...", file=sys.stderr)
-        if apoc:
-            s.run(CLEANUP_CYPHER).consume()
+        if SKIP_CLEANUP:
+            print(f"[co-mandate] SKIP cleanup (resume mode, RESUME_SKIP={RESUME_SKIP})",
+                  file=sys.stderr)
         else:
-            while True:
-                r = s.run(CLEANUP_FALLBACK).single()
-                deleted = r["deleted"] if r else 0
-                if not deleted:
-                    break
-                print(f"  cleanup: deleted {deleted}", file=sys.stderr)
+            print("[co-mandate] Cleanup existing CO_MANDATE...", file=sys.stderr)
+            if apoc:
+                s.run(CLEANUP_CYPHER).consume()
+            else:
+                while True:
+                    r = s.run(CLEANUP_FALLBACK).single()
+                    deleted = r["deleted"] if r else 0
+                    if not deleted:
+                        break
+                    print(f"  cleanup: deleted {deleted}", file=sys.stderr)
 
         print("[co-mandate] Counting companies with 2-50 dirigeants...", file=sys.stderr)
         total = s.run(COUNT_CHUNKS).single()["total_companies"]
@@ -138,9 +147,11 @@ def main():
             r = s.run(BUILD_APOC).single()
             print(f"  apoc result: {dict(r) if r else None}", file=sys.stderr)
         else:
-            print("[co-mandate] Building via Python chunks (no APOC)...", file=sys.stderr)
+            print(f"[co-mandate] Building via Python chunks (no APOC) — start skip={RESUME_SKIP}...",
+                  file=sys.stderr)
             CHUNK = 1000
-            skip = 0
+            skip = RESUME_SKIP
+            consecutive_empty = 0
             while skip < total:
                 r = s.run(CHUNK_BUILD, skip=skip, limit=CHUNK).single()
                 processed = r["processed"] if r else 0
@@ -148,7 +159,11 @@ def main():
                 print(f"  chunk {skip}/{total} processed={processed}",
                       file=sys.stderr, flush=True)
                 if processed == 0:
-                    break
+                    consecutive_empty += 1
+                    if consecutive_empty >= 5:
+                        break
+                else:
+                    consecutive_empty = 0
 
         verify = s.run(VERIFY_CYPHER).single()
         n_total = verify["total_relations"]
