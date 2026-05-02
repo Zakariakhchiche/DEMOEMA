@@ -161,7 +161,16 @@ COPILOT_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_dirigeant",
-            "description": "Profil complet dirigeant: identité INPI (mandats, formes, rôles), patrimoine SCI (capital + valeur bilan), OSINT (LinkedIn, GitHub, Twitter, emails), sanctions personne, DVF zones.",
+            "description": (
+                "Profil complet dirigeant: identité INPI (mandats, formes, rôles), "
+                "patrimoine SCI (capital + valeur bilan), OSINT (LinkedIn, GitHub, "
+                "Twitter, emails), sanctions personne, DVF zones, ET réseau co-mandats "
+                "Neo4j (graph.top_co_mandataires = top 10 associés, "
+                "graph.n_red_1hop = nb sanctionnés/offshore/lobbyistes à 1 hop, "
+                "graph.is_sanctioned/has_offshore/is_lobbyist = flags compliance). "
+                "Utilise pour répondre 'liste les associés de X', 'profil compliance "
+                "de X', 'qui dans son réseau direct a un red flag'."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {

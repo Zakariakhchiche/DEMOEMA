@@ -1356,6 +1356,16 @@ async def _dirigeant_full(
                 "by_cp": [_serialize(r) for r in dvf_rows],
             }
 
+    # Merge Neo4j network data — flags compliance pré-agrégés sur le Person
+    # node + top 10 co-mandataires + count red flags à 1 hop. Permet au LLM
+    # de répondre "liste les associés de X" et "qui dans son entourage a un
+    # red flag" sans appeler N tools SQL séparés. Si Neo4j indispo : graph=None.
+    import asyncio
+    from routers.graph import fetch_person_graph_summary_sync
+    graph_summary = await asyncio.to_thread(
+        fetch_person_graph_summary_sync, nom_uc, prenom_uc
+    )
+
     return {
         "identity": _serialize(inpi),
         "sci_patrimoine": _serialize(sci) if sci else None,
@@ -1365,6 +1375,7 @@ async def _dirigeant_full(
         "osint_raw": _serialize(osint_raw) if osint_raw else None,
         "sanctions": [_serialize(s) for s in sanctions],
         "dvf_zones": dvf_summary,
+        "graph": graph_summary,
     }
 
 

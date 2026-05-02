@@ -38,6 +38,84 @@ def _get_driver():
     return _driver
 
 
+# ─── Reusable helper used by routers/datalake.py:_dirigeant_full ──────────
+# Renvoie un payload compact (flags + top co-mandataires + counts) à
+# merger dans la réponse `get_dirigeant`, pour que TOUTES les questions LLM
+# touchant un dirigeant gagnent en network awareness sans nouveau tool.
+_GRAPH_SUMMARY_CYPHER = """
+MATCH (p:Person {nom: $nom, prenom: $prenom})
+WITH p LIMIT 1
+CALL {
+    WITH p
+    OPTIONAL MATCH (p)-[r:CO_MANDATE]-(q:Person)
+    RETURN q, r ORDER BY coalesce(r.n_shared_companies, 1) DESC LIMIT 10
+}
+WITH p, collect(CASE WHEN q IS NULL THEN NULL ELSE {
+    full_name: q.full_name,
+    nom: q.nom,
+    prenom: q.prenom,
+    n_shared: coalesce(r.n_shared_companies, 1),
+    is_sanctioned: coalesce(q.is_sanctioned, false),
+    has_offshore: coalesce(q.has_offshore, false),
+    is_lobbyist: coalesce(q.is_lobbyist, false)
+} END) AS top_unfiltered
+WITH p, [x IN top_unfiltered WHERE x IS NOT NULL] AS top_co_mandataires
+CALL {
+    WITH p
+    OPTIONAL MATCH (p)-[:CO_MANDATE]-(q2:Person)
+    WHERE coalesce(q2.is_sanctioned, false)
+       OR coalesce(q2.has_offshore, false)
+       OR coalesce(q2.is_lobbyist, false)
+    RETURN count(DISTINCT q2) AS n_red_1hop
+}
+RETURN
+    coalesce(p.is_sanctioned, false) AS is_sanctioned,
+    coalesce(p.is_lobbyist, false)   AS is_lobbyist,
+    coalesce(p.has_offshore, false)  AS has_offshore,
+    coalesce(p.n_sci, 0)             AS n_sci,
+    coalesce(p.total_capital_sci, 0.0) AS total_capital_sci,
+    p.sci_denominations              AS sci_denominations,
+    p.linkedin_url                   AS linkedin_url,
+    p.github_username                AS github_username,
+    p.twitter_handle                 AS twitter_handle,
+    p.n_total_social                 AS n_total_social,
+    p.wikidata_qid                   AS wikidata_qid,
+    p.wikidata_birth_year            AS wikidata_birth_year,
+    p.wikidata_occupation            AS wikidata_occupation,
+    p.icij_leaks                     AS icij_leaks,
+    p.lobby_denominations            AS lobby_denominations,
+    p.sanctions_programs             AS sanctions_programs,
+    top_co_mandataires,
+    n_red_1hop
+"""
+
+
+def fetch_person_graph_summary_sync(nom: str, prenom: str) -> dict | None:
+    """Sync helper — a wrapper async appellera via asyncio.to_thread.
+
+    Renvoie None si Neo4j indispo / dirigeant introuvable. Le caller doit
+    tolérer cette absence (sortie cleanly avec graph: None dans le JSON
+    de _dirigeant_full).
+    """
+    nom_uc = (nom or "").strip().upper()
+    prenom_uc = (prenom or "").strip().upper()
+    if not nom_uc or not prenom_uc:
+        return None
+    try:
+        driver = _get_driver()
+        with driver.session() as s:
+            r = s.run(
+                _GRAPH_SUMMARY_CYPHER,
+                nom=nom_uc,
+                prenom=prenom_uc,
+            ).single()
+            return dict(r) if r else None
+    except Exception:
+        # Neo4j down ou indisponible : on dégrade gracieusement.
+        # Le caller voit None et continue avec juste les data SQL.
+        return None
+
+
 @router.get("/person/{nom}/{prenom}")
 async def person_graph(nom: str, prenom: str, top_n: int = 10):
     """Retourne les enrichissements + top co-mandataires d'un dirigeant.
