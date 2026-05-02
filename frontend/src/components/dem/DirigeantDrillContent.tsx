@@ -96,18 +96,16 @@ export function DirigeantDrillContent({ data }: { data: Record<string, unknown> 
       </Section>
 
       <Section title="Patrimoine SCI (capital + valeur bilan)">
-        {/* Fallback graph quand silver.dirigeant_sci_patrimoine vide pour ce
-          dirigeant (Neo4j priority1 enrichment a une couverture plus large). */}
-        <Row label="Nombre SCI" value={String(sci.n_sci ?? g.n_sci ?? 0)} />
-        <Row label="Capital cumulé (statutaire)" value={fmt(sci.total_capital_sci ?? g.total_capital_sci)} />
+        <Row label="Nombre SCI" value={String(sci.n_sci || 0)} />
+        <Row label="Capital cumulé (statutaire)" value={fmt(sci.total_capital_sci)} />
         <Row label="Valeur (total actif bilan)" value={<span style={{ fontWeight: 700, color: "var(--accent-emerald)" }}>{fmt(sciVal.total_actif)}</span>} />
         <Row label="Biens immobiliers" value={fmt(sciVal.immo_corporelles)} />
         <Row label="Capitaux propres" value={fmt(sciVal.capitaux_propres)} />
         <Row label="CA cumulé SCI" value={fmt(sciVal.ca_net_total)} />
         <Row label="Emprunts/dettes" value={fmt(sciVal.emprunts_dettes)} />
-        <Row label="SCI ayant déposé comptes" value={`${sciVal.n_sci_with_comptes || 0} / ${sci.n_sci ?? g.n_sci ?? 0}`} />
+        <Row label="SCI ayant déposé comptes" value={`${sciVal.n_sci_with_comptes || 0} / ${sci.n_sci || 0}`} />
         <Row label="1ère SCI" value={sci.first_sci_date ? String(sci.first_sci_date).slice(0, 10) : "—"} />
-        <Row label="Dénominations SCI" value={arr(sci.sci_denominations).length > 0 ? arr(sci.sci_denominations).join(" · ") : arr(g.sci_denominations).join(" · ")} />
+        <Row label="Dénominations SCI" value={arr(sci.sci_denominations).join(" · ")} />
         <Row label="Codes postaux SCI" value={arr(sci.sci_code_postaux).join(", ")} />
       </Section>
 

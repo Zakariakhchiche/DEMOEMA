@@ -1162,6 +1162,45 @@ async def _dirigeant_full(
         nom_u, prenom_u, date_n,
     ))
 
+    # 1.bis. Fallback bronze.inpi_formalites_personnes — silver.inpi_dirigeants
+    # n'agrège pas toujours sirens_mandats/denominations/formes_juridiques/roles
+    # (data quality limitée du codegen-applied SQL). Pour les dirigeants où ces
+    # arrays silver sont NULL mais qui ont bien des rows en bronze, on les
+    # construit ici via JOIN bronze.inpi_formalites_personnes ⨝ entreprises.
+    bronze_mandats = None
+    if inpi and (
+        not inpi.get("sirens_mandats")
+        or not inpi.get("denominations")
+        or not inpi.get("roles")
+    ):
+        bronze_mandats = await _safe(pool.fetchrow(
+            """SELECT
+                  array_agg(DISTINCT p.siren) FILTER (WHERE p.siren IS NOT NULL) AS sirens_mandats,
+                  array_agg(DISTINCT e.denomination) FILTER (WHERE e.denomination IS NOT NULL AND e.denomination != '') AS denominations,
+                  array_agg(DISTINCT e.forme_juridique) FILTER (WHERE e.forme_juridique IS NOT NULL AND e.forme_juridique != '') AS formes_juridiques,
+                  array_agg(DISTINCT p.individu_role) FILTER (WHERE p.individu_role IS NOT NULL AND p.individu_role != '') AS roles,
+                  count(DISTINCT p.siren) AS n_mandats_total_bronze,
+                  count(DISTINCT p.siren) FILTER (WHERE p.actif = true) AS n_mandats_actifs_bronze
+               FROM bronze.inpi_formalites_personnes p
+               LEFT JOIN bronze.inpi_formalites_entreprises e ON e.siren = p.siren
+               WHERE p.type_de_personne = 'INDIVIDU'
+                 AND UPPER(unaccent(p.individu_nom)) = UPPER(unaccent($1))
+                 AND UPPER(unaccent($2)) = ANY(
+                     SELECT UPPER(unaccent(unnest))
+                     FROM unnest(p.individu_prenoms)
+                 )""",
+            nom_u, prenom_u,
+        ), timeout_s=8.0)
+        # Merge bronze fallback into inpi dict (mutable since fetchrow returns Record)
+        if bronze_mandats:
+            inpi = dict(inpi)
+            for k in ("sirens_mandats", "denominations", "formes_juridiques", "roles"):
+                if not inpi.get(k) and bronze_mandats.get(k):
+                    inpi[k] = bronze_mandats[k]
+            # Remplace n_mandats_total si silver le donnait à 0 mais bronze a la vraie valeur
+            if not inpi.get("n_mandats_total") and bronze_mandats.get("n_mandats_total_bronze"):
+                inpi["n_mandats_total"] = bronze_mandats["n_mandats_total_bronze"]
+
     # Pour les fallbacks ci-dessous, on UPPER + strip-accents côté Python pour
     # exploiter les index btree (nom) / btree (nom, prenom) sur
     # silver.dirigeants_360 et gold.dirigeants_master. UPPER(unaccent(...))
