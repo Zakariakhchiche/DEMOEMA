@@ -50,8 +50,7 @@ do_export() {
     # Companies — toutes formes juridiques, tous capital. Filtre minimal :
     # actif, denomination NOT NULL.
     blue "  Exporting companies.csv..."
-    docker exec -i "$DATALAKE_CONTAINER" psql -U postgres -d datalake -c "
-SET statement_timeout = 0;
+    docker exec -i -e PGOPTIONS='-c statement_timeout=0' "$DATALAKE_CONTAINER" psql -U postgres -d datalake -q -c "
 COPY (
   SELECT DISTINCT ON (siren)
     siren AS \"siren:ID(Company)\",
@@ -74,8 +73,7 @@ COPY (
     # Persons — depuis silver.inpi_dirigeants (8M rows), pré-agrégés.
     # uid = sha1(nom|prenom_trié|date_naissance) pour stable join avec is_dirigeant.csv
     blue "  Exporting persons.csv..."
-    docker exec -i "$DATALAKE_CONTAINER" psql -U postgres -d datalake -c "
-SET statement_timeout = 0;
+    docker exec -i -e PGOPTIONS='-c statement_timeout=0' "$DATALAKE_CONTAINER" psql -U postgres -d datalake -q -c "
 COPY (
   SELECT
     md5(coalesce(nom,'')||'|'||coalesce(prenom,'')||'|'||coalesce(date_naissance,'')) AS \"uid:ID(Person)\",
@@ -96,8 +94,7 @@ COPY (
     # IS_DIRIGEANT — Person -[role]-> Company depuis bronze.inpi_formalites_personnes.
     # JOIN sur (nom, prenom, date_naissance) pour resolver le person_uid.
     blue "  Exporting is_dirigeant.csv..."
-    docker exec -i "$DATALAKE_CONTAINER" psql -U postgres -d datalake -c "
-SET statement_timeout = 0;
+    docker exec -i -e PGOPTIONS='-c statement_timeout=0' "$DATALAKE_CONTAINER" psql -U postgres -d datalake -q -c "
 COPY (
   SELECT
     md5(coalesce(p.individu_nom,'')||'|'||coalesce(p.individu_prenoms[1],'')||'|'||coalesce(p.individu_date_naissance,'')) AS \":START_ID(Person)\",
