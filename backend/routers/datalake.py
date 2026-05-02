@@ -1246,42 +1246,30 @@ async def _dirigeant_full(
         )
 
     # 2. Patrimoine SCI agrégé sur (nom, prenom, date_naissance) normalisé.
-    # Pattern `array_agg(text[])` rejeté par PG si dimensions différentes
-    # entre rows ("cannot accumulate arrays of different dimensionality") —
-    # on utilise des subqueries `unnest(col)` qui flattent par row avant
-    # le DISTINCT global.
+    # Single CTE avec WHERE indexé (Python UPPER+strip-accents — silver est
+    # 100% uppercase, vérifié 8.1M/8.1M) puis unnest pour flatten les arrays
+    # de tailles variables. Évite array_agg(text[]) qui plante avec
+    # "cannot accumulate arrays of different dimensionality".
     sci = await _safe(pool.fetchrow(
-        """SELECT
+        """WITH src AS (
+              SELECT n_sci, total_capital_sci,
+                     sci_denominations, sci_sirens, sci_code_postaux,
+                     first_sci_date
+              FROM silver.dirigeant_sci_patrimoine
+              WHERE nom IN ($1, $2)
+                AND prenom IN ($3, $4)
+                AND ($5::text IS NULL OR date_naissance LIKE $5 || '%')
+           )
+           SELECT
               SUM(n_sci) AS n_sci,
               SUM(total_capital_sci) AS total_capital_sci,
-              ARRAY(
-                SELECT DISTINCT s
-                FROM silver.dirigeant_sci_patrimoine d, unnest(d.sci_denominations) s
-                WHERE UPPER(unaccent(d.nom)) = UPPER(unaccent($1))
-                  AND UPPER(unaccent(d.prenom)) = UPPER(unaccent($2))
-                  AND ($3::text IS NULL OR d.date_naissance LIKE $3 || '%')
-              ) AS sci_denominations,
-              ARRAY(
-                SELECT DISTINCT s
-                FROM silver.dirigeant_sci_patrimoine d, unnest(d.sci_sirens) s
-                WHERE UPPER(unaccent(d.nom)) = UPPER(unaccent($1))
-                  AND UPPER(unaccent(d.prenom)) = UPPER(unaccent($2))
-                  AND ($3::text IS NULL OR d.date_naissance LIKE $3 || '%')
-              ) AS sci_sirens,
-              ARRAY(
-                SELECT DISTINCT s
-                FROM silver.dirigeant_sci_patrimoine d, unnest(d.sci_code_postaux) s
-                WHERE UPPER(unaccent(d.nom)) = UPPER(unaccent($1))
-                  AND UPPER(unaccent(d.prenom)) = UPPER(unaccent($2))
-                  AND ($3::text IS NULL OR d.date_naissance LIKE $3 || '%')
-              ) AS sci_code_postaux,
+              ARRAY(SELECT DISTINCT s FROM src, unnest(sci_denominations) s) AS sci_denominations,
+              ARRAY(SELECT DISTINCT s FROM src, unnest(sci_sirens) s) AS sci_sirens,
+              ARRAY(SELECT DISTINCT s FROM src, unnest(sci_code_postaux) s) AS sci_code_postaux,
               MIN(first_sci_date) AS first_sci_date
-           FROM silver.dirigeant_sci_patrimoine
-           WHERE UPPER(unaccent(nom)) = UPPER(unaccent($1))
-             AND UPPER(unaccent(prenom)) = UPPER(unaccent($2))
-             AND ($3::text IS NULL OR date_naissance LIKE $3 || '%')""",
-        nom_u, prenom_u, date_n,
-    ))
+           FROM src""",
+        nom_for_sql, nom_for_sql_na, prenom_for_sql, prenom_for_sql_na, date_n,
+    ), timeout_s=10.0)
 
     # 2 bis. Valeur réelle du patrimoine SCI : agrégation des derniers comptes
     # déposés à l'INPI pour chaque siren SCI du dirigeant.
