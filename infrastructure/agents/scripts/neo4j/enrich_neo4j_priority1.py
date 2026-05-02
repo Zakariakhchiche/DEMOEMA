@@ -67,11 +67,14 @@ RETURN count(DISTINCT p) AS flagged
 # (nom, prenom, date_naissance) avec les arrays sci_sirens, sci_denominations
 # pré-agrégés. Pas besoin de GROUP BY supplémentaire.
 SCI_SQL = """
+-- Cast en float8 (double precision) pour que le driver psycopg renvoie
+-- un float Python natif (et non un Decimal qui n'est pas sérialisable
+-- vers le driver Neo4j).
 SELECT
   upper(unaccent(nom)) AS nom_uc,
   upper(unaccent(prenom)) AS prenom_uc,
   coalesce(n_sci, 0)::int AS total_n_sci,
-  coalesce(total_capital_sci, 0)::numeric AS total_capital,
+  coalesce(total_capital_sci, 0)::float8 AS total_capital,
   sci_denominations AS sci_denos,
   sci_sirens
 FROM silver.dirigeant_sci_patrimoine
@@ -92,13 +95,23 @@ RETURN count(DISTINCT p) AS flagged
 
 # ────────── OSINT social (Maigret/Holehe data) ──────────
 OSINT_SQL = """
+-- bronze.osint_persons stocke les URLs en arrays. n_total_social =
+-- somme des array_length non-null des 7 sources sociales.
 SELECT
   upper(unaccent(nom)) AS nom_uc,
   upper(unaccent(prenoms[1])) AS prenom_uc,
   (linkedin_urls)[1] AS linkedin,
   (github_usernames)[1] AS github,
   (twitter_handles)[1] AS twitter,
-  coalesce(n_total_social, n_linkedin + n_github + n_twitter + n_other_sites, 0) AS n_total_social
+  (
+    coalesce(array_length(linkedin_urls, 1), 0)
+    + coalesce(array_length(github_usernames, 1), 0)
+    + coalesce(array_length(twitter_handles, 1), 0)
+    + coalesce(array_length(instagram_handles, 1), 0)
+    + coalesce(array_length(facebook_urls, 1), 0)
+    + coalesce(array_length(medium_profiles, 1), 0)
+    + coalesce(array_length(youtube_channels, 1), 0)
+  ) AS n_total_social
 FROM bronze.osint_persons
 WHERE nom IS NOT NULL AND prenoms IS NOT NULL AND array_length(prenoms, 1) > 0
 """
