@@ -1140,66 +1140,31 @@ async def _dirigeant_full(
     if not nom_u or not prenom_u:
         raise HTTPException(status_code=400, detail="nom + prenom requis")
 
-    # 1. Identité INPI — match insensible casse/accents pour gérer "Mignon"
-    # vs "MIGNON" et "DUFOÛR" vs "DUFOUR" qui sont les mêmes personnes.
+    # 1. Identité INPI — silver.inpi_dirigeants peut avoir PLUSIEURS rows pour
+    # un même (nom, prenom) — homonymes avec dates de naissance différentes.
+    # Cas observé : "LAMOUR VINCENT" → 6 rows (1960, 1987, 1972, 1993, 1972, 1972),
+    # avec n_mandats_actifs = [1, 1, 23, 1, 2, 2]. On veut RETOURNER LE PLUS
+    # ACTIF (= probable focus user) et ses données précises, PAS un agrégat
+    # cross-homonymes (qui plantait array_agg avec "cannot accumulate arrays
+    # of different dimensionality" — bug observé 2026-05-02).
+    #
+    # Stratégie : ORDER BY n_mandats_total DESC LIMIT 1 → row la plus riche.
+    # date_naissance optionnel resserre si fourni.
     inpi = await _safe(pool.fetchrow(
         """SELECT
-              MAX(nom) AS nom, MAX(prenom) AS prenom,
-              MAX(date_naissance) AS date_naissance, MAX(age_2026) AS age,
-              MAX(n_mandats_total) AS n_mandats_total,
-              MAX(n_mandats_actifs) AS n_mandats_actifs,
-              ARRAY(SELECT DISTINCT unnest(array_agg(sirens_mandats))) AS sirens_mandats,
-              ARRAY(SELECT DISTINCT unnest(array_agg(denominations))) AS denominations,
-              ARRAY(SELECT DISTINCT unnest(array_agg(formes_juridiques))) AS formes_juridiques,
-              ARRAY(SELECT DISTINCT unnest(array_agg(roles))) AS roles,
-              MIN(first_mandat_date) AS first_mandat_date,
-              MAX(last_mandat_date) AS last_mandat_date,
-              bool_or(is_multi_mandat) AS is_multi_mandat
+              nom, prenom, date_naissance, age_2026 AS age,
+              n_mandats_total, n_mandats_actifs,
+              sirens_mandats, denominations, formes_juridiques, roles,
+              first_mandat_date, last_mandat_date,
+              is_multi_mandat
            FROM silver.inpi_dirigeants
            WHERE UPPER(unaccent(nom)) = UPPER(unaccent($1))
              AND UPPER(unaccent(prenom)) = UPPER(unaccent($2))
-             AND ($3::text IS NULL OR date_naissance LIKE $3 || '%')""",
+             AND ($3::text IS NULL OR date_naissance LIKE $3 || '%')
+           ORDER BY coalesce(n_mandats_total, n_mandats_actifs, 0) DESC
+           LIMIT 1""",
         nom_u, prenom_u, date_n,
     ))
-
-    # 1.bis. Fallback bronze.inpi_formalites_personnes — silver.inpi_dirigeants
-    # n'agrège pas toujours sirens_mandats/denominations/formes_juridiques/roles
-    # (data quality limitée du codegen-applied SQL). Pour les dirigeants où ces
-    # arrays silver sont NULL mais qui ont bien des rows en bronze, on les
-    # construit ici via JOIN bronze.inpi_formalites_personnes ⨝ entreprises.
-    bronze_mandats = None
-    if inpi and (
-        not inpi.get("sirens_mandats")
-        or not inpi.get("denominations")
-        or not inpi.get("roles")
-    ):
-        bronze_mandats = await _safe(pool.fetchrow(
-            """SELECT
-                  array_agg(DISTINCT p.siren) FILTER (WHERE p.siren IS NOT NULL) AS sirens_mandats,
-                  array_agg(DISTINCT e.denomination) FILTER (WHERE e.denomination IS NOT NULL AND e.denomination != '') AS denominations,
-                  array_agg(DISTINCT e.forme_juridique) FILTER (WHERE e.forme_juridique IS NOT NULL AND e.forme_juridique != '') AS formes_juridiques,
-                  array_agg(DISTINCT p.individu_role) FILTER (WHERE p.individu_role IS NOT NULL AND p.individu_role != '') AS roles,
-                  count(DISTINCT p.siren) AS n_mandats_total_bronze,
-                  count(DISTINCT p.siren) FILTER (WHERE p.actif = true) AS n_mandats_actifs_bronze
-               FROM bronze.inpi_formalites_personnes p
-               LEFT JOIN bronze.inpi_formalites_entreprises e ON e.siren = p.siren
-               WHERE p.type_de_personne = 'INDIVIDU'
-                 AND UPPER(unaccent(p.individu_nom)) = UPPER(unaccent($1))
-                 AND UPPER(unaccent($2)) = ANY(
-                     SELECT UPPER(unaccent(unnest))
-                     FROM unnest(p.individu_prenoms)
-                 )""",
-            nom_u, prenom_u,
-        ), timeout_s=8.0)
-        # Merge bronze fallback into inpi dict (mutable since fetchrow returns Record)
-        if bronze_mandats:
-            inpi = dict(inpi)
-            for k in ("sirens_mandats", "denominations", "formes_juridiques", "roles"):
-                if not inpi.get(k) and bronze_mandats.get(k):
-                    inpi[k] = bronze_mandats[k]
-            # Remplace n_mandats_total si silver le donnait à 0 mais bronze a la vraie valeur
-            if not inpi.get("n_mandats_total") and bronze_mandats.get("n_mandats_total_bronze"):
-                inpi["n_mandats_total"] = bronze_mandats["n_mandats_total_bronze"]
 
     # Pour les fallbacks ci-dessous, on UPPER + strip-accents côté Python pour
     # exploiter les index btree (nom) / btree (nom, prenom) sur
