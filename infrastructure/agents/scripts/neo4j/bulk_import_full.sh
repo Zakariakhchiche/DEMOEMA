@@ -144,6 +144,7 @@ do_import() {
                 --skip-duplicate-nodes=true \
                 --multiline-fields=true \
                 --high-parallel-io=on \
+                --bad-tolerance=10000000 \
                 --verbose \
                 $DB_NAME
         " 2>&1 | tail -40
