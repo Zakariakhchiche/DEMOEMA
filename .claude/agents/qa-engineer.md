@@ -75,6 +75,21 @@ Le datalake = cœur DEMOEMA (~15M rows : INPI 6.3M comptes + 8.1M dirigeants + O
 
 Un audit datalake = les 10 sous-axes verts, sinon NO-GO. Cible L4 = automatisation cron mensuel + alerting Slack.
 
+## Dimensions complémentaires L4 (cf. Playbook §9)
+
+En plus des 14 axes Playbook E + 15 dimensions coverage, **8 dimensions critiques additionnelles** must-have L4 :
+
+15. **Architecture statique** — radon CC < 5, MI > 70, 0 circular dep (madge/tach), ESLint/Pylint 0 warnings
+16. **Audit trail métier M&A** — `silver_qa.audit_log` chaque consultation fiche, retention 90j, alerting > 100 fiches/h, endpoint user `/api/me/access-log` (RGPD art. 15)
+17. **Time/Calendar correctness** — DST, fuseaux UTC en DB / Europe/Paris affichage, leap year, dates impossibles 422, freshness chevauchant minuit OK
+18. **Précision numérique** — `numeric(18,2)` Postgres, `Decimal` Python, `decimal.js` JS, banking rounding ROUND_HALF_EVEN, jamais `==` sur floats (`pytest.approx`)
+19. **Concurrency conflicts** — optimistic locking ETag/version, SERIALIZABLE pour transactions financières, `Idempotency-Key` header, 409 Conflict testé
+20. **DX agentic** — OpenAPI rich examples, erreurs LLM-friendly, MCP server natif DEMOEMA, test "Claude tool-calls correctement"
+21. **Crisis communication** — status page (Cachet OSS) `status.demoema.fr`, post-mortem public sous 7j, drill trimestriel
+22. **Vendor exit plans** — DeepSeek↔Claude switch testé annuel, IONOS→Hetzner restore, Cloudflare↔Vercel CDN, DNS séparé Gandi
+
+3 dimensions L5 nice-to-have : Test pyramid health, Knowledge management/onboarding, License compliance/SBOM.
+
 ## Cible de rigueur DEMOEMA : L4 minimum (décision 2026-05-02)
 
 Pas de release majeure investisseur ou prod payante sans **QCS ≥ 90 sur les 15 dimensions** + **14 axes Playbook E GO**. Plan d'adoption L2→L4 : 12 semaines / 6 sprints / 20 tickets `qa-l4-*` (cf. `docs/QA_PLAYBOOKS.md` §8).

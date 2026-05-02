@@ -1407,7 +1407,143 @@ Sans ces 10 critères → la release n'est pas prod-grade et reste en staging/be
 
 ---
 
-## 9. Sources état de l'art (référencées 2026-05-02)
+## 9. Dimensions complémentaires à activer (au-delà L4)
+
+Audit retrospectif des 14 axes existants → 10 dimensions critiques **non encore couvertes** identifiées. Priorisation pour L4+ (must-have avant prod payante) ou L5 (nice-to-have).
+
+### Dimension 15 — Architecture & qualité code statique (must-have L4)
+- **Complexité cyclomatique** : `radon cc backend/ --average` → cible avg < 5, max < 15 par fonction
+- **Maintainability Index** : `radon mi backend/` → cible > 70 sur tous modules
+- **Dead code** : `vulture` Python + `knip` JS/TS → 0 fonction/import unused
+- **Dépendances circulaires** : `madge --circular frontend/src/` + `tach` Python boundaries → 0 cycle
+- **SonarQube-équivalent OSS** : `pylint`, `mypy --strict`, `eslint --max-warnings=0`
+- **Couplage / cohésion** : analyse `dependency-cruiser` JS/TS → règles boundaries (frontend/components ne peut pas importer backend/*)
+- **Code smells** : duplication > 5 % via `jscpd` ou `pmd-cpd` → fail-build
+- **Architecture fitness functions** : tests qui échouent si l'archi viole une règle (ex: `backend/datalake.py::GOLD_TABLES_WHITELIST` doit être source-of-truth, pas dupliqué)
+- **Verdict** : pass si CC avg < 5 + MI > 70 + 0 dead code + 0 circular dep + ESLint/Pylint 0 warnings
+
+### Dimension 16 — Audit trail métier M&A (must-have L4 — deal confidentiality)
+DEMOEMA traite des **deals confidentiels** — qui a vu quelle fiche, quand, depuis où ? Critique pour secret affaires + RGPD + futur audits clients.
+- **Table `silver_qa.audit_log`** : chaque accès à une fiche cible logué (user_id, siren_consulté, endpoint, timestamp, ip_hash, user_agent_hash)
+- **Retention 90 j minimum** (extensible 5 ans pour compliance investisseurs)
+- **Endpoint admin `/api/admin/audit?user_id=X&from=...&to=...`** : qui a vu quoi (réservé super-admin)
+- **Endpoint utilisateur `/api/me/access-log`** : RGPD art. 15 — l'utilisateur dirigeant a droit de savoir qui a consulté sa fiche
+- **Alerting suspicious patterns** : > 100 fiches consultées par 1 user en < 1h → flag suspect (scraping/leak)
+- **Pas de PII en clair dans audit log** : seulement IDs et hash
+- **Verdict** : pass si chaque consultation tracée + retention 90j + endpoint admin testé + alerting actif
+
+### Dimension 17 — Time/Calendar correctness (must-have L4)
+- **DST changes** : test queries chevauchant 2026-03-29 02h (FR DST forward) et 2026-10-25 03h (DST back) → pas de duplication ni perte d'heure
+- **Fuseau horaire** : tous timestamps en `timestamptz` UTC en DB, conversion `Europe/Paris` à l'affichage uniquement
+- **Leap year** : test `compute_age('1996-02-29')` au 2024-02-29 → 28 ans (pas crash)
+- **Leap second** : si DEMOEMA touche aux microsecondes, vérifier comportement DB Postgres
+- **Date impossibles** : `2026-02-30` rejeté en 422, pas crash 500
+- **Date futures** : SIRENE date_creation = '2050-01-01' → flag ou rejet (pas accepté silencieusement)
+- **Chevauchement minuit** : query `freshness < 24h` à 23h59 ne doit pas exclure des rows enregistrées à 23h58
+- **Test Hypothesis** : `from hypothesis.strategies import datetimes` → générer 1000+ dates incluant edge cases
+- **Verdict** : pass si test_temporal.py couvre 7 cas + 0 crash sur dates impossibles
+
+### Dimension 18 — Précision numérique (must-have L4 — calculs financiers)
+- **Postgres** : montants en `numeric(18,2)`, jamais `float`/`real`/`double precision`
+- **Python** : utiliser `decimal.Decimal` pour calculs M&A, pas `float`
+- **JavaScript** : `Number` est IEEE 754 → précision limitée. Utiliser `decimal.js` ou string pour montants
+- **Test invariant** : `(a + b) - b == a` doit être vrai pour CA/EBITDA (vérifier avec Hypothesis 1000 inputs)
+- **Arrondi banking** : `ROUND_HALF_EVEN` (banker's rounding) pas `ROUND_HALF_UP` pour éviter biais cumulatif
+- **Affichage cohérent** : `formatEur(204531122.45)` → "204,5 M€" partout (cf. G8 helper)
+- **Pas d'overflow** : CA cap 1e12 (1 trillion) pour éviter overflow numérique
+- **Comparaison floats** : jamais `==`, toujours `pytest.approx(rel=1e-6)`
+- **Verdict** : pass si 0 `float` pour montants + arrondi banking + 100 % invariants Hypothesis
+
+### Dimension 19 — Concurrency conflicts (must-have L4)
+- **Optimistic locking** : ajouter `version` ou `updated_at` colonne, ETag header, comparaison à update
+- **Pessimistic locking** : `SELECT ... FOR UPDATE` pour transactions critiques (ex: assignment cible analyste)
+- **Isolation level Postgres** : par défaut `READ COMMITTED`, élever à `SERIALIZABLE` pour transactions financières
+- **Test write-write conflict** : 2 users updatent la même fiche cible → 1 succès + 1 retry/error explicite
+- **Test stale read** : user A lit fiche, user B update, user A submit avec version old → 409 Conflict
+- **Last-write-wins documenté** : pour les champs où c'est OK (ex: notes textuelles), pas pour scoring/financial
+- **Idempotence keys** : POST endpoints critiques acceptent `Idempotency-Key` header (cf. Stripe pattern)
+- **Verdict** : pass si optimistic locking sur 5 endpoints critiques + 409 testé + Idempotency-Key supporté
+
+### Dimension 20 — DX agentic / LLM-friendly API (must-have L4)
+DEMOEMA expose API → utilisable par d'autres LLMs (Claude, GPT-4, agents internes Cursor). Doit être agentic-ready.
+- **OpenAPI rich** : chaque endpoint a `summary`, `description`, `examples`, `responses` complets (pas juste 200)
+- **Tool descriptions claires** : pour les 16 tools du copilot DeepSeek, descriptions explicites en FR + EN
+- **Erreurs LLM-friendly** : message d'erreur explicite + suggestion (`"SIREN invalide. Format attendu: 9 chiffres consécutifs. Exemple: 333275774"`)
+- **Pagination cohérente** : `limit`/`offset` ou cursor `?after=...`, jamais incohérence entre endpoints
+- **Field naming consistent** : `siren` partout (pas `siren_id` ici, `idSiren` là), `created_at` (pas `creation_date` ou `date_creation`)
+- **Idempotence claire** : doc indique GET = idempotent, POST = pas, etc.
+- **Test "Claude peut utiliser DEMOEMA via tool calls"** : feed l'OpenAPI à Claude → demander "fais-moi une fiche EQUANS" → Claude tool-calls correctement
+- **MCP server natif** : exposer DEMOEMA en serveur MCP pour intégration directe dans Claude Code/Cursor
+- **Verdict** : pass si Claude eval test green + OpenAPI 100 % examples + erreurs LLM-friendly
+
+### Dimension 21 — Crisis communication & status page (must-have L4)
+- **Status page publique** : Cachet (OSS, auto-hébergé) ou Statping → `status.demoema.fr`
+- **Composants exposés** : Frontend, API, Datalake, Copilot LLM, Workers ingestion
+- **Incidents publiés** : auto-publication depuis Prometheus alerting (déclenchement > 5 min)
+- **Templates communication** : email user "service partiellement dégradé", "incident résolu", "post-mortem"
+- **Post-mortem public** : pour incidents > 1h, post-mortem publié sous 7j (root cause, timeline, action items)
+- **RSS/Webhook** : status updates en RSS pour intégration Slack interne + customers
+- **Test drill** : trimestriel, simuler incident → status page mis à jour < 5 min, post-mortem rédigé < 7j
+- **Verdict** : pass si status page live + 1 drill réalisé + 1 post-mortem publié
+
+### Dimension 22 — Vendor risk + exit plan (must-have L4)
+DEMOEMA dépend de : DeepSeek (LLM), Hetzner (VPS staging), IONOS (VPS prod), Cloudflare (CDN), Atlassian (Jira/Confluence), GitHub (repo+CI). Chacun = single point of failure.
+- **DeepSeek** : si abandonné/banni → fallback Claude API (Anthropic) ou Mistral. Test mensuel switch provider via env `LLM_PROVIDER=anthropic`
+- **IONOS VPS** : si down 24h+ → restore datalake sur Hetzner backup. Test annuel restore.
+- **Cloudflare** : si compte banni → fallback Vercel CDN. DNS séparé (Gandi) pour switch < 1h
+- **Atlassian** : si tombé → backup Jira mensuel JSON dans repo. Possibilité migration vers Linear/Notion
+- **GitHub** : si banni → mirror GitLab self-hosted. Backup repo quotidien
+- **Vendor SLA tracking** : table `vendor_sla` avec uptime promised vs réel mensuel
+- **Exit plan documenté** : `docs/VENDOR_EXIT_PLANS.md` avec procédure pour chaque vendor critique
+- **Test annuel switch** : 1 vendor/an testé en switch live (DeepSeek → Claude → DeepSeek)
+- **Verdict** : pass si exit plans documentés + 1 switch testé/an + DNS séparé du CDN
+
+### Dimension 23 — Test pyramid health monitoring (nice-to-have L5)
+- **Ratio idéal** : 70 % unit / 20 % integration / 10 % E2E
+- **Mesure mensuelle** : count par catégorie via tags pytest/Playwright
+- **Alerte** : si E2E > 20 % du total → suite va devenir lente + flaky
+- **Alerte** : si unit < 60 % → manque tests fondamentaux
+- **CI time budget** : suite complète < 30 min ; si dépasse → paralléliser ou skip slow PRs non-prod
+- **Flake rate par catégorie** : E2E < 1 %, integration < 0.5 %, unit < 0.1 %
+
+### Dimension 24 — Knowledge management & onboarding (nice-to-have L5)
+- **ADR (Architecture Decision Records)** : `docs/adr/NNNN_<title>.md` pour décisions architecturales (déjà partiellement fait avec `docs/DECISIONS_VALIDEES.md`)
+- **Runbooks ops** : 1 runbook par scénario (incident, deploy, rollback, restore, scale-up)
+- **Onboarding new dev** : checklist + script auto qui setup env local en 1 commande (`make dev-setup`) + tutorial 30 min
+- **Vidéos training** : enregistrer screencast 5-10 min par feature majeure (copilot, datalake, scoring)
+- **Atelier internal QA L4** : formation 2j à l'équipe sur les playbooks A-F + outils (Hypothesis, Schemathesis, Playwright, garak)
+
+### Dimension 25 — License compliance & SBOM continu (nice-to-have L5)
+- **Inventaire deps** : `pip-licenses` Python + `license-checker` JS → toutes deps avec licence
+- **Pas de GPL/AGPL** dans le runtime (incompatible code propriétaire DEMOEMA)
+- **SBOM** : `cyclonedx-bom` génère SBOM par release, hosté GitHub release artifacts
+- **Renovate / Dependabot** : auto-PR mensuelles pour deps mineures, manuel pour majors
+- **Audit license annuel** : grep tous les `LICENSE` en deps pour compliance
+
+---
+
+### Synthèse priorisation L4
+
+Pour atteindre L4 prod-grade payante (cible 2026-07-25), activer les **8 dimensions must-have** :
+
+| Dim | Priorité | Effort | Sprint cible |
+|---|---|---|---|
+| 15 Architecture statique | Must-have L4 | 2 j | S5 (existing slot) |
+| 16 Audit trail métier | Must-have L4 (RGPD + secret M&A) | 3 j | S4 |
+| 17 Time/Calendar | Must-have L4 | 2 j | S2 (avec Hypothesis) |
+| 18 Précision numérique | Must-have L4 | 2 j | S2 |
+| 19 Concurrency conflicts | Must-have L4 | 3 j | S5 |
+| 20 DX agentic | Must-have L4 | 3 j | S6 |
+| 21 Crisis communication | Must-have L4 | 3 j | S6 |
+| 22 Vendor exit plans | Must-have L4 | 2 j | S5 |
+
+**+20 jours-homme** ajoutés au plan 12 semaines = ~66 j-h total = 11-13 ingénieur-semaines (vs 8-10 estimé initial). Réviser planning : ajouter 2 semaines (sprint 7) ou paralléliser 4 dévs sur 12 semaines.
+
+**Tickets SCRUM-157 → SCRUM-164** à créer pour ces 8 dimensions (j'ai créé 1 epic + 20 stories = SCRUM-136 → SCRUM-156, prochain serait 157).
+
+---
+
+## 10. Sources état de l'art (référencées 2026-05-02)
 
 ### Anthropic / Claude Code
 - [Subagents docs](https://code.claude.com/docs/en/sub-agents)
