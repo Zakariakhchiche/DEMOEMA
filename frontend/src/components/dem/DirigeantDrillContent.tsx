@@ -11,6 +11,8 @@ export interface DirigeantFullData {
   osint_raw: Record<string, unknown> | null;
   sanctions: Record<string, unknown>[];
   dvf_zones: Record<string, unknown> | null;
+  // Bloc Neo4j (PR #94) — fallback quand silver vide pour SCI/OSINT/Wikidata.
+  graph?: Record<string, unknown> | null;
 }
 
 export function DirigeantDrillContent({ data }: { data: Record<string, unknown> | DirigeantFullData }) {
@@ -21,6 +23,10 @@ export function DirigeantDrillContent({ data }: { data: Record<string, unknown> 
   const osintRaw = (data.osint_raw as Record<string, unknown>) || {};
   const sanctions = (data.sanctions as unknown[]) || [];
   const dvf = (data.dvf_zones as Record<string, unknown>) || null;
+  // Graph Neo4j sert de fallback quand silver SCI/OSINT n'a pas de row pour
+  // ce dirigeant (cas fréquent : silver.dirigeant_sci_patrimoine n'est pas
+  // exhaustif, alors que Neo4j capture les SCI via l'enrichment priority1).
+  const g = (data.graph as Record<string, unknown> | null) || {};
 
   const fmt = (v: unknown) => {
     if (v == null || v === "") return "—";
@@ -35,9 +41,23 @@ export function DirigeantDrillContent({ data }: { data: Record<string, unknown> 
   };
   const arr = (v: unknown): string[] => Array.isArray(v) ? (v as unknown[]).map(String).filter(Boolean) : [];
 
-  const linkedinUrls = arr(osintRaw.linkedin_urls);
-  const githubUsers = arr(osintRaw.github_usernames);
-  const twitterHandles = arr(osintRaw.twitter_handles);
+  // Helpers : préfère silver.osint_persons_enriched, sinon fallback Neo4j (graph)
+  // qui capture aussi linkedin_url / github_username / twitter_handle (single string).
+  const linkedinUrls = (() => {
+    const fromRaw = arr(osintRaw.linkedin_urls);
+    if (fromRaw.length > 0) return fromRaw;
+    return g.linkedin_url ? [String(g.linkedin_url)] : [];
+  })();
+  const githubUsers = (() => {
+    const fromRaw = arr(osintRaw.github_usernames);
+    if (fromRaw.length > 0) return fromRaw;
+    return g.github_username ? [String(g.github_username)] : [];
+  })();
+  const twitterHandles = (() => {
+    const fromRaw = arr(osintRaw.twitter_handles);
+    if (fromRaw.length > 0) return fromRaw;
+    return g.twitter_handle ? [String(g.twitter_handle)] : [];
+  })();
   const instagramHandles = arr(osintRaw.instagram_handles);
   const mediumProfiles = arr(osintRaw.medium_profiles);
   const facebookUrls = arr(osintRaw.facebook_urls);
@@ -76,18 +96,31 @@ export function DirigeantDrillContent({ data }: { data: Record<string, unknown> 
       </Section>
 
       <Section title="Patrimoine SCI (capital + valeur bilan)">
-        <Row label="Nombre SCI" value={String(sci.n_sci || 0)} />
-        <Row label="Capital cumulé (statutaire)" value={fmt(sci.total_capital_sci)} />
+        {/* Fallback graph quand silver.dirigeant_sci_patrimoine vide pour ce
+          dirigeant (Neo4j priority1 enrichment a une couverture plus large). */}
+        <Row label="Nombre SCI" value={String(sci.n_sci ?? g.n_sci ?? 0)} />
+        <Row label="Capital cumulé (statutaire)" value={fmt(sci.total_capital_sci ?? g.total_capital_sci)} />
         <Row label="Valeur (total actif bilan)" value={<span style={{ fontWeight: 700, color: "var(--accent-emerald)" }}>{fmt(sciVal.total_actif)}</span>} />
         <Row label="Biens immobiliers" value={fmt(sciVal.immo_corporelles)} />
         <Row label="Capitaux propres" value={fmt(sciVal.capitaux_propres)} />
         <Row label="CA cumulé SCI" value={fmt(sciVal.ca_net_total)} />
         <Row label="Emprunts/dettes" value={fmt(sciVal.emprunts_dettes)} />
-        <Row label="SCI ayant déposé comptes" value={`${sciVal.n_sci_with_comptes || 0} / ${sci.n_sci || 0}`} />
+        <Row label="SCI ayant déposé comptes" value={`${sciVal.n_sci_with_comptes || 0} / ${sci.n_sci ?? g.n_sci ?? 0}`} />
         <Row label="1ère SCI" value={sci.first_sci_date ? String(sci.first_sci_date).slice(0, 10) : "—"} />
-        <Row label="Dénominations SCI" value={arr(sci.sci_denominations).join(" · ")} />
+        <Row label="Dénominations SCI" value={arr(sci.sci_denominations).length > 0 ? arr(sci.sci_denominations).join(" · ") : arr(g.sci_denominations).join(" · ")} />
         <Row label="Codes postaux SCI" value={arr(sci.sci_code_postaux).join(", ")} />
       </Section>
+
+      {/* Bloc Wikidata — apparaît quand silver osint vide mais Neo4j enrichment
+        a wikidata_qid/birth_year/occupation. Source-of-truth différente du
+        bloc OSINT (Maigret/Holehe) ci-dessous. */}
+      {Boolean(g.wikidata_qid || g.wikidata_birth_year || g.wikidata_occupation) && (
+        <Section title="Wikidata">
+          <Row label="QID" value={g.wikidata_qid ? <a href={`https://www.wikidata.org/wiki/${String(g.wikidata_qid)}`} target="_blank" rel="noreferrer" style={{ color: "var(--accent-blue)" }}>{String(g.wikidata_qid)}</a> : "—"} />
+          <Row label="Année de naissance" value={g.wikidata_birth_year ? String(g.wikidata_birth_year) : "—"} />
+          <Row label="Occupation" value={g.wikidata_occupation ? String(g.wikidata_occupation) : "—"} />
+        </Section>
+      )}
 
       <Section title="Présence digitale (OSINT)">
         <Row label="LinkedIn URLs" value={linkedinUrls.length === 0 ? "—" : (
