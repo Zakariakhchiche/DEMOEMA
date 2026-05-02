@@ -128,6 +128,9 @@ export function PersonSheet({ person, onClose }: Props) {
             graph={graph}
             loading={graphLoading}
             error={graphError}
+            nom={nom}
+            prenom={prenom}
+            fullName={person.nom || `${prenom} ${nom}`.trim()}
           />
         </div>
       </div>
