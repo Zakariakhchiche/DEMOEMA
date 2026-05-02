@@ -151,15 +151,21 @@ RETURN count(DISTINCT p) AS flagged
 """
 
 
-def _run_enrich(name, conn, driver, sql, cypher, key_func=None):
-    """Generic enrichment runner."""
-    print(f"[{name}] Picking from datalake...", file=sys.stderr)
-    with conn.cursor() as cur:
-        cur.execute(sql)
-        rows = cur.fetchall()
-        # Capture columns INSIDE the with-block — sinon cur.description = None.
-        columns = [d.name for d in cur.description]
-    print(f"[{name}] {len(rows)} rows to process", file=sys.stderr)
+def _run_enrich(name, dsn, driver, sql, cypher, key_func=None):
+    """Generic enrichment runner.
+
+    Ouvre une connection PG fraîche par enrichment (et la rollback à la
+    fin) pour éviter idle-in-transaction timeout — le SCI run prenait
+    plusieurs minutes pendant lesquelles la conn restait open en
+    transaction, et Postgres la fermait avant le passage à OSINT.
+    """
+    print(f"[{name}] Picking from datalake (fresh connection)...", file=sys.stderr, flush=True)
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            rows = cur.fetchall()
+            columns = [d.name for d in cur.description]
+    print(f"[{name}] {len(rows)} rows to process", file=sys.stderr, flush=True)
 
     n_flagged = 0
     n_errors = 0
@@ -202,15 +208,17 @@ def main():
     driver.verify_connectivity()
 
     results = {}
-    with psycopg.connect(dsn) as conn:
-        if "hatvp" not in skip:
-            results["hatvp"] = _run_enrich("hatvp", conn, driver, HATVP_SQL, HATVP_CYPHER)
-        if "sci" not in skip:
-            results["sci"] = _run_enrich("sci", conn, driver, SCI_SQL, SCI_CYPHER)
-        if "osint" not in skip:
-            results["osint"] = _run_enrich("osint", conn, driver, OSINT_SQL, OSINT_CYPHER)
-        if "wikidata" not in skip:
-            results["wikidata"] = _run_enrich("wikidata", conn, driver, WIKIDATA_SQL, WIKIDATA_CYPHER)
+    # Chaque _run_enrich ouvre/ferme sa propre connection PG (autocommit) →
+    # pas de "idle-in-transaction" entre les phases. Permet aussi de lancer
+    # avec --skip hatvp,sci pour ne refaire que OSINT+Wikidata après crash.
+    if "hatvp" not in skip:
+        results["hatvp"] = _run_enrich("hatvp", dsn, driver, HATVP_SQL, HATVP_CYPHER)
+    if "sci" not in skip:
+        results["sci"] = _run_enrich("sci", dsn, driver, SCI_SQL, SCI_CYPHER)
+    if "osint" not in skip:
+        results["osint"] = _run_enrich("osint", dsn, driver, OSINT_SQL, OSINT_CYPHER)
+    if "wikidata" not in skip:
+        results["wikidata"] = _run_enrich("wikidata", dsn, driver, WIKIDATA_SQL, WIKIDATA_CYPHER)
 
     driver.close()
     results["total_duration_s"] = round(time.time() - t0, 1)
