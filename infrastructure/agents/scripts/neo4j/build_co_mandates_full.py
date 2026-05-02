@@ -152,9 +152,33 @@ def main():
             CHUNK = 1000
             skip = RESUME_SKIP
             consecutive_empty = 0
+            n_deadlock_retries = 0
             while skip < total:
-                r = s.run(CHUNK_BUILD, skip=skip, limit=CHUNK).single()
-                processed = r["processed"] if r else 0
+                # Retry-on-transient-error : Neo4j Forseti deadlocks happen
+                # under concurrent MERGE → retry up to 5x with jitter, then skip.
+                processed = 0
+                for attempt in range(5):
+                    try:
+                        r = s.run(CHUNK_BUILD, skip=skip, limit=CHUNK).single()
+                        processed = r["processed"] if r else 0
+                        break
+                    except Exception as e:
+                        # neo4j.exceptions.TransientError ou idem class
+                        msg = str(e)
+                        is_transient = (
+                            "DeadlockDetected" in msg
+                            or "TransientError" in type(e).__name__
+                        )
+                        if not is_transient or attempt == 4:
+                            print(f"  chunk {skip} FATAL after {attempt+1} attempts: {type(e).__name__}: {msg[:150]}",
+                                  file=sys.stderr, flush=True)
+                            raise
+                        n_deadlock_retries += 1
+                        wait = 0.5 * (2 ** attempt) + (skip % 7) / 100.0
+                        print(f"  chunk {skip} transient (attempt {attempt+1}/5), retry in {wait:.1f}s",
+                              file=sys.stderr, flush=True)
+                        time.sleep(wait)
+
                 skip += CHUNK
                 print(f"  chunk {skip}/{total} processed={processed}",
                       file=sys.stderr, flush=True)
@@ -164,6 +188,8 @@ def main():
                         break
                 else:
                     consecutive_empty = 0
+            print(f"[co-mandate] {n_deadlock_retries} transient retries during run",
+                  file=sys.stderr, flush=True)
 
         verify = s.run(VERIFY_CYPHER).single()
         n_total = verify["total_relations"]
