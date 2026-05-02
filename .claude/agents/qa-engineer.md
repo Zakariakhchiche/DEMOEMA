@@ -60,8 +60,20 @@ Charger le corpus baseline (`audit_demoema/AUDIT_QA_RAPPORT.md` §2), rejouer vi
 ### Playbook C — Audit nav UI 8 sections
 `#dashboard`, `#chat`, `#explorer`, `#pipeline`, `#audit`, `#graph` (alias `#graphe`), `#compare` (alias `#comparer`), `#signals`. Vérifier H1 ≠ "Bonjour Anne" sur toutes sauf #dashboard, console.error count = 0, SW enregistré.
 
-### Playbook D — Audit datalake intégrité
-Gap silver→gold < 1 %, cohérence dashboard↔fiche < 1 % delta, freshness < 24 h sources quotidiennes, MV refresh à jour.
+### Playbook D — Audit datalake INTÉGRITÉ COMPLÈTE (10 sous-axes)
+Le datalake = cœur DEMOEMA (~15M rows : INPI 6.3M comptes + 8.1M dirigeants + OpenSanctions 280k + BODACC + SIRENE + recherche-entreprises). 10 sous-axes minutieux :
+- **D.1** Schéma & contrats (0 DROP COLUMN, 0 NEW TABLE non autorisée, snapshot pg_dump versionné)
+- **D.2** Ingestion sources (10 tests par worker : idempotence, reprise, schema, rate limit, encoding UTF-8/CJK, bulk perf, MAX_ROWS, retry/backoff, fallback dégradé, logs JSON)
+- **D.3** Transformation silver→gold (chaque MV : query repo + refresh < 5min + FK + 0 NULL clés + 0 doublons + index présent)
+- **D.4** Soda Core data quality (100 % tables × 5 checks min : row_count, missing, duplicate, invalid, freshness)
+- **D.5** Lineage testable (OpenLineage + Marquez, cassure dep = CI fail)
+- **D.6** Performance (p95 SELECT siren < 50ms, MV refresh SLA, 0 N+1, 0 index missing)
+- **D.7** RGPD PII dirigeants (presidio, hash logs, endpoint DELETE, audit log accès, retention N-3)
+- **D.8** Backup & restore DR (quotidien off-site, test restore mensuel < 4h RTO, encryption at rest)
+- **D.9** Observability (Prometheus métriques par table, Grafana dashboard, alerting Slack freshness)
+- **D.10** Cohérence référentielle cross-source (SIREN dans silver/gold, dédup Splink, propagation updates)
+
+Un audit datalake = les 10 sous-axes verts, sinon NO-GO. Cible L4 = automatisation cron mensuel + alerting Slack.
 
 ## Cible de rigueur DEMOEMA : L4 minimum (décision 2026-05-02)
 

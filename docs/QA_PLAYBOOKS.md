@@ -227,50 +227,222 @@ cd C:\Users\zkhch\garak_demoema
 
 **Automatisation cible** : Stagehand/Playwright avec MCP en CI sur PRs touchant `frontend/`.
 
-### Playbook D — Audit datalake gold/silver intégrité (cycle mensuel)
+### Playbook D — Audit datalake gold/silver INTÉGRITÉ COMPLÈTE (cycle mensuel + post-ingestion)
 
-**Quand le déclencher** : après chargement majeur de source (>100k rows ingérées), changement schema gold, ou mise en prod nouvelle MV.
+**Périmètre** : c'est le cœur de DEMOEMA — ~15M rows répartis sur silver/bronze/gold.
+- `bronze.*` : raw ingéré tel quel des sources (BODACC annonces XML, INPI bulk dumps, OpenSanctions ZIP)
+- `silver.*` : raw normalisé (schémas typés, colonnes canoniques)
+  - `silver.inpi_comptes` ~6.3M rows (bilans annuels)
+  - `silver.inpi_dirigeants` ~8.1M rows (mandats sociaux)
+  - `silver.opensanctions` ~280k rows (sanctions UE/OFAC/UK/HMT)
+  - `silver.bodacc_annonces` (cumul annonces officielles)
+  - `silver.insee_unites_legales` (SIRENE base)
+  - `silver.recherche_entreprises` (cache enrichi gouv)
+- `gold.*` : matérialized views (jointures + agrégats métier)
+  - `gold.entreprises_master`, `gold.cibles_ma_top`, `gold.scoring_ma`, `gold.sanctions_master`, `gold.press_mentions`, `gold.dirigeants_master`, `gold.dirigeants_360`, etc. (~12 tables)
+- Whitelist sécurité : `GOLD_TABLES_WHITELIST` dans `backend/datalake.py`
+
+**Quand le déclencher** :
+- Mensuel obligatoire (1er du mois)
+- Post-ingestion majeure (>100k rows ajoutées)
+- Post-changement schéma gold (nouvelle colonne, nouvelle MV)
+- Post-deploy backend touchant `backend/routers/datalake.py` ou `backend/datalake.py`
 
 **Pré-requis** :
-- SSH VPS : `ssh -i ~/.ssh/demoema_ionos_ed25519 root@82.165.57.191`
-- ou endpoint `/api/datalake/_introspect`
+- SSH VPS readonly : `ssh -i ~/.ssh/demoema_ionos_ed25519 root@82.165.57.191`
+- Postgres credentials read-only (utilisateur `demoema_qa`, à créer si absent)
+- Endpoint `/api/datalake/_introspect`
+- Soda Core installé : `pip install soda-core-postgres`
+- `qa/soda/configuration.yml` + `qa/soda/checks/` (à créer dans le repo)
 
-**Vérifications canoniques** :
+#### Sous-axe D.1 — Schéma & contrats (zéro drift)
+- **Pas de DROP COLUMN jamais** (mandate Zak `feedback_no_new_tables`) — vérifier via `pg_attribute` historique vs snapshot
+- **Pas de NEW TABLE** sauf décision explicite Zak — enrichir l'existant (add column nullable)
+- **Types Postgres stricts** : pas de `text` pour des montants (utiliser `numeric(18,2)`), pas de `timestamp without time zone`, toujours `timestamptz`
+- **NOT NULL sur clés métier** : `siren`, `id`, `ingested_at`
+- **Snapshot schéma versionné** : `qa/snapshots/schema_<date>.sql` généré via `pg_dump --schema-only`, comparé en CI vs précédent (diff PR description si changement)
+- **Verdict D.1** : pass si 0 DROP COLUMN, 0 NEW TABLE non autorisée, types canoniques, NOT NULL clés métier
+
+#### Sous-axe D.2 — Ingestion sources externes (chaque worker testé)
+
+Pour chaque source (`bodacc`, `inpi_comptes`, `inpi_dirigeants`, `opensanctions`, `insee_sirene`, `recherche_entreprises`, `hatvp`, `ofac`, etc.) — un test dédié dans `infrastructure/agents/platform/ingestion/sources/test_<source>.py` couvrant :
+
+1. **Idempotence** : rejouer la même source 2× consécutivement → 0 doublon créé (constraint unique sur `(siren, year, source_hash)` ou équivalent)
+2. **Reprise après crash** : kill -9 mid-ingestion → relancer → reprendre à la dernière transaction COMMIT propre
+3. **Schema validation** : valider que la réponse parsée respecte un Pydantic model strict (rejet ligne si incomplète, log warning, pas crash worker)
+4. **Rate limit respecté** : test Mock que le worker dort entre requêtes selon `requests_per_second` config
+5. **Encoding UTF-8** : payloads avec accents (Pinault, Aïcha, Zürich) + CJK (testé avec INPI dirigeants nom étrangers) sans corruption
+6. **Bulk insert performance** : 100k rows < 30 s via `asyncpg.copy_records_to_table` (cf. G9 BODACC COPY natif)
+7. **MAX_ROWS_PER_RUN** : cap à 500k rows par run pour éviter saturation (cf. opensanctions.py:24)
+8. **Retry / backoff exponential** : 503/timeout source → retry 3× avec sleep `2**attempt`
+9. **Fallback dégradé** : si source down → fallback `silver.<source>` cache (G6 OpenSanctions pattern), flag `degraded:true`
+10. **Logs structurés** : `{source, run_id, rows_in, rows_inserted, rows_rejected, duration_ms, errors}` en JSON
+
+**Verdict D.2** : pass si chaque source a `test_<source>.py` avec ces 10 tests + tous green en CI nightly.
+
+#### Sous-axe D.3 — Transformation silver → gold (chaque MV testée)
+
+Pour chaque MV `gold.<name>` :
+
+1. **Définition vérifiable** : la query définissant la MV est dans le repo (`backend/migrations/gold_<name>.sql`), pas seulement en DB
+2. **Test refresh** : `REFRESH MATERIALIZED VIEW CONCURRENTLY gold.<name>` réussit en < 5 min sur prod
+3. **Test résultat** : `SELECT COUNT(*) FROM gold.<name>` retourne valeur cohérente (vs snapshot mois précédent, delta < 20 %)
+4. **Cohérence FK conceptuelle** : 100 % des `siren` de `gold.<name>` existent dans `silver.insee_unites_legales` ou `silver.inpi_comptes`
+5. **Pas de NULL sur clés** : `siren`, `id`, `updated_at` → 0 NULL
+6. **Index présents** : chaque MV a son index sur `siren` minimum (ex: SCRUM-133 a montré que `gold.press_mentions` n'avait pas son index → query slow)
+7. **Pas de doublons SIREN** sauf intentionnel (test sur `gold.entreprises_master` : 1 row par SIREN unique)
+8. **Distribution sectorielle réaliste** : `gold.cibles_ma_top` doit pas être 100 % NAF 7010Z (vrai dataset M&A FR a une distribution réaliste)
+
+Test SQL canonique :
 ```sql
--- Gap silver→gold (cibles silver pas dans gold)
-SELECT COUNT(*) AS silver_not_in_gold
-FROM silver.inpi_comptes c
-WHERE NOT EXISTS (SELECT 1 FROM gold.entreprises_master m WHERE m.siren=c.siren);
--- Cible : < 1% du count silver
-
--- Cohérence dashboard ↔ fiche (CA même valeur)
-SELECT em.siren, em.ca_dernier AS gold_ca, sc.ca AS silver_ca
-FROM gold.entreprises_master em
-JOIN silver.inpi_comptes sc ON sc.siren = em.siren
-WHERE ABS(em.ca_dernier - sc.ca) / NULLIF(sc.ca,0) > 0.01
-LIMIT 50;
--- Cible : 0 row (tolérance < 1%)
-
--- Tables gold whitelisted ont au moins 1 row
-SELECT t, GREATEST(0, reltuples::bigint) AS rows
-FROM pg_class
-JOIN pg_namespace n ON n.oid = relnamespace
-WHERE n.nspname = 'gold' AND t IN (
-  -- liste GOLD_TABLES_WHITELIST de backend/datalake.py
+-- Pour chaque MV gold, ces 8 checks doivent passer
+WITH mv_checks AS (
+  SELECT 'gold.entreprises_master' AS mv,
+         COUNT(*) AS rows,
+         COUNT(*) FILTER (WHERE siren IS NULL) AS null_siren,
+         COUNT(*) - COUNT(DISTINCT siren) AS dup_siren,
+         COUNT(*) FILTER (WHERE NOT EXISTS (
+           SELECT 1 FROM silver.insee_unites_legales s WHERE s.siren = em.siren
+         )) AS orphan_siren,
+         COUNT(*) FILTER (WHERE updated_at IS NULL) AS null_updated_at
+  FROM gold.entreprises_master em
+  -- ... répéter pour chaque MV
 )
-AND reltuples = 0;
--- Cible : 0 row
+SELECT * FROM mv_checks WHERE rows = 0 OR null_siren > 0 OR dup_siren > 0
+                       OR orphan_siren > rows * 0.01 OR null_updated_at > 0;
+-- Cible : 0 row retournée
 ```
 
-**Index/MV à maintenir** :
+**Verdict D.3** : pass si chaque MV gold passe ses 8 checks + index présents + refresh < 5 min.
+
+#### Sous-axe D.4 — Data quality framework (Soda Core toutes tables)
+
+Fichier `qa/soda/checks/silver_inpi_comptes.yml` exemple :
+```yaml
+checks for silver.inpi_comptes:
+  - row_count > 6000000      # baseline 6.3M
+  - missing_count(siren) = 0
+  - duplicate_count(siren, year) = 0   # 1 row par SIREN/exercice
+  - invalid_count(siren) = 0:
+      valid regex: '^[0-9]{9}$'
+  - invalid_count(ca) = 0:
+      valid min: 0
+      valid max: 1e12      # 1 trillion EUR cap raisonnable
+  - freshness(ingested_at) < 24h
+  - schema:
+      fail:
+        when wrong column type:
+          siren: varchar(9)
+          ca: numeric(18,2)
+          ingested_at: timestamptz
+
+checks for silver.inpi_dirigeants:
+  - row_count > 8000000      # baseline 8.1M
+  - missing_count(siren) = 0
+  - missing_count(nom) = 0
+  - missing_count(prenom) = 0   # ou allow null si entité morale
+  - freshness(ingested_at) < 24h
+
+checks for silver.opensanctions:
+  - row_count between 250000 and 350000   # 280k baseline ±25%
+  - missing_count(entity_id) = 0
+  - duplicate_count(entity_id) = 0
+  - freshness(ingested_at) < 7d   # mensuel
+
+checks for gold.scoring_ma:
+  - row_count > 1000000
+  - missing_count(deal_score) = 0
+  - invalid_count(deal_score) = 0:
+      valid min: 0
+      valid max: 100
+  - freshness(updated_at) < 24h
+
+# ... répéter pour les ~12 tables gold + ~6 tables silver
+```
+
+Commande : `soda scan -d demoema -c qa/soda/configuration.yml qa/soda/checks/`
+
+**Verdict D.4** : pass si Soda 0 fail + chaque table a ≥ 5 checks (row_count, missing, duplicate, invalid, freshness).
+
+#### Sous-axe D.5 — Lineage testable (OpenLineage + tests cross-tables)
+
+- **OpenLineage events** : chaque MV refresh émet un event `(input_datasets, output_datasets, run_id)` consommé par Marquez
+- **Test lineage** : `gold.cibles_ma_top` doit dépendre de `silver.inpi_comptes` ET `gold.scoring_ma` — vérifier via Marquez API
+- **Test "cassure lineage"** : si on retire une dépendance source (drop view silver), CI doit fail explicitement
+- **Documentation auto** : `docs/DATACATALOG_LINEAGE.md` regéneré à chaque release depuis OpenLineage
+
+**Verdict D.5** : pass si lineage Marquez à jour + 0 dépendance manquante + doc regen automatique.
+
+#### Sous-axe D.6 — Performance & SLA datalake
+
+- **p95 SELECT FROM gold.entreprises_master WHERE siren = X** : < 50 ms (avec index siren)
+- **p95 query Explorer** (`SELECT * FROM gold.<table> LIMIT 100`) : < 500 ms
+- **MV refresh time** : `gold.entreprises_master` < 5 min (CONCURRENTLY), `gold.scoring_ma` < 10 min
+- **Bulk insert worker** : BODACC 50k rows < 30 s (cf. G9 patch)
+- **N+1 detection** : trace OpenTelemetry sur endpoints fiche/dashboard — 0 N+1 sur les 10 top queries
+- **EXPLAIN ANALYZE en CI** : pour les 20 queries les plus lentes (via `pg_stat_statements`), capturer plan + comparer baseline (alerte si seq scan apparaît)
+- **Index missing detector** :
 ```sql
--- Index manquants identifiés (SCRUM-133)
-CREATE INDEX IF NOT EXISTS press_mentions_siren_idx
-  ON gold.press_mentions(siren);
-REFRESH MATERIALIZED VIEW CONCURRENTLY gold.sanctions_master;
+SELECT schemaname, tablename, attname
+FROM pg_stats
+WHERE schemaname IN ('silver', 'gold')
+  AND n_distinct > 1000
+  AND correlation > 0.5
+  AND tablename || '_' || attname || '_idx' NOT IN (
+    SELECT indexname FROM pg_indexes WHERE schemaname IN ('silver', 'gold')
+  );
+-- Cible : 0 row (tous les champs filtrables ont leur index)
 ```
 
-**Métriques de freshness** : `silver.<table>.ingested_at` doit être < 24h pour les sources quotidiennes (BODACC, INPI), < 7 j pour mensuelles (HATVP, OFAC).
+**Verdict D.6** : pass si SLA respectés + 0 N+1 + 0 index missing sur champs filtrables.
+
+#### Sous-axe D.7 — RGPD & PII (dirigeants personnes physiques)
+
+- **`silver.inpi_dirigeants`** contient des PII (nom, prénom, date naissance, adresse) — minimisation obligatoire
+- **Pseudonymisation possible** : `presidio` (Microsoft) tag les colonnes PII automatiquement
+- **Logs sans PII** : aucun log applicatif ne doit contenir `nom`/`prenom` lisible — utiliser hash SHA256(nom+prenom+siren) ou juste SIREN de la société
+- **Droit à l'oubli testable** : endpoint admin DELETE `dirigeant_id` doit purger silver + gold + caches Redis + logs (ou anonymiser)
+- **Export utilisateur** : si DEMOEMA expose une fiche dirigeant, l'utilisateur dirigeant lui-même doit pouvoir demander l'export portabilité (RGPD art. 20)
+- **Audit log accès** : qui a consulté la fiche du dirigeant X et quand → traçable 30 jours
+- **Retention policy** : silver.inpi_dirigeants garde 100 % des mandats actifs + N-3 ans révoqués (pas indéfini)
+
+**Verdict D.7** : pass si 0 PII en logs applicatifs + endpoint DELETE testable + audit log accès actif.
+
+#### Sous-axe D.8 — Backup & restore (DR)
+
+- **Backup quotidien** : `pg_dump` ou `pg_basebackup` chaque nuit, stocké en off-site (S3-compatible Hetzner Storage Box ou Backblaze)
+- **Test restore mensuel** : restaurer le dump du jour précédent sur un staging temporaire en < 4h (RTO objectif)
+- **RPO** : Point-in-time recovery ≤ 24h en cas de désastre
+- **Validation post-restore** : `soda scan` sur l'instance restaurée → 100 % checks pass
+- **Encryption at rest** : disques VPS chiffrés (LUKS) + dumps chiffrés (gpg avec clé managée)
+
+**Verdict D.8** : pass si backup auto + test restore réussi (< 4h) + soda scan post-restore green.
+
+#### Sous-axe D.9 — Observability datalake
+
+- **Métriques Prometheus** : `datalake_rows_total{schema,table}`, `datalake_freshness_seconds{table}`, `datalake_query_duration_seconds`, `datalake_ingestion_errors_total{source}`
+- **Grafana dashboard** : 1 panel par table critique avec freshness + row count + p95 query
+- **Alerting** : Slack/email si `freshness > seuil` (BODACC 24h, INPI 24h, OpenSanctions 7d)
+- **Logs structurés** : tous les workers ingestion + queries datalake en JSON avec `correlation_id`
+- **Trace OpenTelemetry** : SSE copilot bout-en-bout (frontend → backend → tools datalake → asyncpg → Postgres)
+
+**Verdict D.9** : pass si métriques exposées + alerting actif + tous workers tracés.
+
+#### Sous-axe D.10 — Tests d'intégrité référentielle (cross-source)
+
+- **Cohérence SIREN** : tout SIREN dans `gold.*` doit exister dans au moins une source officielle (SIRENE ou INPI)
+- **Cohérence dirigeants** : `gold.dirigeants_master.siren` ↔ `silver.inpi_dirigeants` cohérent (delta < 1 %)
+- **Doublons inter-sources** : un même dirigeant Pinault peut apparaître dans INPI ET SIRENE — entity resolution via Splink (cf. axe 3 logique métier) doit dé-dupliquer
+- **Datasets cross-cohérence** : un SIREN sanctionné dans `silver.opensanctions` doit avoir un flag dans `gold.entreprises_master.is_sanctioned = true`
+- **Mises à jour propagées** : si SIRENE update une entreprise (radiation), `gold.entreprises_master.is_active` doit être mis à `false` au prochain refresh
+
+**Verdict D.10** : pass si toutes les invariants cross-source OK (test SQL dédié `qa/sql/cross_integrity.sql`).
+
+### Synthèse Playbook D — Verdict global
+
+Pass si les 10 sous-axes D.1 → D.10 sont GO. Sinon NO-GO + liste de blockers.
+
+**Cible L4** : automatisation 100 % de Playbook D dans GitHub Actions cron mensuel + alerting Slack si NO-GO.
 
 ---
 
@@ -501,13 +673,124 @@ for (const route of ROUTES) {
 
 **Verdict axe 1** : pass uniquement si Lighthouse perf > 80, a11y > 95, SW registered, 0 console error, **ET 100 % des éléments cliquables PASS dans clickables-exhaustive.spec.ts** (350-400+ éléments distincts sur les 14 routes).
 
-### Axe 2 — Backend API (FastAPI / SSE / contracts)
-- **OpenAPI fuzz** : Schemathesis sur `/openapi.json` (couvre tous les endpoints en 1 commande)
-- **Pytest coverage** : objectif 70 % global, 90 % sur modules critiques (auth, scoring, copilot)
-- **Latency profiling** : k6 ou Locust sur top endpoints (`/api/datalake/dashboard`, `/api/datalake/fiche/{siren}`, `/api/copilot/stream`)
-- **SSE streaming** : test stream 30-90 s sans reconnect ou perte d'event `done:true`
-- **Error handling** : 401, 403, 422, 429, 500 cohérents — schema d'erreur unifié
-- **Verdict** : pass si Schemathesis 0 schema violation, p95 endpoint top-10 < SLA, coverage seuil OK
+### Axe 2 — Backend API MINUTIEUX (FastAPI / SSE / async / contracts)
+
+L'axe 2 est doublé en 10 sous-axes B.1 → B.10 (parallèle au Playbook D pour le datalake). Le backend DEMOEMA = ~80 endpoints REST + SSE streaming copilot + 16 tools LLM + JWT auth + asyncpg pool.
+
+#### Sous-axe B.1 — Inventaire exhaustif endpoints (chaque path × méthode testé)
+- **Auto-discovery** : grep `@app.get/post/put/patch/delete` + `@router.*` dans `backend/main.py` + `backend/routers/*.py` → ~80 endpoints
+- **Pour chaque endpoint** : 1 test happy + 5 negatives (cf. axe 15 negative coverage)
+- **Couverture matrice** : path × méthode × auth_scope × content_type
+- **OpenAPI 3.1 spec** : `/openapi.json` doit lister 100 % des endpoints (drift detection : grep code vs spec)
+- **Tags cohérents** : chaque endpoint a un `tags=[...]` cohérent (groupement Swagger UI)
+- **Verdict B.1** : pass si 100 % endpoints listés OpenAPI + 100 % ont test happy+5neg
+
+#### Sous-axe B.2 — Schémas Pydantic stricts (input + output)
+- **Tous endpoints** acceptent un `BaseModel` Pydantic v2 (pas `dict` en input)
+- **Tous endpoints** retournent un `response_model` Pydantic typé (pas `dict` brut)
+- **Validation strict** : `model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)` partout
+- **Custom validators** : SIREN regex `^[0-9]{9}$`, code NAF `^\d{4}[A-Z]$`, dates ISO 8601
+- **Schemathesis stateful** : génération automatique de payloads malformés via Hypothesis → 0 crash backend
+- **Test rejet types** : envoyer `{"siren": 123}` (int) au lieu `"123456789"` (str) → 422 propre
+- **Verdict B.2** : pass si Schemathesis 0 schema violation + 100 % endpoints typés + 0 `extra='allow'`
+
+#### Sous-axe B.3 — SSE streaming robustesse copilot
+- **Endpoint** : `/api/copilot/stream` envoie events `data: {...}\n\n` puis `done: true`
+- **Test reconnect** : si client perd connexion mid-stream, reprendre via `Last-Event-ID` (ou réémission complète)
+- **Test long stream** : 30-90 s sans timeout (timeout backend 90 s, frontend 120 s avec grace)
+- **Test concurrent** : 10 streams parallèles depuis 1 user → tous reçoivent leur réponse correcte (pas de cross-talk)
+- **Test cancel** : `AbortController` côté client → backend détecte `request.is_disconnected()` et stoppe les tools en cours
+- **Test backpressure** : si client lent, buffer SSE pas explosé (asyncio queue size capped)
+- **Pas de fuite mémoire** : 1000 streams enchaînés → RSS stable (test endurance D-style)
+- **Logs SSE** : chaque stream logué avec `stream_id`, `user_id`, `tools_called`, `tokens_in/out`, `latency_ms`
+- **Verdict B.3** : pass si 100 % tests SSE green + 0 cross-talk + RSS stable
+
+#### Sous-axe B.4 — Async / concurrency / connection pool
+- **asyncpg pool** : taille config (min=5, max=20), test exhaustion sous load (50 VUs concurrent → 0 timeout)
+- **httpx async client** : singleton avec timeout configuré, retries via `httpx.HTTPTransport(retries=3)`
+- **`asyncio.gather`** : tools indépendants en parallèle (cf. G1) — vérifier ordre causal préservé pour deps (`get_fiche` → `get_scoring`)
+- **Pas de blocking call** : aucun `time.sleep()`, aucun `requests.get()` (sync) — toujours `await asyncio.sleep()` et `await httpx.get()`
+- **Test deadlock** : 2 endpoints qui appellent des tools partageant le même SIREN → pas de blocage
+- **Test connection leak** : 1000 requêtes → `pg_stat_activity` retourne au baseline (pas de connexions zombies)
+- **Test event loop** : pas de `asyncio.run()` à l'intérieur d'un endpoint (event loop déjà actif)
+- **Verdict B.4** : pass si 0 deadlock + 0 leak + asyncio profile clean (no warnings)
+
+#### Sous-axe B.5 — Error handling cohérent (codes HTTP + messages)
+- **Schéma d'erreur unifié** : tous les 4xx/5xx retournent `{"error": "...", "code": "...", "detail": "..."}` (pas FastAPI default `{"detail": "..."}` simple)
+- **400** : payload mal formé syntactiquement (JSON invalide)
+- **401** : pas de token Authorization
+- **403** : token valide mais scope insuffisant (admin only)
+- **404** : SIREN/ressource introuvable
+- **422** : payload bien formé mais validation métier échoue (Pydantic)
+- **429** : rate limit dépassé (slowapi)
+- **500** : exception non gérée → log Sentry/correlation_id retourné, message générique user
+- **502/503** : source amont down (DeepSeek, INPI, OpenSanctions) — fallback ou message clair
+- **504** : timeout (DeepSeek > 90 s) — message d'excuse + lien re-essayer
+- **Test chacun des 10 codes** : `backend/tests/test_error_codes.py` paramétré
+- **Verdict B.5** : pass si 100 % endpoints respectent le schéma d'erreur + 10 codes testés
+
+#### Sous-axe B.6 — Auth / authz (JWT + scopes + lifecycle)
+- **JWT signature** : RSA256 ou HS256 robuste (clé ≥ 256 bits)
+- **JWKS rotation** : test `/.well-known/jwks.json` accessible + clé tournée tous les 90 j
+- **Expiry** : token expire en 1h → 401 + frontend refresh automatique
+- **Scopes** : 5 rôles (admin / analyst / viewer / guest / super-admin) — test endpoint admin-only depuis viewer → 403
+- **Refresh token** : flow complet test (login → access + refresh → expire → refresh → new access)
+- **Logout** : token blacklist côté backend (Redis SET avec TTL = expiry restant)
+- **CSRF** : si cookies utilisés, double-submit token ou SameSite=Strict
+- **Rate limit login** : 5 tentatives/min/IP → 429 + lockout 15 min
+- **Brute force detection** : alerte si > 100 401 sur 1 min depuis 1 IP
+- **Verdict B.6** : pass si 5 rôles testés + JWT lifecycle complet + 0 CSRF + brute-force detection
+
+#### Sous-axe B.7 — Rate limiting (slowapi par user, pas IP)
+- **slowapi** activé : `@limiter.limit("60/minute")` sur endpoints sensibles
+- **Limites par tier** : free 30/min, pro 300/min, admin illimité
+- **Limit par user** (depuis JWT), pas par IP (CGNAT/Tor problème)
+- **429 explicite** : header `Retry-After: <seconds>` + message en JSON
+- **Test charge** : k6 100 RPS sur user free → 30 first OK, 70 next 429
+- **Bypass health check** : `/api/health`, `/metrics` exemptés du rate limit (sinon Prometheus down)
+- **Verdict B.7** : pass si 3 tiers testés + Retry-After présent + health bypass OK
+
+#### Sous-axe B.8 — Caching (Redis ou in-memory)
+- **Cache Redis** : si présent, TTL adapté par type :
+  - `silver.inpi_comptes` lookups : 1h (data quotidienne)
+  - `gold.scoring_ma` : 5 min (calcul lourd)
+  - DeepSeek tool results : 30 min (réponses LLM)
+- **Cache invalidation cohérente** : si data datalake change → invalider cache via pubsub Redis ou TTL court
+- **Cache hit rate** : monitor via Prometheus, cible > 70 % sur fiches SIREN
+- **Cache stampede protection** : `singleflight` pattern (1ère requête peuple, autres attendent)
+- **Test cache** : 2 requêtes consécutives même endpoint → 1 hit DB + 1 hit cache
+- **Test invalidation** : update fictif silver → invalidation propagée
+- **Verdict B.8** : pass si hit rate > 70 % + invalidation cohérente + stampede protégé
+
+#### Sous-axe B.9 — Health / liveness / readiness (3 endpoints distincts)
+- **`/api/health`** : 200 toujours (sauf si app crashée) — Caddy/k8s liveness probe
+- **`/api/ready`** : 200 si DB + Redis + DeepSeek tous joignables, 503 sinon — readiness probe
+- **`/api/version`** : retourne `{"git_sha": "...", "version": "...", "deployed_at": "..."}` — debug
+- **`/metrics`** : Prometheus exposition (cf. B.10)
+- **Smoke prod auto** : cron 5 min hit `/api/ready` → alerte Slack si 503 > 2 min
+- **Test démarrage propre** : container start → `/api/ready` doit passer en < 30 s
+- **Test arrêt propre** : SIGTERM → finir les requêtes en cours (graceful shutdown 30 s) avant exit
+- **Verdict B.9** : pass si 4 endpoints fonctionnels + cron smoke actif + graceful shutdown
+
+#### Sous-axe B.10 — Logging structuré + traces + métriques
+- **Logs JSON structurés** : `{timestamp, level, correlation_id, user_id?, endpoint, method, status, latency_ms, message}` — cf. `python-json-logger`
+- **`correlation_id`** : middleware injecte un UUID par requête, propagé dans tous les logs + downstream calls
+- **OpenTelemetry trace** : `opentelemetry-instrumentation-fastapi` actif → traces exportées Jaeger/Tempo
+- **Métriques Prometheus** : `prometheus_fastapi_instrumentator` actif sur `/metrics`
+  - `http_requests_total{method, path, status}`
+  - `http_request_duration_seconds{method, path}` (histogram)
+  - `copilot_streams_active` (gauge)
+  - `copilot_tools_called_total{tool_name}`
+  - `datalake_query_duration_seconds{table}`
+- **Sentry** : exceptions non gérées capturées avec correlation_id + user_id
+- **Test logs** : grep dans logs `correlation_id=<uuid>` retourne TOUS les events de la requête
+- **Verdict B.10** : pass si correlation_id partout + traces OTel actives + métriques exposées + Sentry hooked
+
+### Synthèse Axe 2 — Verdict global
+
+Pass si les 10 sous-axes B.1 → B.10 sont GO. Cible L4 = 100 % automatisation en CI nightly + dashboard Grafana dédié backend.
+
+
 
 ### Axe 3 — Logique métier (scoring M&A / matching / business rules)
 - **Property-based testing** : Hypothesis sur invariants `deal_score ∈ [0,100]`, `tier monotone(CA)`, `EBITDA ≤ CA`
@@ -517,14 +800,60 @@ for (const route of ROUTES) {
 - **Calculs financiers** : EBITDA proxy = CA × (1 - charges_perso_taux × ...). Test vs golden dataset 50 entreprises
 - **Verdict** : pass si 100 % invariants Hypothesis green + 0 doublon SIREN/entité
 
-### Axe 4 — Données (silver/gold quality + lineage + freshness)
-- **Great Expectations / Soda Core** : checkpoints sur `silver.*` + `gold.*` (not_null, unique, range, regex pattern)
-- **Freshness** : `silver.<table>.ingested_at` < 24 h pour quotidiens (BODACC, INPI), < 7 j pour mensuels
-- **Drift detection** : whylogs ou ydata-profiling baseline → alerte si distribution col change > seuil
-- **Gap silver→gold** : `SELECT COUNT(*) FROM silver.X WHERE NOT EXISTS gold.X` < 1 %
-- **Cohérence dashboard↔fiche** : delta CA < 1 % sur 100 SIREN sample
-- **MV refresh** : `pg_stat_user_tables.last_analyze < 24 h` sur les MV gold critiques
-- **Verdict** : pass si 100 % checkpoints GE green + 0 gap > 1 % + freshness OK
+### Axe 4 — Données MINUTIEUX (silver/gold + ingestion + lineage + drift + PII)
+
+**Voir aussi le Playbook D §4** qui détaille les 10 sous-axes datalake (D.1 → D.10). L'Axe 4 ici se concentre sur la donnée en transit + ingestion temps réel + drift continu + qualité applicative.
+
+#### Sous-axe DATA.1 — Pipeline ingestion (workers infrastructure/agents/platform/)
+- 60+ specs YAML dans `infrastructure/agents/platform/ingestion/specs/*.yaml` (ADEME, AMF, ANSSI, BODACC, INPI, OFAC, SIRENE, etc.)
+- **Chaque spec** doit avoir un test d'idempotence + parser test + bulk insert test (cf. Playbook D.2)
+- **Schema source → silver** : si la source ajoute un champ, ne pas crasher (warning log + ignore champ inconnu)
+- **Versioning des schémas** : chaque YAML versioné, migration explicite si breaking change
+
+#### Sous-axe DATA.2 — Quality continu (vs audit ponctuel)
+- **Soda Core scans en CI nightly** : 100 % tables silver + gold checkées toutes les nuits (cron 02h UTC)
+- **Alerting Slack** : fail Soda → Slack #data-quality + ticket SCRUM auto
+- **Trend dashboard** : Grafana 1 panel par table avec freshness/row count/missing% sur 30 j
+
+#### Sous-axe DATA.3 — Drift detection (distributions changent)
+- **whylogs hebdo** : profil des colonnes critiques (`gold.scoring_ma.deal_score`, `gold.entreprises_master.ca_dernier`) → alerte si KS test > seuil vs baseline
+- **Cas concret** : si INPI change le format de bilan, distribution CA va shift → drift détecté avant que les fiches partent en prod
+
+#### Sous-axe DATA.4 — Cohérence applicative (data correctness)
+- **Dashboard CA** = **Fiche CA** = **Export CSV CA** (delta < 1 % cf. G2/G4 patches)
+- **Test différentiel multi-canal** : pour 50 SIREN, fetch via 4 chemins différents → tous doivent retourner les mêmes valeurs canoniques
+
+#### Sous-axe DATA.5 — Lineage testable (cf. Playbook D.5)
+- OpenLineage events émis à chaque transformation
+- Marquez API queryable : `gold.cibles_ma_top` dépend de `silver.inpi_comptes` + `gold.scoring_ma`
+- Cassure de dépendance → CI fail explicit
+
+#### Sous-axe DATA.6 — Conformité RGPD pour PII (cf. Playbook D.7)
+- `silver.inpi_dirigeants` 8.1M PII → audit annuel CNIL
+- Logs sans nom/prénom lisible (hash uniquement)
+- Endpoint DELETE testable + audit log accès
+
+#### Sous-axe DATA.7 — Référence externes (sources gouvernementales)
+- INPI RNE, SIRENE, BODACC, recherche-entreprises (gouv gratuit), DeepSeek (LLM) — tous testés via `pytest-recording (VCR.py 8.0)` (rejeu sans live API)
+- Mock httpx async via `respx` pour les workers
+- Détection breakage source : si `recherche-entreprises.api.gouv.fr` change schema, CI doit alerter (canary test 1×/semaine)
+
+#### Sous-axe DATA.8 — No paid action (mandate Zak)
+- Pas d'appel à Pappers (abandonné 2026-04-23) — test grep `pappers` dans response sources doit retourner 0
+- Pas d'appel à GX Cloud, Soda Cloud, Confident AI cloud (tous payants) sans approbation
+- Test CI lint : grep `requirements.txt` pour packages payants → fail-build
+
+#### Sous-axe DATA.9 — Backup + restore (cf. Playbook D.8)
+- Quotidien off-site + test restore mensuel < 4h RTO
+- Soda scan sur instance restaurée → 100 % checks pass
+
+#### Sous-axe DATA.10 — Reproducibilité runs ingestion
+- Chaque run a un `run_id` (UUID), loggé en silver + gold tables (`source_run_id` colonne)
+- Replay possible : rejouer un run pour le même `run_id` → state final identique (idempotence stricte)
+- Snapshot run JSON archivé en `silver_qa.runs_archive` 90 j
+
+**Verdict Axe 4** : pass si Soda Core 0 fail + drift whylogs OK + 4 canaux cohérents + RGPD audit log + 0 source payante + run_id traçable.
+
 
 ### Axe 5 — LLM Copilot (tool-calling + hallucination + RAG)
 - **DeepEval LLMTestCase** : 110 questions baseline avec métriques `AnswerRelevancyMetric`, `FaithfulnessMetric`, `HallucinationMetric`, custom `GEval` pour FR M&A
