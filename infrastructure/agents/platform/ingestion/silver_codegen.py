@@ -842,18 +842,29 @@ def list_silver_specs() -> list[str]:
 def _silver_state(conn) -> dict[str, int | None]:
     """For every materialized view in schema 'silver', return its row count.
     Missing MVs are absent from the returned dict.
+
+    Une matview avec `ispopulated=false` est traitée comme `None` (= missing)
+    pour forcer le rebuild + REFRESH. Sinon le bootstrap considère
+    reltuples=0 comme "empty mais existe" et ne rebuild que si
+    force_empty=True. Les matviews créées avec WITH NO DATA (et pas
+    encore REFRESH'd post-fix PR #95) restent piégées sinon.
     """
     with conn.cursor() as cur:
         cur.execute(
             """
             SELECT n.nspname || '.' || c.relname AS qname,
-                   c.reltuples::bigint           AS approx_rows
+                   c.reltuples::bigint           AS approx_rows,
+                   c.relispopulated              AS ispopulated
             FROM pg_class c
             JOIN pg_namespace n ON n.oid = c.relnamespace
             WHERE n.nspname = 'silver' AND c.relkind = 'm'
             """
         )
-        return {row[0]: row[1] for row in cur.fetchall()}
+        out: dict[str, int | None] = {}
+        for qname, approx_rows, ispopulated in cur.fetchall():
+            # Unpopulated matview = treat as missing → rebuild forcé.
+            out[qname] = None if not ispopulated else approx_rows
+        return out
 
 
 def _bronze_sources_all_empty(source_tables: list[str]) -> list[str]:

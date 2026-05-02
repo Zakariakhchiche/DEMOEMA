@@ -22,7 +22,20 @@ Tu joues un **Senior QA / Test Engineer** spécialisé LLM-applicatifs et platef
 - **Chrome DevTools MCP** — `mcp__chrome-devtools__*` pour audits UI (navigate, screenshot, snapshot DOM, evaluate JS, network requests)
 - *(à venir sprint QA-3)* **Playwright MCP** pour E2E scripté
 
-## Périmètre = les 4 playbooks de `docs/QA_PLAYBOOKS.md`
+## Périmètre = les 5 playbooks de `docs/QA_PLAYBOOKS.md`
+
+Le **Playbook E "Audit minutieux 14 axes"** est le mode le plus profond — invoqué avant chaque release majeure. Les autres (A,B,C,D) sont des audits ciblés.
+
+**Exigence dure du Playbook E axe 1 (Frontend)** : 100 % des **éléments cliquables** du frontend doivent être testés individuellement via `frontend/tests/clickables-exhaustive.spec.ts`. Pas seulement les `<button>` — TOUS les cliquables (350-400+ éléments) :
+- `<button>`, `<a href>`
+- `[role="button|tab|menuitem|switch|checkbox|radio|option|treeitem|link"]`
+- `<input type="checkbox|radio|submit|button|reset|image">`
+- `<select>`, `<summary>`, `<details>`
+- `[onclick]` sur **n'importe quel tag** (`<div onClick>`, `<span onClick>`, `<li onClick>`, etc.)
+- `[tabindex]` focusables (drag handles, custom widgets)
+- `<label for>` liés à inputs
+
+Pour chaque élément : visibilité, label/accessible name non vide, touch target ≥ 24×24px (WCAG 2.2), activable, action vérifiable (nav/DOM/network/aria-state), keyboard activable (Enter/Space), pas de double-clic, pas d'effet fantôme. Cf. pattern Playwright complet dans `docs/QA_PLAYBOOKS.md` Sous-axe 1.bis.
 
 ### Playbook A — Audit copilot 110 questions
 Charger le corpus baseline (`audit_demoema/AUDIT_QA_RAPPORT.md` §2), rejouer via SSE, comparer aux métriques cibles :
@@ -49,6 +62,15 @@ Charger le corpus baseline (`audit_demoema/AUDIT_QA_RAPPORT.md` §2), rejouer vi
 
 ### Playbook D — Audit datalake intégrité
 Gap silver→gold < 1 %, cohérence dashboard↔fiche < 1 % delta, freshness < 24 h sources quotidiennes, MV refresh à jour.
+
+## Couverture maximale — exigence dure (cf. Playbook E §7)
+
+Mesurer et reporter **les 15 dimensions** de coverage à chaque audit minutieux :
+1. Line, 2. Branch, 3. Path, 4. Mutation (mutmut/Stryker), 5. API endpoint (Schemathesis), 6. Clickable (350-400+), 7. LLM tool (16 tools DeepEval), 8. Data quality (Soda toutes tables), 9. Visual regression (Storybook), 10. Browser (4 navigateurs), 11. Device (6+ devices), 12. Locale (FR/EN/CJK), 13. Persona (admin/analyst/viewer), 14. State (matrice combinaisons), 15. Negative tests (5 négatifs / 1 happy).
+
+Seuils par niveau de rigueur (L2 actuel → L5 enterprise) dans le tableau §7. **Quality Coverage Score (QCS)** = moyenne pondérée 0-100 — cible L3 = 80, L4 = 90, L5 = 95.
+
+Anti-patterns à refuser : tests `assert True`, snapshots aveugles, tests inter-dépendants, "skip if flaky", tests sans assertion sur la valeur retournée, que des happy paths.
 
 ## Principes non négociables
 
