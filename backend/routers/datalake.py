@@ -2790,23 +2790,33 @@ async def entreprise_search(
     if not q or len(q.strip()) < 2:
         raise HTTPException(status_code=400, detail="q (>= 2 chars) requis")
     q_clean = q.strip()
+    is_siren = q_clean.isdigit() and len(q_clean) == 9
     pattern = f"%{q_clean}%"
     pool = _pool(req)
 
     # Étape 1 : silver.inpi_comptes — DISTINCT ON (siren) sur date_cloture DESC
     # pour récupérer le dernier dépôt connu par siren. Index trigram sur
     # denomination requis pour la perf ILIKE (sinon seq scan 6M rows).
-    rows_inpi = await _safe(pool.fetch(
-        """SELECT DISTINCT ON (siren)
-              siren, denomination,
-              ca_net AS ca_dernier,
-              date_cloture
-           FROM silver.inpi_comptes
-           WHERE denomination ILIKE $1
-           ORDER BY siren, date_cloture DESC NULLS LAST
-           LIMIT $2""",
-        pattern, limit,
-    ), default=[], timeout_s=8.0)
+    if is_siren:
+        rows_inpi = await _safe(pool.fetch(
+            """SELECT DISTINCT ON (siren)
+                  siren, denomination, ca_net AS ca_dernier, date_cloture
+               FROM silver.inpi_comptes
+               WHERE siren = $1
+               ORDER BY siren, date_cloture DESC NULLS LAST
+               LIMIT $2""",
+            q_clean, limit,
+        ), default=[], timeout_s=8.0)
+    else:
+        rows_inpi = await _safe(pool.fetch(
+            """SELECT DISTINCT ON (siren)
+                  siren, denomination, ca_net AS ca_dernier, date_cloture
+               FROM silver.inpi_comptes
+               WHERE denomination ILIKE $1
+               ORDER BY siren, date_cloture DESC NULLS LAST
+               LIMIT $2""",
+            pattern, limit,
+        ), default=[], timeout_s=8.0)
 
     found_sirens = {r["siren"] for r in rows_inpi if r.get("siren")}
 
@@ -2815,13 +2825,18 @@ async def entreprise_search(
     # remontés en étape 1.
     if len(rows_inpi) < limit:
         remaining = limit - len(rows_inpi)
-        if found_sirens:
+        if is_siren:
+            # Match siren direct (le pk de la table) — cas user fournit un siren.
+            params = [q_clean, remaining]
+            where_clause = "siren = $1"
+            params_idx_limit = "$2"
+        elif found_sirens:
             params = [pattern, list(found_sirens), remaining]
-            extra_where = "AND siren <> ALL($2::text[])"
+            where_clause = "denomination_unite ILIKE $1 AND siren <> ALL($2::text[])"
             params_idx_limit = "$3"
         else:
             params = [pattern, remaining]
-            extra_where = ""
+            where_clause = "denomination_unite ILIKE $1"
             params_idx_limit = "$2"
         rows_insee = await _safe(pool.fetch(
             f"""SELECT
@@ -2833,8 +2848,7 @@ async def entreprise_search(
                    etat_administratif,
                    code_ape
                 FROM silver.insee_unites_legales
-                WHERE denomination_unite ILIKE $1
-                  {extra_where}
+                WHERE {where_clause}
                 ORDER BY siren
                 LIMIT {params_idx_limit}""",
             *params,
@@ -2842,25 +2856,62 @@ async def entreprise_search(
     else:
         rows_insee = []
 
-    # Enrichir étape 1 avec INSEE (forme/etat/code_ape) en un seul aller-retour.
+    # Étape 3 : silver.inpi_dirigeants — fallback final pour les SCIs et
+    # structures patrimoniales que ni inpi_comptes (pas de dépôt) ni insee
+    # (souvent NULL denomination_unite pour SCI) n'ont. Les arrays
+    # `sirens_mandats[]` / `denominations[]` parallèles donnent le mapping
+    # siren -> denomination depuis les déclarations dirigeants INPI.
+    # Coûteux (no GIN sur ILIKE d'array) — gardé en dernier recours,
+    # gated sur restant > 0 et seulement si ni inpi_comptes ni insee n'a
+    # rien trouvé pour pas perdre du temps inutilement.
+    seen_sirens = found_sirens | {r["siren"] for r in rows_insee if r.get("siren")}
+    rows_inpi_dirig: list = []
+    if len(rows_inpi) + len(rows_insee) < limit and not is_siren:
+        remaining = limit - len(rows_inpi) - len(rows_insee)
+        rows_inpi_dirig = await _safe(pool.fetch(
+            """WITH expanded AS (
+                  SELECT DISTINCT
+                         d.sirens_mandats[i] AS siren,
+                         d.denominations[i] AS denomination
+                  FROM silver.inpi_dirigeants d
+                  CROSS JOIN generate_subscripts(d.denominations, 1) AS i
+                  WHERE d.denominations[i] ILIKE $1
+                    AND d.sirens_mandats[i] IS NOT NULL
+                  LIMIT $2 * 3
+               )
+               SELECT siren, denomination,
+                      NULL::numeric AS ca_dernier,
+                      NULL::date AS date_cloture
+               FROM expanded
+               WHERE siren <> ALL($3::text[])
+               ORDER BY denomination
+               LIMIT $2""",
+            pattern, remaining, list(seen_sirens) if seen_sirens else [""],
+        ), default=[], timeout_s=10.0)
+
+    # Enrichir étapes 1 + 3 avec INSEE (forme/etat/code_ape) en un seul
+    # aller-retour. Les sirens issus de inpi_dirigeants (étape 3) bénéficient
+    # aussi de l'enrichissement INSEE quand la row existe.
+    sirens_to_enrich = found_sirens | {r["siren"] for r in rows_inpi_dirig if r.get("siren")}
     insee_extra: dict[str, dict] = {}
-    if found_sirens:
+    if sirens_to_enrich:
         rows_extra = await _safe(pool.fetch(
-            """SELECT siren, categorie_juridique AS forme_juridique,
+            """SELECT siren, denomination_unite,
+                      categorie_juridique AS forme_juridique,
                       etat_administratif, code_ape
                FROM silver.insee_unites_legales
                WHERE siren = ANY($1::text[])""",
-            list(found_sirens),
+            list(sirens_to_enrich),
         ), default=[], timeout_s=4.0)
         for r in rows_extra:
             insee_extra[r["siren"]] = dict(r)
 
-    def _enrich(r: dict) -> dict:
+    def _enrich(r: dict, source: str) -> dict:
         siren = r.get("siren")
         extra = insee_extra.get(siren, {})
         return {
             "siren": siren,
-            "denomination": r.get("denomination"),
+            "denomination": r.get("denomination") or extra.get("denomination_unite"),
             "ca_dernier": r.get("ca_dernier"),
             "date_cloture": r.get("date_cloture"),
             "forme_juridique": r.get("forme_juridique") or extra.get("forme_juridique"),
@@ -2868,11 +2919,12 @@ async def entreprise_search(
             "code_ape": r.get("code_ape") or extra.get("code_ape"),
             "actif": (r.get("etat_administratif") or extra.get("etat_administratif")) == "A"
                 if (r.get("etat_administratif") or extra.get("etat_administratif")) is not None else None,
-            "source": "inpi_comptes" if siren in found_sirens else "insee_unites_legales",
+            "source": source,
         }
 
-    results = [_enrich(_serialize(r)) for r in rows_inpi]
-    results.extend(_enrich(_serialize(r)) for r in rows_insee)
+    results = [_enrich(_serialize(r), "inpi_comptes") for r in rows_inpi]
+    results.extend(_enrich(_serialize(r), "insee_unites_legales") for r in rows_insee)
+    results.extend(_enrich(_serialize(r), "inpi_dirigeants") for r in rows_inpi_dirig)
     return {"q": q_clean, "n": len(results), "results": results}
 
 
