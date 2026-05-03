@@ -160,13 +160,14 @@ export const datalakeApi = {
       // Null si Neo4j down. Sinon contient flags compliance + top
       // co-mandataires + n_red_1hop.
       graph: Record<string, unknown> | null;
-      // Liste détaillée des mandats (1 row par société) — source-of-truth
-      // bronze.inpi_formalites_personnes ⨝ entreprises. Évite la limite
-      // Neo4j qui n'a souvent que 2-3 IS_DIRIGEANT relations sur N mandats
-      // à cause des md5 hash mismatches lors du bulk import.
+      // Liste détaillée des mandats (1 row par société) — silver.inpi_dirigeants
+      // (arrays parallèles dépliés) ⨝ silver.inpi_comptes (capital) ⨝
+      // silver.insee_unites_legales (code_ape / date_creation / actif).
+      // Évite la limite Neo4j qui n'a souvent que 2-3 IS_DIRIGEANT relations
+      // sur N mandats à cause des md5 hash mismatches lors du bulk import.
       mandats_detail: Record<string, unknown>[];
-      // Co-mandataires depuis Postgres (vs graph.top_co_mandataires Neo4j
-      // qui ne capture qu'un sous-ensemble). Triés par n_shared DESC.
+      // Co-mandataires depuis silver.inpi_dirigeants (reverse-lookup via
+      // intersection sirens_mandats). Triés par n_shared DESC.
       co_mandataires_detail: Record<string, unknown>[];
     }>(path);
   },

@@ -1382,70 +1382,77 @@ async def _dirigeant_full(
                 "by_cp": [_serialize(r) for r in dvf_rows],
             }
 
-    # 6. Mandats détaillés — JOIN bronze.inpi_formalites_personnes ⨝ entreprises
-    # pour avoir la liste COMPLÈTE des sociétés où ce dirigeant siège (1 row par
-    # mandat). Ne dépend ni de silver.inpi_dirigeants (qui agrège seulement les
-    # arrays sans détail) ni de Neo4j (qui n'a que 2/23 sirens à cause des hash
-    # md5 mismatch lors du bulk import). Source-of-truth = bronze + entreprises.
-    mandats_detail = await _safe(pool.fetch(
-        """SELECT
-              p.siren,
-              e.denomination,
-              e.forme_juridique,
-              e.code_ape,
-              e.montant_capital AS capital,
-              e.adresse_code_postal AS code_postal,
-              e.date_immatriculation,
-              p.individu_role AS role,
-              p.actif
-           FROM bronze.inpi_formalites_personnes p
-           LEFT JOIN bronze.inpi_formalites_entreprises e ON e.siren = p.siren
-           WHERE p.type_de_personne = 'INDIVIDU'
-             AND p.individu_nom IN ($1, $2)
-             AND ($3 = ANY(p.individu_prenoms) OR $4 = ANY(p.individu_prenoms))
-             AND ($5::text IS NULL OR p.individu_date_naissance LIKE $5 || '%')
-           ORDER BY e.montant_capital DESC NULLS LAST, e.denomination
-           LIMIT 100""",
-        nom_for_sql, nom_for_sql_na, prenom_for_sql, prenom_for_sql_na, date_n,
-    ), default=[], timeout_s=8.0)
+    # 6. Mandats détaillés — silver only (no bronze).
+    # silver.inpi_dirigeants stocke déjà les arrays parallèles sirens_mandats /
+    # denominations / formes_juridiques / roles (1 row par dirigeant agrégé).
+    # On unzippe via generate_subscripts puis on enrichit chaque siren avec :
+    #   - silver.inpi_comptes : dernier capital_social connu (LATERAL DISTINCT
+    #     ON via ORDER BY date_cloture DESC).
+    #   - silver.insee_unites_legales : code_ape, date_creation,
+    #     etat_administratif (= actif si 'A').
+    # Source-of-truth pour la liste exhaustive des mandats sans dépendre de
+    # Neo4j (qui sous-représente à cause des md5 hash mismatches du bulk
+    # import — Vincent Lamour : 2/23 IS_DIRIGEANT relations).
+    sirens_mandats_self = list(inpi.get("sirens_mandats") or []) if inpi else []
+    mandats_detail: list = []
+    if sirens_mandats_self:
+        mandats_detail = await _safe(pool.fetch(
+            """WITH dirigeant AS (
+                  SELECT sirens_mandats, denominations, formes_juridiques, roles
+                  FROM silver.inpi_dirigeants
+                  WHERE nom IN ($1, $2)
+                    AND prenom IN ($3, $4)
+                    AND ($5::text IS NULL OR date_naissance LIKE $5 || '%')
+                  ORDER BY coalesce(n_mandats_total, n_mandats_actifs, 0) DESC
+                  LIMIT 1
+               )
+               SELECT
+                  d.sirens_mandats[i]     AS siren,
+                  d.denominations[i]      AS denomination,
+                  d.formes_juridiques[i]  AS forme_juridique,
+                  d.roles[i]              AS role,
+                  ic.capital_social       AS capital,
+                  ul.code_ape             AS code_ape,
+                  ul.date_creation        AS date_immatriculation,
+                  (ul.etat_administratif = 'A') AS actif
+               FROM dirigeant d
+               CROSS JOIN generate_subscripts(d.sirens_mandats, 1) AS i
+               LEFT JOIN LATERAL (
+                  SELECT capital_social
+                  FROM silver.inpi_comptes
+                  WHERE siren = d.sirens_mandats[i]
+                  ORDER BY date_cloture DESC NULLS LAST
+                  LIMIT 1
+               ) ic ON true
+               LEFT JOIN silver.insee_unites_legales ul
+                  ON ul.siren = d.sirens_mandats[i]
+               ORDER BY ic.capital_social DESC NULLS LAST, d.denominations[i]
+               LIMIT 100""",
+            nom_for_sql, nom_for_sql_na, prenom_for_sql, prenom_for_sql_na, date_n,
+        ), default=[], timeout_s=12.0)
 
-    # 7. Co-mandataires détaillés — toutes les personnes qui partagent au moins
-    # 1 société avec le dirigeant. Source bronze (vs Neo4j CO_MANDATE qui ne
-    # capture qu'un sous-ensemble — typiquement 1 / 20 pour ce dirigeant).
+    # 7. Co-mandataires détaillés — silver only.
+    # Reverse-lookup : trouver tous les autres dirigeants dont sirens_mandats
+    # intersecte celui de la cible. Index GIN sur silver.inpi_dirigeants.
+    # sirens_mandats requis pour la perf (déjà utilisé par d'autres queries du
+    # codebase : datalake.py:391, datalake.py:499).
     co_mandataires_detail: list = []
-    if mandats_detail:
-        self_sirens = list({m["siren"] for m in mandats_detail if m.get("siren")})
-        if self_sirens:
-            co_mandataires_detail = await _safe(pool.fetch(
-                """WITH self AS (
-                      SELECT unnest($1::text[]) AS siren
-                   ),
-                   shared AS (
-                      SELECT
-                          p.individu_nom AS nom,
-                          coalesce(p.individu_prenoms[1], '') AS prenom,
-                          coalesce(p.individu_date_naissance, '') AS date_naissance,
-                          p.siren
-                      FROM bronze.inpi_formalites_personnes p
-                      JOIN self s ON s.siren = p.siren
-                      WHERE p.type_de_personne = 'INDIVIDU'
-                        AND p.individu_nom IS NOT NULL
-                        -- Exclure le dirigeant lui-même
-                        AND NOT (
-                          p.individu_nom IN ($2, $3)
-                          AND ($4 = ANY(p.individu_prenoms) OR $5 = ANY(p.individu_prenoms))
-                        )
-                   )
-                   SELECT
-                      nom, prenom, date_naissance,
-                      count(DISTINCT siren)::int AS n_shared,
-                      array_agg(DISTINCT siren) AS via_sirens
-                   FROM shared
-                   GROUP BY nom, prenom, date_naissance
-                   ORDER BY n_shared DESC, nom
-                   LIMIT 20""",
-                self_sirens, nom_for_sql, nom_for_sql_na, prenom_for_sql, prenom_for_sql_na,
-            ), default=[], timeout_s=8.0)
+    if sirens_mandats_self:
+        co_mandataires_detail = await _safe(pool.fetch(
+            """SELECT
+                  d.nom, d.prenom, d.date_naissance,
+                  count(DISTINCT s.siren)::int AS n_shared,
+                  array_agg(DISTINCT s.siren) AS via_sirens
+               FROM silver.inpi_dirigeants d,
+                    unnest($1::char(9)[]) AS s(siren)
+               WHERE s.siren = ANY(d.sirens_mandats)
+                 AND NOT (d.nom IN ($2, $3) AND d.prenom IN ($4, $5))
+               GROUP BY d.nom, d.prenom, d.date_naissance
+               ORDER BY n_shared DESC, d.nom
+               LIMIT 20""",
+            sirens_mandats_self, nom_for_sql, nom_for_sql_na,
+            prenom_for_sql, prenom_for_sql_na,
+        ), default=[], timeout_s=12.0)
 
     # Merge Neo4j network data — flags compliance pré-agrégés sur le Person
     # node + top 10 co-mandataires + count red flags à 1 hop. Permet au LLM
@@ -1467,11 +1474,14 @@ async def _dirigeant_full(
         "sanctions": [_serialize(s) for s in sanctions],
         "dvf_zones": dvf_summary,
         "graph": graph_summary,
-        # Liste détaillée des mandats — source-of-truth bronze.inpi_formalites_*
-        # (Neo4j a souvent un sous-ensemble à cause de hash mismatch md5).
+        # Mandats détaillés — silver.inpi_dirigeants (arrays parallèles
+        # unzippés) + silver.inpi_comptes (capital) + silver.insee_unites_legales
+        # (code_ape / date_creation / actif). Listing exhaustif sans dépendre
+        # de Neo4j (md5 mismatch sous-représente).
         "mandats_detail": [_serialize(m) for m in mandats_detail],
-        # Co-mandataires détaillés depuis Postgres — listing ground-truth de
-        # toutes les personnes qui partagent au moins 1 société avec lui.
+        # Co-mandataires détaillés — reverse-lookup sur silver.inpi_dirigeants
+        # via intersection des sirens_mandats. Liste ground-truth des personnes
+        # qui partagent au moins 1 société avec le dirigeant.
         "co_mandataires_detail": [_serialize(c) for c in co_mandataires_detail],
     }
 
