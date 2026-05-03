@@ -109,6 +109,8 @@ markers = [
     "unit: fast tests, no IO",
     "integration: require docker-compose test stack",
     "slow: >1s per test",
+    "negative: tests assert error/rejection paths (4xx, exceptions)",
+    "property: Hypothesis property-based tests",
 ]
 filterwarnings = [
     "error",
