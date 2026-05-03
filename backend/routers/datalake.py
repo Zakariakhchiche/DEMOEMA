@@ -2904,6 +2904,7 @@ async def entreprise_search(
     es_extra: dict[str, dict] = {}
     comptes_extra: dict[str, dict] = {}
     scoring_extra: dict[str, dict] = {}
+    sci_extra: dict[str, dict] = {}
 
     if all_sirens:
         sirens_list = list(all_sirens)
@@ -2968,12 +2969,52 @@ async def entreprise_search(
             for r in rows_scoring:
                 scoring_extra[r["siren"]] = dict(r)
 
+        # 5) gold.sci_master — feature store SCI / holdings patrimoniales
+        # avec adresse_dept + ownership_type + scoring patrimoine + valuation.
+        # Comble les SCIs absentes de entreprises_signals/scoring_ma (filtres
+        # M&A excluent les patrimoniales sans CA).
+        if await _table_exists(pool, "gold", "sci_master"):
+            rows_sci = await _safe(pool.fetch(
+                """SELECT siren,
+                          denomination, forme_juridique, code_ape, sigle,
+                          adresse_code_postal, adresse_dept, adresse_voie,
+                          date_immatriculation, age_entreprise,
+                          capital_social, total_actif, immo_corporelles,
+                          capitaux_propres, emprunts_dettes,
+                          patrimoine_net_estime, ca_net, resultat_net,
+                          effectif_moyen, date_cloture_dernier_bilan,
+                          has_bilan_recent,
+                          n_dirigeants_individu, n_dirigeants_morale,
+                          ownership_type,
+                          dirigeants_individus_noms, dirigeants_individus_ages,
+                          age_dirigeant_max, has_dirigeant_senior,
+                          has_famille_unique, famille_dominante_nom,
+                          parent_sirens, parent_denominations,
+                          dvf_zone_n_transactions_5y, dvf_zone_prix_m2_median,
+                          dvf_zone_total_volume_eur,
+                          deal_score, tier,
+                          patrimoine_net_score, transmission_score,
+                          compliance_score, structure_score,
+                          liquidite_score, diversification_geo_score,
+                          valuation_estimee_eur,
+                          bodacc_n_events_24m, bodacc_has_cession_event,
+                          has_sanction, has_offshore_match, has_judilibre_decision,
+                          is_sci, is_holding_patrimoniale,
+                          data_quality_score
+                   FROM gold.sci_master
+                   WHERE siren = ANY($1::text[])""",
+                sirens_list,
+            ), default=[], timeout_s=4.0)
+            for r in rows_sci:
+                sci_extra[r["siren"]] = dict(r)
+
     def _enrich(r: dict, source: str) -> dict:
         siren = r.get("siren")
         ie = insee_extra.get(siren, {})
         es = es_extra.get(siren, {})
         ce = comptes_extra.get(siren, {})
         sc = scoring_extra.get(siren, {})
+        sci = sci_extra.get(siren, {})
         etat = r.get("etat_administratif") or ie.get("etat_administratif")
         return {
             "siren": siren,
@@ -2991,27 +3032,61 @@ async def entreprise_search(
                                 or ie.get("forme_juridique")),
             "etat_administratif": etat,
             "actif": etat == "A" if etat is not None else None,
-            "code_ape": (r.get("code_ape") or es.get("code_ape") or ie.get("code_ape")),
-            "naf": (r.get("code_ape") or es.get("code_ape") or ie.get("code_ape")),
+            "code_ape": (r.get("code_ape") or es.get("code_ape") or ie.get("code_ape")
+                         or sci.get("code_ape")),
+            "naf": (r.get("code_ape") or es.get("code_ape") or ie.get("code_ape")
+                    or sci.get("code_ape")),
             "tranche_effectifs": ie.get("tranche_effectifs"),
-            # Adresse — entreprises_signals
-            "adresse_code_postal": es.get("adresse_code_postal"),
+            # Adresse — entreprises_signals + fallback gold.sci_master
+            "adresse_code_postal": (es.get("adresse_code_postal")
+                                    or sci.get("adresse_code_postal")),
             "ville": es.get("ville"),
-            "dept": es.get("dept"),
-            "date_immatriculation": es.get("date_immatriculation"),
-            "date_creation": es.get("date_immatriculation") or ie.get("date_creation"),
-            # Scoring M&A — gold.scoring_ma
-            "score_ma": sc.get("score_ma"),
-            "tier": sc.get("tier"),
+            "dept": (es.get("dept") or sci.get("adresse_dept")),
+            "date_immatriculation": (es.get("date_immatriculation")
+                                     or sci.get("date_immatriculation")),
+            "date_creation": (es.get("date_immatriculation") or ie.get("date_creation")
+                              or sci.get("date_immatriculation")),
+            # Scoring M&A — gold.scoring_ma (entreprises classiques)
+            #            ou gold.sci_master.deal_score (SCIs/holdings patrimoniales)
+            "score_ma": sc.get("score_ma") or sci.get("deal_score"),
+            "tier": sc.get("tier") or sci.get("tier"),
             "deal_percentile": sc.get("deal_percentile"),
-            "transmission_score": sc.get("transmission_score"),
+            "transmission_score": sc.get("transmission_score") or sci.get("transmission_score"),
             "attractivity_score": sc.get("attractivity_score"),
             "scale_score": sc.get("scale_score"),
-            "structure_score": sc.get("structure_score"),
+            "structure_score": sc.get("structure_score") or sci.get("structure_score"),
             "risk_multiplier": sc.get("risk_multiplier"),
-            "ev_estimated_eur": sc.get("ev_estimated_eur"),
-            # Provenance
-            "source": source,
+            "ev_estimated_eur": sc.get("ev_estimated_eur") or sci.get("valuation_estimee_eur"),
+            # ⭐ Bloc SCI / patrimoine — uniquement si la siren matche gold.sci_master
+            "is_sci": sci.get("is_sci"),
+            "is_holding_patrimoniale": sci.get("is_holding_patrimoniale"),
+            "patrimoine_net_estime": sci.get("patrimoine_net_estime"),
+            "total_actif": sci.get("total_actif") or ce.get("ca_dernier"),  # fallback inpi_comptes
+            "immo_corporelles": sci.get("immo_corporelles"),
+            "ownership_type": sci.get("ownership_type"),
+            "n_dirigeants_individu": sci.get("n_dirigeants_individu"),
+            "n_dirigeants_morale": sci.get("n_dirigeants_morale"),
+            "dirigeants_individus_noms": sci.get("dirigeants_individus_noms"),
+            "dirigeants_individus_ages": sci.get("dirigeants_individus_ages"),
+            "has_famille_unique": sci.get("has_famille_unique"),
+            "famille_dominante_nom": sci.get("famille_dominante_nom"),
+            "parent_sirens": sci.get("parent_sirens"),
+            "parent_denominations": sci.get("parent_denominations"),
+            "dvf_zone_n_transactions_5y": sci.get("dvf_zone_n_transactions_5y"),
+            "dvf_zone_prix_m2_median": sci.get("dvf_zone_prix_m2_median"),
+            "dvf_zone_total_volume_eur": sci.get("dvf_zone_total_volume_eur"),
+            "valuation_estimee_eur": sci.get("valuation_estimee_eur"),
+            "patrimoine_net_score": sci.get("patrimoine_net_score"),
+            "compliance_score": sci.get("compliance_score"),
+            "liquidite_score": sci.get("liquidite_score"),
+            "diversification_geo_score": sci.get("diversification_geo_score"),
+            "bodacc_n_events_24m": sci.get("bodacc_n_events_24m"),
+            "bodacc_has_cession_event": sci.get("bodacc_has_cession_event"),
+            "has_sanction": sci.get("has_sanction"),
+            "has_offshore_match": sci.get("has_offshore_match"),
+            "data_quality_score": sci.get("data_quality_score"),
+            # Provenance — préfère sci_master pour les SCIs
+            "source": "gold.sci_master" if siren in sci_extra else source,
         }
 
     results = [_enrich(_serialize(r), "inpi_comptes") for r in rows_inpi]
