@@ -97,7 +97,10 @@ dirigeants_aggr AS (
         min(d.age_2026) AS age_dirigeant_min,
         bool_or(d.age_2026 >= 60) AS has_dirigeant_senior,
         bool_or(d.age_2026 < 18) AS has_minor_dirigeant,
-        bool_or(d.age_2026 < 45 AND d.nom = mode() WITHIN GROUP (ORDER BY d.nom) OVER (PARTITION BY sb.siren)) AS has_successeur,
+        -- has_successeur : proxy "présence d'un dirigeant < 45 ans" (transmission).
+        -- On ne peut pas combiner mode() WITHIN GROUP avec OVER (PARTITION) en
+        -- Postgres ; le proxy plus simple est suffisant pour l'usage M&A.
+        bool_or(d.age_2026 < 45) AS has_successeur,
         count(DISTINCT d.nom) AS n_distinct_noms_famille
     FROM sci_base sb
     JOIN silver.inpi_dirigeants d ON sb.siren::char(9) = ANY(d.sirens_mandats)
