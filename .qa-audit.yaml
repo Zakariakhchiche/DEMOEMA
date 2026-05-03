@@ -1,0 +1,36 @@
+# Config QA Audit pour DEMOEMA — chargée par skill ~/.claude/skills/qa-audit/
+# Override les defaults + active le preset opt-in `demoema.yaml`.
+
+project_slug: demoema
+target_level: L4
+
+# Active le preset DEMOEMA-specific (pièges projet, sources data, endpoints)
+preset_overrides:
+  - demoema
+
+stack:
+  backend: fastapi
+  frontend: nextjs
+  database: postgres
+  llm: deepseek
+
+endpoints:
+  health: /api/health
+  openapi: /openapi.json  # 404 prod intentionnel sécurité
+  fallback_openapi: backend/openapi.yaml
+  copilot_redteam: /api/copilot/redteam
+  copilot_stream: /api/copilot/stream
+  base_url: https://82-165-57-191.sslip.io
+
+paths:
+  backend_tests: backend/tests
+  frontend_tests: frontend/__tests__
+  e2e_tests: frontend/tests/e2e
+  soda_checks: qa/soda/checks
+  baseline_pool: audit_data/qa_baseline_pool.yaml
+
+qcs_thresholds:
+  L2: 55
+  L3: 80
+  L4: 90
+  L5: 95
