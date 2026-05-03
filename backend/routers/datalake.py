@@ -2889,36 +2889,128 @@ async def entreprise_search(
             pattern, remaining, list(seen_sirens) if seen_sirens else [""],
         ), default=[], timeout_s=10.0)
 
-    # Enrichir étapes 1 + 3 avec INSEE (forme/etat/code_ape) en un seul
-    # aller-retour. Les sirens issus de inpi_dirigeants (étape 3) bénéficient
-    # aussi de l'enrichissement INSEE quand la row existe.
-    sirens_to_enrich = found_sirens | {r["siren"] for r in rows_inpi_dirig if r.get("siren")}
+    # Enrichissement post-collection : pour CHAQUE siren matché (toute source
+    # confondue), JOIN les tables silver / gold pour donner à TargetCard de
+    # quoi afficher CA / EBITDA / NAF / dept / effectif / forme / ville /
+    # score_ma. Sans cet enrichissement, les cards rendues dans le chat ont
+    # CA "—", EBITDA "—", NAF "—", Dept "—" (rapport user 2026-05-03).
+    all_sirens = (
+        {r["siren"] for r in rows_inpi if r.get("siren")}
+        | {r["siren"] for r in rows_insee if r.get("siren")}
+        | {r["siren"] for r in rows_inpi_dirig if r.get("siren")}
+    )
+
     insee_extra: dict[str, dict] = {}
-    if sirens_to_enrich:
-        rows_extra = await _safe(pool.fetch(
+    es_extra: dict[str, dict] = {}
+    comptes_extra: dict[str, dict] = {}
+    scoring_extra: dict[str, dict] = {}
+
+    if all_sirens:
+        sirens_list = list(all_sirens)
+        # 1) INSEE — denomination canonique + forme + etat + code_ape +
+        # tranche_effectifs + date_creation.
+        rows_insee_full = await _safe(pool.fetch(
             """SELECT siren, denomination_unite,
                       categorie_juridique AS forme_juridique,
-                      etat_administratif, code_ape
+                      etat_administratif, code_ape,
+                      tranche_effectifs, date_creation
                FROM silver.insee_unites_legales
                WHERE siren = ANY($1::text[])""",
-            list(sirens_to_enrich),
+            sirens_list,
         ), default=[], timeout_s=4.0)
-        for r in rows_extra:
+        for r in rows_insee_full:
             insee_extra[r["siren"]] = dict(r)
+
+        # 2) silver.entreprises_signals — code_ape (override INSEE) + forme +
+        # adresse complète + date_immatriculation. Source la plus complète.
+        if await _table_exists(pool, "silver", "entreprises_signals"):
+            rows_es = await _safe(pool.fetch(
+                """SELECT siren, code_ape, forme_juridique,
+                          adresse_code_postal,
+                          adresse_commune AS ville,
+                          COALESCE(adresse_dept, LEFT(adresse_code_postal, 2)) AS dept,
+                          date_immatriculation
+                   FROM silver.entreprises_signals
+                   WHERE siren = ANY($1::text[])""",
+                sirens_list,
+            ), default=[], timeout_s=4.0)
+            for r in rows_es:
+                es_extra[r["siren"]] = dict(r)
+
+        # 3) silver.inpi_comptes derniers dépôts — CA, EBITDA proxy
+        # (resultat_net), capitaux propres, effectif moyen, capital social.
+        rows_comptes = await _safe(pool.fetch(
+            """SELECT DISTINCT ON (siren)
+                  siren, ca_net AS ca_dernier, resultat_net AS ebitda_dernier,
+                  capitaux_propres, effectif_moyen, capital_social,
+                  date_cloture
+               FROM silver.inpi_comptes
+               WHERE siren = ANY($1::text[])
+               ORDER BY siren, date_cloture DESC NULLS LAST""",
+            sirens_list,
+        ), default=[], timeout_s=4.0)
+        for r in rows_comptes:
+            comptes_extra[r["siren"]] = dict(r)
+
+        # 4) gold.scoring_ma si dispo (score M&A, tier, axes v3, EV).
+        if await _table_exists(pool, "gold", "scoring_ma"):
+            rows_scoring = await _safe(pool.fetch(
+                """SELECT siren,
+                          COALESCE(deal_score_raw, score_total) AS score_ma,
+                          tier, deal_percentile,
+                          transmission_score, attractivity_score,
+                          scale_score, structure_score,
+                          risk_multiplier, ev_estimated_eur
+                   FROM gold.scoring_ma
+                   WHERE siren = ANY($1::text[])""",
+                sirens_list,
+            ), default=[], timeout_s=4.0)
+            for r in rows_scoring:
+                scoring_extra[r["siren"]] = dict(r)
 
     def _enrich(r: dict, source: str) -> dict:
         siren = r.get("siren")
-        extra = insee_extra.get(siren, {})
+        ie = insee_extra.get(siren, {})
+        es = es_extra.get(siren, {})
+        ce = comptes_extra.get(siren, {})
+        sc = scoring_extra.get(siren, {})
+        etat = r.get("etat_administratif") or ie.get("etat_administratif")
         return {
             "siren": siren,
-            "denomination": r.get("denomination") or extra.get("denomination_unite"),
-            "ca_dernier": r.get("ca_dernier"),
-            "date_cloture": r.get("date_cloture"),
-            "forme_juridique": r.get("forme_juridique") or extra.get("forme_juridique"),
-            "etat_administratif": r.get("etat_administratif") or extra.get("etat_administratif"),
-            "code_ape": r.get("code_ape") or extra.get("code_ape"),
-            "actif": (r.get("etat_administratif") or extra.get("etat_administratif")) == "A"
-                if (r.get("etat_administratif") or extra.get("etat_administratif")) is not None else None,
+            "denomination": r.get("denomination") or ie.get("denomination_unite"),
+            # Financier — silver.inpi_comptes
+            "ca_dernier": r.get("ca_dernier") or ce.get("ca_dernier"),
+            "ebitda_dernier": ce.get("ebitda_dernier"),
+            "capitaux_propres": ce.get("capitaux_propres"),
+            "capital_social": ce.get("capital_social"),
+            "effectif_moyen": ce.get("effectif_moyen"),
+            "effectif_exact": ce.get("effectif_moyen"),
+            "date_cloture": r.get("date_cloture") or ce.get("date_cloture"),
+            # Identité — INSEE / entreprises_signals
+            "forme_juridique": (r.get("forme_juridique") or es.get("forme_juridique")
+                                or ie.get("forme_juridique")),
+            "etat_administratif": etat,
+            "actif": etat == "A" if etat is not None else None,
+            "code_ape": (r.get("code_ape") or es.get("code_ape") or ie.get("code_ape")),
+            "naf": (r.get("code_ape") or es.get("code_ape") or ie.get("code_ape")),
+            "tranche_effectifs": ie.get("tranche_effectifs"),
+            # Adresse — entreprises_signals
+            "adresse_code_postal": es.get("adresse_code_postal"),
+            "ville": es.get("ville"),
+            "dept": es.get("dept"),
+            "date_immatriculation": es.get("date_immatriculation"),
+            "date_creation": es.get("date_immatriculation") or ie.get("date_creation"),
+            # Scoring M&A — gold.scoring_ma
+            "score_ma": sc.get("score_ma"),
+            "tier": sc.get("tier"),
+            "deal_percentile": sc.get("deal_percentile"),
+            "transmission_score": sc.get("transmission_score"),
+            "attractivity_score": sc.get("attractivity_score"),
+            "scale_score": sc.get("scale_score"),
+            "structure_score": sc.get("structure_score"),
+            "risk_multiplier": sc.get("risk_multiplier"),
+            "ev_estimated_eur": sc.get("ev_estimated_eur"),
+            # Provenance
             "source": source,
         }
 
