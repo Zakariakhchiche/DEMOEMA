@@ -1382,6 +1382,71 @@ async def _dirigeant_full(
                 "by_cp": [_serialize(r) for r in dvf_rows],
             }
 
+    # 6. Mandats détaillés — JOIN bronze.inpi_formalites_personnes ⨝ entreprises
+    # pour avoir la liste COMPLÈTE des sociétés où ce dirigeant siège (1 row par
+    # mandat). Ne dépend ni de silver.inpi_dirigeants (qui agrège seulement les
+    # arrays sans détail) ni de Neo4j (qui n'a que 2/23 sirens à cause des hash
+    # md5 mismatch lors du bulk import). Source-of-truth = bronze + entreprises.
+    mandats_detail = await _safe(pool.fetch(
+        """SELECT
+              p.siren,
+              e.denomination,
+              e.forme_juridique,
+              e.code_ape,
+              e.montant_capital AS capital,
+              e.adresse_code_postal AS code_postal,
+              e.date_immatriculation,
+              p.individu_role AS role,
+              p.actif
+           FROM bronze.inpi_formalites_personnes p
+           LEFT JOIN bronze.inpi_formalites_entreprises e ON e.siren = p.siren
+           WHERE p.type_de_personne = 'INDIVIDU'
+             AND p.individu_nom IN ($1, $2)
+             AND ($3 = ANY(p.individu_prenoms) OR $4 = ANY(p.individu_prenoms))
+             AND ($5::text IS NULL OR p.individu_date_naissance LIKE $5 || '%')
+           ORDER BY e.montant_capital DESC NULLS LAST, e.denomination
+           LIMIT 100""",
+        nom_for_sql, nom_for_sql_na, prenom_for_sql, prenom_for_sql_na, date_n,
+    ), default=[], timeout_s=8.0)
+
+    # 7. Co-mandataires détaillés — toutes les personnes qui partagent au moins
+    # 1 société avec le dirigeant. Source bronze (vs Neo4j CO_MANDATE qui ne
+    # capture qu'un sous-ensemble — typiquement 1 / 20 pour ce dirigeant).
+    co_mandataires_detail: list = []
+    if mandats_detail:
+        self_sirens = list({m["siren"] for m in mandats_detail if m.get("siren")})
+        if self_sirens:
+            co_mandataires_detail = await _safe(pool.fetch(
+                """WITH self AS (
+                      SELECT unnest($1::text[]) AS siren
+                   ),
+                   shared AS (
+                      SELECT
+                          p.individu_nom AS nom,
+                          coalesce(p.individu_prenoms[1], '') AS prenom,
+                          coalesce(p.individu_date_naissance, '') AS date_naissance,
+                          p.siren
+                      FROM bronze.inpi_formalites_personnes p
+                      JOIN self s ON s.siren = p.siren
+                      WHERE p.type_de_personne = 'INDIVIDU'
+                        AND p.individu_nom IS NOT NULL
+                        -- Exclure le dirigeant lui-même
+                        AND NOT (
+                          p.individu_nom IN ($2, $3)
+                          AND ($4 = ANY(p.individu_prenoms) OR $5 = ANY(p.individu_prenoms))
+                        )
+                   )
+                   SELECT
+                      nom, prenom, date_naissance,
+                      count(DISTINCT siren)::int AS n_shared,
+                      array_agg(DISTINCT siren) AS via_sirens
+                   FROM shared
+                   GROUP BY nom, prenom, date_naissance
+                   ORDER BY n_shared DESC, nom
+                   LIMIT 20""",
+                self_sirens, nom_for_sql, nom_for_sql_na, prenom_for_sql, prenom_for_sql_na,
+            ), default=[], timeout_s=8.0)
+
     # Merge Neo4j network data — flags compliance pré-agrégés sur le Person
     # node + top 10 co-mandataires + count red flags à 1 hop. Permet au LLM
     # de répondre "liste les associés de X" et "qui dans son entourage a un
@@ -1402,6 +1467,12 @@ async def _dirigeant_full(
         "sanctions": [_serialize(s) for s in sanctions],
         "dvf_zones": dvf_summary,
         "graph": graph_summary,
+        # Liste détaillée des mandats — source-of-truth bronze.inpi_formalites_*
+        # (Neo4j a souvent un sous-ensemble à cause de hash mismatch md5).
+        "mandats_detail": [_serialize(m) for m in mandats_detail],
+        # Co-mandataires détaillés depuis Postgres — listing ground-truth de
+        # toutes les personnes qui partagent au moins 1 société avec lui.
+        "co_mandataires_detail": [_serialize(c) for c in co_mandataires_detail],
     }
 
 
