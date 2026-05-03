@@ -147,6 +147,11 @@ export function PersonSheet({ person, onClose }: Props) {
             nom={nom}
             prenom={prenom}
             fullName={person.nom || `${prenom} ${nom}`.trim()}
+            mandatsDetail={data?.mandats_detail as Parameters<typeof PersonGraphSection>[0]["mandatsDetail"]}
+            coMandatairesDetail={data?.co_mandataires_detail as Parameters<typeof PersonGraphSection>[0]["coMandatairesDetail"]}
+            nMandatsActifsPg={(data?.identity as { n_mandats_actifs?: number | null } | null)?.n_mandats_actifs ?? null}
+            nSciPg={(data?.sci_patrimoine as { n_sci?: number | null } | null)?.n_sci ?? null}
+            totalCapitalSciPg={(data?.sci_patrimoine as { total_capital_sci?: number | null } | null)?.total_capital_sci ?? null}
           />
         </div>
       </div>

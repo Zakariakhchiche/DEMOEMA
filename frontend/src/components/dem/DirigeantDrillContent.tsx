@@ -13,6 +13,8 @@ export interface DirigeantFullData {
   dvf_zones: Record<string, unknown> | null;
   // Bloc Neo4j (PR #94) — fallback quand silver vide pour SCI/OSINT/Wikidata.
   graph?: Record<string, unknown> | null;
+  // Liste détaillée des mandats (1 row par société). Source : bronze.inpi_*.
+  mandats_detail?: Record<string, unknown>[];
 }
 
 export function DirigeantDrillContent({ data }: { data: Record<string, unknown> | DirigeantFullData }) {
