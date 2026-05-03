@@ -2968,38 +2968,81 @@ async def entreprise_search(
             for r in rows_scoring:
                 scoring_extra[r["siren"]] = dict(r)
 
+    # 5) Last-resort bronze.inpi_formalites_entreprises — pour les SCIs / SAS
+    # patrimoniales que ni silver.entreprises_signals (411k rows, certaines
+    # SCIs absentes) ni silver.insee_unites_legales (rows présentes mais
+    # colonnes NULL pour les sirens récents non re-bootstrapés) ne couvrent.
+    # Source vérifiée 2026-05-03 sur prod : bronze a denomination + forme_juridique
+    # + code_ape complets pour ATRIUM PATRIMOINE 897992525 / 485176408 /
+    # KL INVESTISSEMENTS 529334302 alors que silver renvoie tout NULL.
+    # On lit en bronze UNIQUEMENT pour les sirens où silver ne sait pas
+    # répondre (forme_juridique ET code_ape NULL des 2 sources silver).
+    bronze_extra: dict[str, dict] = {}
+    if all_sirens:
+        sirens_silver_empty = [
+            s for s in all_sirens
+            if not (
+                (insee_extra.get(s, {}).get("code_ape"))
+                or (es_extra.get(s, {}).get("code_ape"))
+                or (insee_extra.get(s, {}).get("forme_juridique"))
+                or (es_extra.get(s, {}).get("forme_juridique"))
+            )
+        ]
+        if sirens_silver_empty and await _table_exists(pool, "bronze", "inpi_formalites_entreprises"):
+            rows_bronze = await _safe(pool.fetch(
+                """SELECT siren, denomination, forme_juridique, code_ape,
+                          adresse_code_postal,
+                          date_immatriculation,
+                          montant_capital
+                   FROM bronze.inpi_formalites_entreprises
+                   WHERE siren = ANY($1::text[])""",
+                sirens_silver_empty,
+            ), default=[], timeout_s=4.0)
+            for r in rows_bronze:
+                bronze_extra[r["siren"]] = dict(r)
+
     def _enrich(r: dict, source: str) -> dict:
         siren = r.get("siren")
         ie = insee_extra.get(siren, {})
         es = es_extra.get(siren, {})
         ce = comptes_extra.get(siren, {})
         sc = scoring_extra.get(siren, {})
+        bz = bronze_extra.get(siren, {})
         etat = r.get("etat_administratif") or ie.get("etat_administratif")
         return {
             "siren": siren,
-            "denomination": r.get("denomination") or ie.get("denomination_unite"),
-            # Financier — silver.inpi_comptes
+            "denomination": (r.get("denomination") or ie.get("denomination_unite")
+                             or bz.get("denomination")),
+            # Financier — silver.inpi_comptes (bronze a montant_capital fallback)
             "ca_dernier": r.get("ca_dernier") or ce.get("ca_dernier"),
             "ebitda_dernier": ce.get("ebitda_dernier"),
             "capitaux_propres": ce.get("capitaux_propres"),
-            "capital_social": ce.get("capital_social"),
+            "capital_social": ce.get("capital_social") or bz.get("montant_capital"),
             "effectif_moyen": ce.get("effectif_moyen"),
             "effectif_exact": ce.get("effectif_moyen"),
             "date_cloture": r.get("date_cloture") or ce.get("date_cloture"),
-            # Identité — INSEE / entreprises_signals
+            # Identité — INSEE / entreprises_signals / fallback bronze
             "forme_juridique": (r.get("forme_juridique") or es.get("forme_juridique")
-                                or ie.get("forme_juridique")),
+                                or ie.get("forme_juridique") or bz.get("forme_juridique")),
             "etat_administratif": etat,
             "actif": etat == "A" if etat is not None else None,
-            "code_ape": (r.get("code_ape") or es.get("code_ape") or ie.get("code_ape")),
-            "naf": (r.get("code_ape") or es.get("code_ape") or ie.get("code_ape")),
+            "code_ape": (r.get("code_ape") or es.get("code_ape")
+                         or ie.get("code_ape") or bz.get("code_ape")),
+            "naf": (r.get("code_ape") or es.get("code_ape")
+                    or ie.get("code_ape") or bz.get("code_ape")),
             "tranche_effectifs": ie.get("tranche_effectifs"),
-            # Adresse — entreprises_signals
-            "adresse_code_postal": es.get("adresse_code_postal"),
+            # Adresse — entreprises_signals / fallback bronze
+            "adresse_code_postal": (es.get("adresse_code_postal")
+                                    or bz.get("adresse_code_postal")),
             "ville": es.get("ville"),
-            "dept": es.get("dept"),
-            "date_immatriculation": es.get("date_immatriculation"),
-            "date_creation": es.get("date_immatriculation") or ie.get("date_creation"),
+            "dept": (es.get("dept")
+                     or (bz.get("adresse_code_postal")[:2]
+                         if bz.get("adresse_code_postal") else None)),
+            "date_immatriculation": (es.get("date_immatriculation")
+                                     or bz.get("date_immatriculation")),
+            "date_creation": (es.get("date_immatriculation")
+                              or ie.get("date_creation")
+                              or bz.get("date_immatriculation")),
             # Scoring M&A — gold.scoring_ma
             "score_ma": sc.get("score_ma"),
             "tier": sc.get("tier"),
