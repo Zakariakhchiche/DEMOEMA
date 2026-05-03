@@ -3029,7 +3029,7 @@ async def entreprise_search(
             "date_cloture": r.get("date_cloture") or ce.get("date_cloture"),
             # Identité — INSEE / entreprises_signals
             "forme_juridique": (r.get("forme_juridique") or es.get("forme_juridique")
-                                or ie.get("forme_juridique")),
+                                or ie.get("forme_juridique") or sci.get("forme_juridique")),
             "etat_administratif": etat,
             "actif": etat == "A" if etat is not None else None,
             "code_ape": (r.get("code_ape") or es.get("code_ape") or ie.get("code_ape")
