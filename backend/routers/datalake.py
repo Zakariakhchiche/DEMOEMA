@@ -2974,6 +2974,11 @@ async def entreprise_search(
         # Comble les SCIs absentes de entreprises_signals/scoring_ma (filtres
         # M&A excluent les patrimoniales sans CA).
         if await _table_exists(pool, "gold", "sci_master"):
+            # Schema gold.sci_master V2 (sans dirigeants_individus_noms,
+            # age_dirigeant_max, has_famille_unique, dvf_zone_* — ces enrichissements
+            # ont été retirés de silver.sci_master pour permettre une matérialisation
+            # rapide en 1 min au lieu de 1h+. À ré-ajouter en V3 via JOINs séparés
+            # ou pré-aggregation silver.dvf_zone_summary.
             rows_sci = await _safe(pool.fetch(
                 """SELECT siren,
                           denomination, forme_juridique, code_ape, sigle,
@@ -2986,12 +2991,7 @@ async def entreprise_search(
                           has_bilan_recent,
                           n_dirigeants_individu, n_dirigeants_morale,
                           ownership_type,
-                          dirigeants_individus_noms, dirigeants_individus_ages,
-                          age_dirigeant_max, has_dirigeant_senior,
-                          has_famille_unique, famille_dominante_nom,
                           parent_sirens, parent_denominations,
-                          dvf_zone_n_transactions_5y, dvf_zone_prix_m2_median,
-                          dvf_zone_total_volume_eur,
                           deal_score, tier,
                           patrimoine_net_score, transmission_score,
                           compliance_score, structure_score,
