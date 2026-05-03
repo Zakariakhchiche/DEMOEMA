@@ -112,7 +112,7 @@ export function PersonGraphSection({
   // On reste bloquant uniquement si Neo4j ET Postgres sont absents.
   if (loading && !hasMandatsPg) {
     return (
-      <Section title="Réseau · INPI bronze (graphe complet)">
+      <Section title="Réseau · INPI silver (source-of-truth)">
         <div style={{ color: "var(--text-tertiary)", fontSize: 13 }}>
           Chargement du graphe…
         </div>
@@ -122,7 +122,7 @@ export function PersonGraphSection({
   if (!graph && !hasMandatsPg) {
     if (error) {
       return (
-        <Section title="Réseau · INPI bronze (graphe complet)">
+        <Section title="Réseau · INPI silver (source-of-truth)">
           <div style={{ color: "var(--text-tertiary)", fontSize: 12.5 }}>
             <Icon name="warning" size={12} /> Pas de match dans le graphe pour ce dirigeant.
             <span style={{ marginLeft: 8, color: "var(--text-muted)", fontSize: 11.5 }}>
@@ -158,7 +158,7 @@ export function PersonGraphSection({
 
   return (
     <>
-      <Section title="Réseau · INPI bronze (source-of-truth) + Neo4j (viz)">
+      <Section title="Réseau · INPI silver (source-of-truth) + Neo4j (viz)">
       {/* CTA visualisation graphe */}
       {canOpenGraph && (
         <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
@@ -323,7 +323,7 @@ export function PersonGraphSection({
             fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase",
             letterSpacing: "0.06em", fontWeight: 600, marginBottom: 8,
           }}>
-            Companies ({mandatsDetail!.length} mandats · INPI bronze)
+            Companies ({mandatsDetail!.length} mandats · INPI silver)
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             {mandatsDetail!.slice(0, 30).map((c, i) => {
@@ -358,10 +358,12 @@ export function PersonGraphSection({
                     {c.role ?? ""}
                   </span>
                   <span style={{
-                    color: c.actif ? "var(--accent-teal)" : "var(--text-muted)",
+                    color: c.actif === true ? "var(--accent-teal)"
+                      : c.actif === false ? "var(--text-muted)"
+                      : "transparent",
                     fontSize: 11, fontWeight: 600,
                   }}>
-                    {c.actif ? "actif" : "fermé"}
+                    {c.actif === true ? "actif" : c.actif === false ? "fermé" : "—"}
                   </span>
                 </div>
               );
