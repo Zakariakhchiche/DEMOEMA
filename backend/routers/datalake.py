@@ -2767,6 +2767,115 @@ async def press_recent(
         return {"articles": [], "notice": f"erreur silver.press_mentions_matched: {type(e).__name__}"}
 
 
+@router.get("/entreprise/search")
+async def entreprise_search(
+    req: Request,
+    q: str | None = None,
+    limit: int = Query(10, ge=1, le=30),
+):
+    """Recherche large d'entreprise par dénomination — sans floor CA, couvre
+    SCIs / holdings patrimoniales / structures non-cotées que /cibles filtre
+    (M&A-only).
+
+    Sources interrogées en cascade :
+      1. `silver.inpi_comptes` (denomination ILIKE) — entreprises avec dépôts
+         de comptes annuels INPI. Couvre la plupart des structures actives.
+      2. `silver.insee_unites_legales` (denomination_unite ILIKE) — fallback
+         pour les entités sans dépôts comptes (typique SCIs patrimoniales).
+
+    Retourne 1 row par siren avec siren + denomination + dernier ca_net si
+    dispo + forme_juridique INSEE + etat_administratif. Frontend / LLM peut
+    ensuite appeler get_fiche_entreprise/{siren} pour le détail.
+    """
+    if not q or len(q.strip()) < 2:
+        raise HTTPException(status_code=400, detail="q (>= 2 chars) requis")
+    q_clean = q.strip()
+    pattern = f"%{q_clean}%"
+    pool = _pool(req)
+
+    # Étape 1 : silver.inpi_comptes — DISTINCT ON (siren) sur date_cloture DESC
+    # pour récupérer le dernier dépôt connu par siren. Index trigram sur
+    # denomination requis pour la perf ILIKE (sinon seq scan 6M rows).
+    rows_inpi = await _safe(pool.fetch(
+        """SELECT DISTINCT ON (siren)
+              siren, denomination,
+              ca_net AS ca_dernier,
+              date_cloture
+           FROM silver.inpi_comptes
+           WHERE denomination ILIKE $1
+           ORDER BY siren, date_cloture DESC NULLS LAST
+           LIMIT $2""",
+        pattern, limit,
+    ), default=[], timeout_s=8.0)
+
+    found_sirens = {r["siren"] for r in rows_inpi if r.get("siren")}
+
+    # Étape 2 : silver.insee_unites_legales — couvre les structures sans
+    # comptes INPI (SCIs patrimoniales typiques). Exclut les sirens déjà
+    # remontés en étape 1.
+    if len(rows_inpi) < limit:
+        remaining = limit - len(rows_inpi)
+        if found_sirens:
+            params = [pattern, list(found_sirens), remaining]
+            extra_where = "AND siren <> ALL($2::text[])"
+            params_idx_limit = "$3"
+        else:
+            params = [pattern, remaining]
+            extra_where = ""
+            params_idx_limit = "$2"
+        rows_insee = await _safe(pool.fetch(
+            f"""SELECT
+                   siren,
+                   denomination_unite AS denomination,
+                   NULL::numeric AS ca_dernier,
+                   NULL::date AS date_cloture,
+                   categorie_juridique AS forme_juridique,
+                   etat_administratif,
+                   code_ape
+                FROM silver.insee_unites_legales
+                WHERE denomination_unite ILIKE $1
+                  {extra_where}
+                ORDER BY siren
+                LIMIT {params_idx_limit}""",
+            *params,
+        ), default=[], timeout_s=8.0)
+    else:
+        rows_insee = []
+
+    # Enrichir étape 1 avec INSEE (forme/etat/code_ape) en un seul aller-retour.
+    insee_extra: dict[str, dict] = {}
+    if found_sirens:
+        rows_extra = await _safe(pool.fetch(
+            """SELECT siren, categorie_juridique AS forme_juridique,
+                      etat_administratif, code_ape
+               FROM silver.insee_unites_legales
+               WHERE siren = ANY($1::text[])""",
+            list(found_sirens),
+        ), default=[], timeout_s=4.0)
+        for r in rows_extra:
+            insee_extra[r["siren"]] = dict(r)
+
+    def _enrich(r: dict) -> dict:
+        siren = r.get("siren")
+        extra = insee_extra.get(siren, {})
+        return {
+            "siren": siren,
+            "denomination": r.get("denomination"),
+            "ca_dernier": r.get("ca_dernier"),
+            "date_cloture": r.get("date_cloture"),
+            "forme_juridique": r.get("forme_juridique") or extra.get("forme_juridique"),
+            "etat_administratif": r.get("etat_administratif") or extra.get("etat_administratif"),
+            "code_ape": r.get("code_ape") or extra.get("code_ape"),
+            "actif": (r.get("etat_administratif") or extra.get("etat_administratif")) == "A"
+                if (r.get("etat_administratif") or extra.get("etat_administratif")) is not None else None,
+            "source": "inpi_comptes" if siren in found_sirens else "insee_unites_legales",
+        }
+
+    results = [_enrich(_serialize(r)) for r in rows_inpi]
+    results.extend(_enrich(_serialize(r)) for r in rows_insee)
+    return {"q": q_clean, "n": len(results), "results": results}
+
+
 @router.get("/cibles")
 async def cibles_search(
     req: Request,

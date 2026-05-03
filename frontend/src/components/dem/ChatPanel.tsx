@@ -12,7 +12,7 @@ import { UserMessage, AiMessage } from "./ChatBubbles";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { formatSiren } from "@/lib/dem/format";
 import { SUGGESTIONS_INITIAL } from "@/lib/dem/data";
-import { fetchTargets, fetchPersons, extractDirigeantsFromText, extractFocusPersonFromQuery } from "@/lib/dem/adapter";
+import { fetchTargets, fetchPersons, extractDirigeantsFromText, extractFocusPersonFromQuery, extractFocusEntrepriseFromQuery, searchEntrepriseByName } from "@/lib/dem/adapter";
 import { streamCopilot } from "@/lib/api";
 import type { ChatMsg, AiMessageData, Target, Density, Person } from "@/lib/dem/types";
 
@@ -369,6 +369,13 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
         }
       : null;
 
+    // Focus entreprise — détectée si la query ressemble à un nom de société
+    // (tokens corporate type PATRIMOINE/CAPITAL/HOLDING/SCI, ou intent
+    // "qui est <NOM>" sans pattern personne valide). Évite la régression
+    // observée 2026-05-03 où "qui est ATRIUM PATRIMOINE" rendait des
+    // PersonCard random au lieu d'une fiche entreprise.
+    const focusEntrepriseRaw = !focusPerson ? extractFocusEntrepriseFromQuery(text) : null;
+
     // Heuristique sourcing : on ne déclenche fetchTargets QUE si la query
     // ressemble à un sourcing M&A (mots-clés cibles/trouve/liste/recherche/secteur/dept).
     // Évite le bug "5 mêmes cards reviennent pour tout" car fetchTargets
@@ -416,6 +423,14 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
       }
     }
 
+    // Si focus entreprise détecté, on fetch la fiche light en parallèle du
+    // stream LLM — la card sera rendue sous la réponse (path "siren" déjà
+    // géré ci-dessous). Limit 3 pour permettre d'afficher quelques alternatives
+    // si plusieurs sirens matchent (ex: "Equans" → 4 entités du groupe).
+    const focusEntrepriseSearchPromise = focusEntrepriseRaw
+      ? searchEntrepriseByName(focusEntrepriseRaw.q, 3).catch(() => [] as Target[])
+      : Promise.resolve([] as Target[]);
+
     // Branchement réel : on stream le texte via /api/copilot/stream tout en
     // récupérant en parallèle les cibles depuis /api/datalake (uniquement si
     // intent sourcing détecté). Sinon cards reste vide → réponse texte pure.
@@ -454,10 +469,11 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
       isDirigeants ? fetchPersons(4) : Promise.resolve([]),
     ];
 
-    const [streamedText, cibles, persons] = await Promise.all([
+    const [streamedText, cibles, persons, focusEntrepriseCards] = await Promise.all([
       textStreamPromise,
       cibleSearchPromise,
       personSearchPromise,
+      focusEntrepriseSearchPromise,
     ]);
 
     let response: AiMessageData;
@@ -496,6 +512,20 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
         role: "ai", kind: "persons", header: "Dirigeants",
         content: streamedText || "Croisement INPI dirigeants × patrimoine SCI :",
         persons: personsForCards,
+      };
+    } else if (focusEntrepriseRaw && focusEntrepriseCards.length > 0) {
+      // Question portant sur 1 entreprise précise — silver.inpi_comptes /
+      // silver.insee_unites_legales (sans floor CA, donc couvre les SCIs et
+      // holdings patrimoniales que /cibles filtre). On remonte la 1re cible
+      // en card sous la réponse — clic ouvre la fiche entreprise.
+      const headerLabel = focusEntrepriseCards.length === 1
+        ? "Fiche entreprise"
+        : `Fiche entreprise (${focusEntrepriseCards.length} matches)`;
+      response = {
+        role: "ai", kind: "siren", header: headerLabel,
+        content: streamedText || `${focusEntrepriseCards[0].denomination} — siren ${focusEntrepriseCards[0].siren}.`,
+        cards: focusEntrepriseCards.slice(0, 3),
+        followups: ["Fiche complète", "Dirigeants", "DD Compliance", "Réseau"],
       };
     } else if (focusPerson) {
       // Question portant sur 1 personne précise (ex: "Bernard ARNAULT et son
