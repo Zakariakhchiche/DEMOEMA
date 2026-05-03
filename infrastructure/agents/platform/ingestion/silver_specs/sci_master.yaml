@@ -1,0 +1,155 @@
+silver_name: silver.sci_master
+goal: >
+  🏠 FEATURE STORE PATRIMOINE SCI / HOLDING IMMOBILIÈRE. Un row par SIREN SCI
+  (forme 65xx ou holding patrimoniale identifiée), avec :
+    - identité complète (denomination, forme, code_ape, adresse, date_immat)
+    - patrimoine financier (total_actif, immo_corporelles, capitaux_propres,
+      emprunts_dettes, capital_social, ca_net, resultat_net) depuis dernier bilan
+    - ownership_type (individual / mixed / corporate) — distingue SCI personnelle
+      des SCI détenues par groupes
+    - dirigeants individus (count, noms, ages) + parents personnes morales
+      (sirens des PM dirigeantes)
+    - estimation patrimoine immobilier via JOIN silver.dvf_transactions
+      sur adresse_code_postal (prix m² médian zone × surface si dispo)
+    - tier patrimoine (A_HOT >5M€ / B_WARM 1-5M€ / C_PIPELINE <1M€)
+
+  Comble le trou laissé par silver.entreprises_signals qui filtre `montant_capital
+  >= 100k€` (exclut les SCIs patrimoniales 1k€ capital nominal). Permet à
+  /api/datalake/entreprise/search de répondre proprement pour ATRIUM PATRIMOINE,
+  MAISON LAMOUR, etc. sans fallback bronze runtime.
+
+source_tables:
+  - bronze.inpi_formalites_entreprises    # base : identité + capital + adresse
+  - bronze.inpi_formalites_personnes      # ownership : type_de_personne
+  - silver.inpi_dirigeants                # count individus dirigeants
+  - silver.inpi_comptes                   # patrimoine financier (dernier bilan)
+  - silver.dvf_transactions               # zone DVF (prix m² médian par CP)
+  - silver.dirigeant_sci_patrimoine       # cross-check signal patrimoine
+
+grain: "1 row par SIREN SCI (clé = siren)"
+
+key_columns:
+  - siren
+
+business_logic: |
+  CIBLE = sirens identifiés comme SCI ou holding patrimoniale :
+
+  WHERE
+    e.forme_juridique LIKE '65%'                                -- SCI civile (6540,6541,6589,6599...)
+    OR e.forme_juridique IN ('5499','5710')                     -- SARL/SAS holdings patrimoniales
+       AND (
+         e.denomination ILIKE '%PATRIMOINE%'
+         OR e.denomination ILIKE '%HOLDING%'
+         OR e.denomination ILIKE '%FAMIL%'
+         OR e.denomination ILIKE '%MAISON %'
+       )
+  ET e.date_radiation IS NULL                                    -- exclure radiées
+
+  COLONNES À EXPOSER :
+
+  [Identité — depuis bronze.inpi_formalites_entreprises]
+  - siren, denomination, forme_juridique, code_ape
+  - adresse_code_postal, adresse_dept (LEFT 2), adresse_commune
+  - date_immatriculation, age_entreprise = age years
+  - capital_social = montant_capital                              -- nominal statutaire
+
+  [Patrimoine financier — depuis silver.inpi_comptes (DISTINCT ON siren ORDER BY date_cloture DESC)]
+  - total_actif                                                    -- proxy valeur enveloppe
+  - immo_corporelles                                               -- biens immo en propre
+  - immo_financieres = total_actif - immo_corporelles - cash      -- titres/participations (calculé)
+  - capitaux_propres                                               -- valeur nette associés
+  - emprunts_dettes                                                -- effet de levier
+  - patrimoine_net_estime = total_actif - COALESCE(emprunts_dettes, 0)
+  - ca_net                                                         -- généralement 0 pour SCI patrimoniale
+  - resultat_net
+  - date_cloture_dernier_bilan
+  - has_bilan_recent = (date_cloture >= now() - interval '2 years')
+  - n_exercices_deposes = count distinct date_cloture
+
+  [Ownership — distinction physique vs morale via bronze.inpi_formalites_personnes]
+  - n_dirigeants_individu = count DISTINCT individu_nom WHERE type_de_personne='INDIVIDU' AND actif=true
+  - n_dirigeants_morale   = count DISTINCT siren_dirigeant WHERE type_de_personne='PERSONNE_MORALE' AND actif=true
+  - ownership_type        = CASE
+      WHEN n_dirigeants_morale = 0 AND n_dirigeants_individu > 0 THEN 'individual'
+      WHEN n_dirigeants_individu = 0 AND n_dirigeants_morale > 0 THEN 'corporate'
+      WHEN n_dirigeants_individu > 0 AND n_dirigeants_morale > 0 THEN 'mixed'
+      ELSE 'unknown'
+    END
+
+  [Dirigeants individus — via silver.inpi_dirigeants WHERE siren ∈ sirens_mandats[]]
+  - dirigeants_individus_noms       = array_agg upper(prenom || ' ' || nom) ORDER BY n_mandats_actifs DESC LIMIT 5
+  - dirigeants_individus_ages       = array_agg age_2026 (parallèle)
+  - has_famille_unique              = boolean — TRUE si tous les dirigeants individus partagent le même nom de famille
+                                      (signal patrimoniale familiale type "MAISON LAMOUR")
+
+  [Parents corporate — quand ownership_type IN ('corporate','mixed')]
+  - parent_sirens                   = array_agg DISTINCT bronze.inpi_formalites_personnes.siren_dirigeant FILTER (type='PERSONNE_MORALE')
+  - parent_denominations            = JOIN bronze.inpi_formalites_entreprises ON parent_sirens
+
+  [Estimation immobilière — via silver.dvf_transactions matché sur adresse_code_postal]
+  - dvf_zone_n_transactions         = count DISTINCT id_mutation WHERE code_postal = sci.adresse_code_postal AND date_mutation >= now() - interval '5 years'
+  - dvf_zone_prix_m2_median         = percentile_cont(0.5) WITHIN GROUP (ORDER BY valeur_fonciere / surface_reelle_bati)
+                                       FILTER (WHERE surface_reelle_bati > 10 AND valeur_fonciere > 50000)
+  - dvf_zone_total_volume_eur       = sum valeur_fonciere
+  -- valeur_immo_estimee_eur reste NULL ici car nécessite surface SCI (gold.parcelles_cibles
+  --  qui n'est pas matérialisée). Frontend peut afficher prix m² zone × estimation manuelle.
+
+  [Cross-check patrimoine via silver.dirigeant_sci_patrimoine]
+  - n_dirigeants_with_multiple_sci  = count dirigeants ayant ≥ 3 SCIs (signal pro patrimoine)
+
+  [Tier patrimoine — score scoring patrimoine SCI]
+  - patrimoine_tier = CASE
+      WHEN patrimoine_net_estime >= 5_000_000 THEN 'A_HOT'
+      WHEN patrimoine_net_estime >= 1_000_000 THEN 'B_WARM'
+      WHEN patrimoine_net_estime >= 100_000   THEN 'C_PIPELINE'
+      WHEN total_actif IS NULL                THEN 'D_OPAQUE'   -- pas de bilan déposé
+      ELSE 'E_REJECT'
+    END
+
+transformations: |
+  CTE 1 : sci_base
+    SELECT siren + identité + capital_social + adresse depuis bronze.inpi_formalites_entreprises
+    WHERE le filtre SCI ci-dessus.
+
+  CTE 2 : last_bilan
+    DISTINCT ON (siren) ... silver.inpi_comptes ORDER BY siren, date_cloture DESC NULLS LAST
+    JOIN sci_base ON siren.
+
+  CTE 3 : dirigeants_aggr
+    LEFT JOIN bronze.inpi_formalites_personnes p ON p.siren = sci_base.siren AND p.actif = true
+    GROUP BY p.siren :
+    - count individus / personnes morales
+    - tableau noms individus
+    - tableau parent_sirens (PM)
+
+  CTE 4 : dvf_zone
+    GROUP BY code_postal sur silver.dvf_transactions (date_mutation >= now() - 5 ans)
+    Calcul percentile_cont 0.5 sur valeur_fonciere/surface_reelle_bati.
+
+  CTE 5 : famille_unique
+    Pour chaque siren, vérifier si tous individu_nom partagent même nom de famille
+    (count distinct individu_nom = 1).
+
+  Final SELECT : LEFT JOIN tous les CTE, calcul ownership_type + tier.
+
+  ⚠️ SCI sans bilan INPI déposé (~80% des patrimoniales) :
+    total_actif/capitaux_propres/emprunts_dettes restent NULL → tier='D_OPAQUE'.
+
+indexes:
+  - siren
+  - "patrimoine_net_estime DESC NULLS LAST"
+  - ownership_type
+  - patrimoine_tier
+  - adresse_dept
+  - "(forme_juridique LIKE '65%')"
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 1800
+
+estimated_volume: |
+  ~3-4M SCIs en France (forme 65xx).
+  + ~50k holdings patrimoniales SARL/SAS via heuristique denomination.
+  Total attendu : ~3-4.05M rows.
+
+  Coût stockage : ~2 GB (50 colonnes × 4M rows).
+  Coût refresh : ~30 min sur VPS (JOIN bronze + silver.dvf + silver.inpi_comptes).
