@@ -574,7 +574,10 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
             if len(q) < 2:
                 return {"error": "q (>= 2 chars) requis"}
             limit = max(1, min(int(args.get("limit", 10)), 30))
-            async with httpx.AsyncClient(timeout=12) as client:
+            # Timeout 30s (vs 12s défaut) : étape 3 silver.inpi_dirigeants
+            # peut prendre 8-12s à cold cache (scan arrays denominations[]
+            # sans GIN sur ILIKE). Le endpoint lui-même clamp à 10s par step.
+            async with httpx.AsyncClient(timeout=30) as client:
                 r = await client.get(
                     f"{datalake_base}/api/datalake/entreprise/search",
                     params={"q": q, "limit": limit},

@@ -499,6 +499,23 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
         cards: [cibles[0]],
         followups: ["Fiche complète", "Dirigeants", "DD Compliance", "Évolution finance", "Réseau"],
       };
+    } else if (focusEntrepriseRaw && focusEntrepriseCards.length > 0) {
+      // Question portant sur 1 entreprise précise (ATRIUM PATRIMOINE, MESANGE
+      // CAPITAL, etc.) — silver.inpi_comptes / silver.insee_unites_legales /
+      // silver.inpi_dirigeants (sans floor CA, donc couvre les SCIs et
+      // holdings patrimoniales que /cibles filtre). Cette branche passe AVANT
+      // isDirigeants car "patrimoine" est dans isDirigeants regex —
+      // sans ça, "qui est ATRIUM PATRIMOINE" tombait en branche dirigeants
+      // et rendait des PersonCards random au lieu de la fiche entreprise.
+      const headerLabel = focusEntrepriseCards.length === 1
+        ? "Fiche entreprise"
+        : `Fiche entreprise (${focusEntrepriseCards.length} matches)`;
+      response = {
+        role: "ai", kind: "siren", header: headerLabel,
+        content: streamedText || `${focusEntrepriseCards[0].denomination} — siren ${focusEntrepriseCards[0].siren}.`,
+        cards: focusEntrepriseCards.slice(0, 3),
+        followups: ["Fiche complète", "Dirigeants", "DD Compliance", "Réseau"],
+      };
     } else if (isDirigeants) {
       // Bug v6/cards : avant, on remontait toujours le top-4 pro_ma_score depuis
       // gold.dirigeants_master (Esteve/Moczulski/Geny/Chertok), indépendamment
@@ -512,20 +529,6 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
         role: "ai", kind: "persons", header: "Dirigeants",
         content: streamedText || "Croisement INPI dirigeants × patrimoine SCI :",
         persons: personsForCards,
-      };
-    } else if (focusEntrepriseRaw && focusEntrepriseCards.length > 0) {
-      // Question portant sur 1 entreprise précise — silver.inpi_comptes /
-      // silver.insee_unites_legales (sans floor CA, donc couvre les SCIs et
-      // holdings patrimoniales que /cibles filtre). On remonte la 1re cible
-      // en card sous la réponse — clic ouvre la fiche entreprise.
-      const headerLabel = focusEntrepriseCards.length === 1
-        ? "Fiche entreprise"
-        : `Fiche entreprise (${focusEntrepriseCards.length} matches)`;
-      response = {
-        role: "ai", kind: "siren", header: headerLabel,
-        content: streamedText || `${focusEntrepriseCards[0].denomination} — siren ${focusEntrepriseCards[0].siren}.`,
-        cards: focusEntrepriseCards.slice(0, 3),
-        followups: ["Fiche complète", "Dirigeants", "DD Compliance", "Réseau"],
       };
     } else if (focusPerson) {
       // Question portant sur 1 personne précise (ex: "Bernard ARNAULT et son
