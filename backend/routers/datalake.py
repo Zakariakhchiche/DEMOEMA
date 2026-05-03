@@ -1162,6 +1162,12 @@ async def _dirigeant_full(
     nom_for_sql_na = _stripcc(nom_for_sql)
     prenom_for_sql_na = _stripcc(prenom_for_sql)
 
+    # Sans date_naissance fournie par le frontend, la WHERE est moins sélective
+    # et la query peut timeout à cold cache → tombait en fallback gold (qui
+    # renvoie n_mandats_actifs=23 mais arrays=NULL et date=NULL). Bug observé
+    # en navigateur 2026-05-03 : drawer Vincent LAMOUR via chat (sans dn)
+    # affichait "23 / 0" + arrays "—" alors que la même fiche via card avec
+    # dn=1974-04 marchait. Bump timeout 4s → 12s pour rester sur silver.
     inpi = await _safe(pool.fetchrow(
         """SELECT
               nom, prenom, date_naissance, age_2026 AS age,
@@ -1176,7 +1182,7 @@ async def _dirigeant_full(
            ORDER BY coalesce(n_mandats_total, n_mandats_actifs, 0) DESC
            LIMIT 1""",
         nom_for_sql, nom_for_sql_na, prenom_for_sql, prenom_for_sql_na, date_n,
-    ))
+    ), timeout_s=12.0)
 
     # Pour les fallbacks ci-dessous, on UPPER + strip-accents côté Python pour
     # exploiter les index btree (nom) / btree (nom, prenom) sur
