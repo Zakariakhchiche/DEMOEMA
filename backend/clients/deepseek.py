@@ -574,9 +574,14 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
             if len(q) < 2:
                 return {"error": "q (>= 2 chars) requis"}
             limit = max(1, min(int(args.get("limit", 10)), 30))
+<<<<<<< Updated upstream
             # Timeout 30s (vs 12s défaut) : étape 3 silver.inpi_dirigeants
             # peut prendre 8-12s à cold cache (scan arrays denominations[]
             # sans GIN sur ILIKE). Le endpoint lui-même clamp à 10s par step.
+=======
+            # Timeout 30s : étape 3 silver.inpi_dirigeants + JOIN gold.sci_master
+            # peut prendre 8-15s à cold cache (silver-only, no bronze runtime).
+>>>>>>> Stashed changes
             async with httpx.AsyncClient(timeout=30) as client:
                 r = await client.get(
                     f"{datalake_base}/api/datalake/entreprise/search",
@@ -595,7 +600,10 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
             siren = args.get("siren", "")
             if not siren.isdigit() or len(siren) != 9:
                 return {"error": "siren invalide (doit être 9 chiffres)"}
-            async with httpx.AsyncClient(timeout=15) as client:
+            # Timeout 30s : depuis ajout JOIN gold.sci_master en backend
+            # 2026-05-03, /fiche/{siren} peut prendre 15-25s à cold cache
+            # sur les gros sirens (Carrefour 652014051 = 12 filiales).
+            async with httpx.AsyncClient(timeout=30) as client:
                 r = await client.get(f"{datalake_base}/api/datalake/fiche/{siren}")
                 if r.status_code == 200:
                     d = r.json()
@@ -634,7 +642,11 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
             url = f"{datalake_base}/api/datalake/dirigeant/{nom}/{prenom}"
             if dn:
                 url += f"/{dn}"
-            async with httpx.AsyncClient(timeout=15) as client:
+            # Timeout 30s : sans date_naissance, le silver query parcourt
+            # les homonymes et peut prendre 12-25s à cold cache (Vincent
+            # LAMOUR 6 homonymes en silver.inpi_dirigeants). Bumpé 15s→30s
+            # 2026-05-03 après régression observée en navigateur.
+            async with httpx.AsyncClient(timeout=30) as client:
                 r = await client.get(url)
                 if r.status_code == 200:
                     return r.json()

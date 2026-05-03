@@ -629,7 +629,10 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
 
     # Dirigeants détaillés — top 10 par mandats actifs, joint avec patrimoine SCI.
     # On essaie d'abord en silver (8M dirigeants), fallback sur l'API gouv si vide.
-    dirigeants_silver = await pool.fetch(
+    # Wrappé _safe pour éviter HTTP 500 si la query timeout (Carrefour 652014051
+    # avec 12+ filiales prend >30s en mode prepare → TimeoutError remontait
+    # au front en 500. Maintenant : timeout=20s + fallback gracieux sur gouv).
+    dirigeants_silver = await _safe(pool.fetch(
         """WITH dirig_raw AS (
               -- Identité = (nom, prenom, date_naissance). Si silver a plusieurs
               -- rows pour la même personne (ex : 1 par siren_main), on garde la
@@ -782,7 +785,7 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
            ) os ON true
            ORDER BY d.n_mandats_actifs DESC NULLS LAST""",
         siren,
-    )
+    ), default=[], timeout_s=20.0)
 
     # Fallback : si silver vide, dérive depuis le gouv API (déjà fetché).
     # Gestion des 2 types de dirigeants :
@@ -840,7 +843,9 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
     # API gov BODACC live si vide.
     signaux: list = []
     if await _table_exists(pool, "silver", "bodacc_annonces"):
-        signaux = await pool.fetch(
+        # Wrappé _safe : sur sirens groupes (Carrefour 652014051), la query
+        # sans index peut prendre >5s → fallback gracieux sur API BODACC live.
+        signaux = await _safe(pool.fetch(
             """SELECT date_parution AS event_date,
                       typeavis_lib AS signal_type,
                       familleavis_lib AS severity,
@@ -852,7 +857,7 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
                ORDER BY date_parution DESC
                LIMIT 20""",
             siren,
-        )
+        ), default=[], timeout_s=8.0)
 
     if not signaux:
         # Fallback live BODACC datadila API. Si succès, on récupère aussi le
@@ -971,7 +976,9 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
     # sirens). Fallback : dirigeants gouv API qui ont un siren (personnes morales).
     network: list = []
     if await _table_exists(pool, "silver", "inpi_dirigeants"):
-        network = await pool.fetch(
+        # Wrappé _safe : sur sirens groupes avec >100 dirigeants, la query
+        # peut prendre >5s. Fallback sur gouv API moral_dirigs si timeout.
+        network = await _safe(pool.fetch(
             """WITH top_dirig AS (
                   SELECT nom, prenom, sirens_mandats, denominations
                   FROM silver.inpi_dirigeants
@@ -997,7 +1004,7 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
                ORDER BY max(other_deno)
                LIMIT 20""",
             siren,
-        )
+        ), default=[], timeout_s=8.0)
 
     if not network and gouv:
         # Fallback : personnes morales dans dirigeants gouv API ARE co-mandats.
