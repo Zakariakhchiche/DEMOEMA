@@ -1,0 +1,11 @@
+[bandit]
+# Bandit SAST config — Sprint 5 / L4 dim 6 (security_static).
+# Source-of-truth = backend/pyproject.toml [tool.bandit]
+# Ce fichier sert de fallback pour les outils qui ne lisent pas pyproject.toml.
+
+exclude_dirs = tests,migrations,__pycache__,htmlcov,.venv,venv
+
+# B101 : assert utilisé en tests pytest (legit)
+# B404 : subprocess imports — usage contrôlé pour scripts ingestion
+# B603 : subprocess sans shell=True — déjà sécurisé via args list
+skips = B101,B404,B603

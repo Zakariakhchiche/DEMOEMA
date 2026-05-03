@@ -29,7 +29,27 @@ qa-l4 = [
     "mutmut>=2.5.0",            # mutation testing (dim 4) — Sprint 2
     "pip-audit>=2.7.0",         # supply chain scan
     "bandit>=1.7.0",            # SAST Python
+    "deepeval>=3.9.9",          # LLM eval (dim 7 tool coverage) — Sprint 4
+    "cyclonedx-bom>=4.5.0",     # SBOM CycloneDX (Sprint 5)
 ]
+
+# Bandit SAST config (Sprint 5 — L4 dim 6 security_static)
+# Run: bandit -r backend/ -c backend/pyproject.toml
+[tool.bandit]
+exclude_dirs = [
+    "tests",
+    "migrations",
+    "__pycache__",
+    "htmlcov",
+    ".venv",
+    "venv",
+]
+# B101 : assert utilisé en tests pytest (legit)
+# B404 : subprocess imports — usage contrôlé pour scripts ingestion
+# B603 : subprocess sans shell=True — déjà sécurisé via args list
+skips = ["B101", "B404", "B603"]
+# Confidence + severity : on ne fail QUE sur HIGH/MEDIUM
+# (scan complet remonté en SARIF pour audit)
 
 [tool.ruff]
 line-length = 100

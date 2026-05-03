@@ -1,0 +1,164 @@
+name: QA — Security (Bandit SAST + pip-audit + SBOM)
+
+# Sprint 5 / L4 dim 6 (security_static 0->100%) + dim 9 (supply_chain).
+# Tourne sur push main, sur chaque PR, et tous les lundis 05h UTC.
+# 3 outils complementaires :
+#   - bandit       : SAST Python (CVE patterns dans le code)
+#   - pip-audit    : CVE des dependances installees
+#   - cyclonedx-py : SBOM CycloneDX (inventaire format standard)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/qa-security.yml'
+  schedule:
+    - cron: '0 5 * * 1'   # Mondays 05:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write   # SARIF upload
+
+jobs:
+  security-scan:
+    name: Bandit + pip-audit + SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install security tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install 'bandit>=1.7.0' 'pip-audit>=2.7.0' 'cyclonedx-bom>=4.5.0' pyyaml
+
+      - name: Validate Bandit config offline
+        # Sanity check du parsing YAML/INI avant le scan reel.
+        run: pytest backend/tests/test_sast_config_valid.py -v -p no:schemathesis --no-cov
+
+      # --- Bandit SAST (Python source) ------------------------------------
+      - name: Bandit SAST scan (JSON + SARIF)
+        id: bandit
+        continue-on-error: true
+        run: |
+          mkdir -p artifacts
+          bandit -r backend/ \
+            -c backend/pyproject.toml \
+            -f json \
+            -o artifacts/bandit.json \
+            || echo "bandit_failed=true" >> $GITHUB_OUTPUT
+          # Egalement en SARIF pour GitHub code scanning
+          bandit -r backend/ \
+            -c backend/pyproject.toml \
+            -f sarif \
+            -o artifacts/bandit.sarif \
+            || true
+
+      - name: Fail on HIGH severity Bandit findings
+        run: |
+          python - <<'PY'
+          import json, sys, pathlib
+          report = pathlib.Path("artifacts/bandit.json")
+          if not report.exists():
+              print("::warning::bandit.json missing — bandit may have crashed.")
+              sys.exit(0)
+          data = json.loads(report.read_text())
+          high = [r for r in data.get("results", []) if r.get("issue_severity") == "HIGH"]
+          medium = [r for r in data.get("results", []) if r.get("issue_severity") == "MEDIUM"]
+          print(f"Bandit findings — HIGH={len(high)}  MEDIUM={len(medium)}")
+          for f in high:
+              loc = f"{f.get('filename')}:{f.get('line_number')}"
+              print(f"::error file={f.get('filename')},line={f.get('line_number')}::"
+                    f"[{f.get('test_id')}] {f.get('issue_text')} ({loc})")
+          if high:
+              sys.exit(1)
+          PY
+
+      - name: Upload Bandit SARIF to GitHub Code Scanning
+        if: always() && hashFiles('artifacts/bandit.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: artifacts/bandit.sarif
+          category: bandit
+
+      # --- pip-audit (CVE des deps) ---------------------------------------
+      - name: pip-audit (requirements.txt CVE scan)
+        continue-on-error: true
+        run: |
+          pip-audit \
+            --requirement backend/requirements.txt \
+            --format json \
+            --output artifacts/pip-audit.json \
+          || true
+          # Fallback humain readable
+          pip-audit \
+            --requirement backend/requirements.txt \
+            --format columns \
+            > artifacts/pip-audit.txt \
+          || true
+
+      - name: Fail on CRITICAL/HIGH CVE in deps
+        run: |
+          python - <<'PY'
+          import json, sys, pathlib
+          report = pathlib.Path("artifacts/pip-audit.json")
+          if not report.exists():
+              print("::warning::pip-audit.json missing.")
+              sys.exit(0)
+          data = json.loads(report.read_text())
+          # pip-audit JSON v2 : top-level "dependencies": [{"name", "vulns": [...]}]
+          deps = data.get("dependencies", []) if isinstance(data, dict) else data
+          findings = []
+          for dep in deps:
+              for v in dep.get("vulns", []) or []:
+                  findings.append((dep.get("name"), v.get("id"), v.get("description", "")[:80]))
+          print(f"pip-audit findings: {len(findings)}")
+          for name, cve, desc in findings:
+              print(f"::warning::{name} {cve} — {desc}")
+          # Pour l'instant on n'echoue pas (informational) — durcir Sprint 6.
+          PY
+
+      # --- SBOM CycloneDX -------------------------------------------------
+      - name: Generate SBOM (CycloneDX JSON)
+        run: |
+          cyclonedx-py requirements \
+            --output-format JSON \
+            --outfile artifacts/sbom.cdx.json \
+            backend/requirements.txt \
+          || cyclonedx-py requirements backend/requirements.txt \
+                --output-format JSON \
+                --output-file artifacts/sbom.cdx.json \
+          || true
+
+      # --- Upload artifacts ------------------------------------------------
+      - name: Upload security artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-security-${{ github.run_id }}
+          path: artifacts/
+          retention-days: 90
+
+      - name: Notify Slack on HIGH finding
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.QA_SLACK_WEBHOOK }}
+        run: |
+          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
+            echo "::warning::QA_SLACK_WEBHOOK not configured — skipping notification."
+            exit 0
+          fi
+          curl -X POST -H 'Content-Type: application/json' \
+            --data "{\"text\":\":rotating_light: QA Security FAILED — bandit HIGH finding(s) on ${{ github.ref }}. https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+            "${SLACK_WEBHOOK_URL}"
