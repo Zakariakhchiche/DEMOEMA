@@ -1772,9 +1772,9 @@ async def copilot_query(q: str = Query(...)):
         f"liste de noms depuis la base interne."
     )
 
-    # --- Detect if user wants Pappers data and enrich context ---
+    # --- Detect if user wants datalake data and enrich context ---
     ql = q.lower()
-    pappers_context = ""
+    datalake_context = ""
     pappers_filters = {}
     targets_updated = False
 
@@ -1819,17 +1819,17 @@ async def copilot_query(q: str = Query(...)):
                     "**Dirigeants :**",
                     rep_lines if rep_lines else "  N/A",
                     "",
-                    "*Source : Pappers MCP — données open data*",
+                    "*Source : datalake silver / recherche-entreprises.gouv*",
                 ]
                 return {
                     "response": "\n".join(resp_lines),
-                    "source": "pappers-mcp",
+                    "source": "silver-inpi",
                     "targets_updated": True,
                 }
             else:
                 return {
-                    "response": f"Aucune entreprise trouvée pour le SIREN **{siren_val}** dans la base Pappers.",
-                    "source": "pappers-mcp",
+                    "response": f"Aucune entreprise trouvée pour le SIREN **{siren_val}** dans le datalake silver.",
+                    "source": "silver-inpi",
                     "targets_updated": False,
                 }
         except Exception as e:
@@ -1909,7 +1909,7 @@ async def copilot_query(q: str = Query(...)):
             if isinstance(pappers_data, dict) and "resultats" in pappers_data:
                 resultats = pappers_data["resultats"][:50]
                 total = pappers_data.get("total", 0)
-                pappers_lines = [f"\nPappers ({total} resultats, {len(resultats)} affiches):"]
+                pappers_lines = [f"\nDatalake silver/INPI ({total} resultats, {len(resultats)} affiches):"]
                 for r in resultats:
                     nom = r.get("nom_entreprise", "?")
                     siren = r.get("siren", "?")
@@ -1921,7 +1921,7 @@ async def copilot_query(q: str = Query(...)):
                     pappers_lines.append(
                         f"- {nom} ({siren}, {ville}) CA:{ca_str}, Eff:{eff}, Cap:{cap}"
                     )
-                pappers_context = "\n".join(pappers_lines)
+                datalake_context = "\n".join(pappers_lines)
 
                 # --- MERGE new results into existing targets (don't replace) ---
                 async with _targets_lock:
@@ -1959,7 +1959,7 @@ async def copilot_query(q: str = Query(...)):
             if isinstance(pappers_result, dict) and pappers_result.get("resultats"):
                 resultats = pappers_result["resultats"][:5]
                 total = pappers_result.get("total", len(resultats))
-                lines = [f"**Recherche Pappers pour \"{q}\" — {total} résultat(s) :**\n"]
+                lines = [f"**Recherche entreprise pour \"{q}\" — {total} résultat(s) :**\n"]
                 add_tasks = []
                 for r in resultats:
                     nom = r.get("nom_entreprise", "N/A")
@@ -1983,24 +1983,24 @@ async def copilot_query(q: str = Query(...)):
                     lines.append("")
                     if siren_r:
                         add_tasks.append(_add_company_to_targets(siren_r))
-                lines.append("*Source : Pappers MCP — données open data*")
+                lines.append("*Source : datalake silver / recherche-entreprises.gouv*")
                 # Add found companies to targets in background
                 if add_tasks:
                     await asyncio.gather(*add_tasks, return_exceptions=True)
                 return {
                     "response": "\n".join(lines),
-                    "source": "pappers-mcp",
+                    "source": "silver-inpi",
                     "targets_updated": bool(add_tasks),
                 }
         except Exception as e:
             print(f"[Copilot] Company name search error: {e}")
 
-    full_context = context + pappers_context
+    full_context = context + datalake_context
 
     # Try DeepSeek AI with enriched context
     ai_response = await copilot_ai_query(q, full_context)
     if ai_response:
-        source = "deepseek-ai+pappers" if pappers_context else "deepseek-ai"
+        source = "deepseek-ai+silver" if datalake_context else "deepseek-ai"
         return {"response": ai_response, "source": source, "targets_updated": targets_updated}
 
     # Fallback: rule-based copilot
@@ -2322,7 +2322,7 @@ async def copilot_query(q: str = Query(...)):
             if isinstance(pappers_result, dict):
                 resultats = pappers_result.get("resultats", [])
                 if resultats:
-                    lines = [f"**Recherche Pappers pour \"{q}\" — {len(resultats)} resultat(s) :**\n"]
+                    lines = [f"**Recherche entreprise pour \"{q}\" — {len(resultats)} resultat(s) :**\n"]
                     for r in resultats[:5]:
                         nom = r.get("nom_entreprise", r.get("denomination", "N/A"))
                         siren = r.get("siren", "")
@@ -2346,8 +2346,8 @@ async def copilot_query(q: str = Query(...)):
                                 qualite = d.get("qualite", "")
                                 lines.append(f"  Dirigeant: {nom_d} — {qualite}")
                         lines.append("")
-                    lines.append("*Source: Pappers MCP — donnees open data*")
-                    return {"response": "\n".join(lines), "source": "pappers-mcp", "targets_updated": targets_updated}
+                    lines.append("*Source: datalake silver / recherche-entreprises.gouv*")
+                    return {"response": "\n".join(lines), "source": "silver-inpi", "targets_updated": targets_updated}
         except Exception as e:
             print(f"[Copilot] Pappers search error: {e}")
 
@@ -2365,7 +2365,7 @@ async def copilot_query(q: str = Query(...)):
             '- **"Signaux"** — Alertes et detections actives\n'
             '- **"LBO"** — Cibles PE-backed\n'
             '- **"Familiales"** — Entreprises familiales\n'
-            '- **"Recherche Pappers"** — Tapez un nom d\'entreprise pour chercher via Pappers\n'
+            '- **"Recherche entreprise"** — Tapez un nom d\'entreprise pour chercher dans le datalake\n'
             '- **"Scoring"** — Explication de la methodologie\n'
             '- **"EBITDA"** — Classement financier'
         ),
