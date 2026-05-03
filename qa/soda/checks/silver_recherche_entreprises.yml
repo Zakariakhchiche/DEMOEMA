@@ -1,0 +1,11 @@
+# silver.recherche_entreprises — recherche-entreprises.gouv.fr (gratuit)
+# Source : api.recherche-entreprises.api.gouv.fr.
+
+checks for silver.recherche_entreprises:
+  - row_count > 0:
+      name: row_count_positive
+  - missing_count(siren) = 0:
+      name: siren_not_null
+      filter: siren IS NOT NULL
+  - freshness(loaded_at) < 7d:
+      name: freshness_under_7d

@@ -1,0 +1,15 @@
+# gold.entreprises_master — table master entreprises (~411k cibles M&A)
+# Build : silver.* → gold.entreprises_master via materialized view.
+
+checks for gold.entreprises_master:
+  - row_count > 400000:
+      name: row_count_above_400k
+  - missing_count(siren) = 0:
+      name: siren_not_null
+  - duplicate_count(siren) = 0:
+      name: no_duplicate_siren
+  - invalid_count(siren) = 0:
+      name: siren_format_valid
+      valid regex: '^\d{9}$'
+  - freshness(refreshed_at) < 24h:
+      name: freshness_under_24h

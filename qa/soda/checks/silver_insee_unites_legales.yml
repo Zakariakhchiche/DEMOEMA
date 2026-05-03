@@ -1,0 +1,13 @@
+# silver.insee_unites_legales — référentiel SIRENE (~25M unités légales)
+# Source : INSEE SIRENE (api.insee.fr — gratuit).
+
+checks for silver.insee_unites_legales:
+  - row_count > 25000000:
+      name: row_count_above_25M
+  - missing_count(siren) = 0:
+      name: siren_not_null
+  - duplicate_count(siren) = 0:
+      name: no_duplicate_siren
+  - invalid_count(siren) = 0:
+      name: siren_format_valid
+      valid regex: '^\d{9}$'

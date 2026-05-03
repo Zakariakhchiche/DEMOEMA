@@ -1,0 +1,15 @@
+# silver.inpi_comptes — comptes annuels INPI (~6.3M rows)
+# Source : INPI RNE (gratuit). Cf. reference_apis.md.
+
+checks for silver.inpi_comptes:
+  - row_count > 6000000:
+      name: row_count_above_6M
+  - missing_count(siren) = 0:
+      name: siren_not_null
+  - duplicate_count(siren, year) = 0:
+      name: no_duplicate_siren_year
+  - invalid_count(siren) = 0:
+      name: siren_format_valid
+      valid regex: '^\d{9}$'
+  - freshness(loaded_at) < 24h:
+      name: freshness_under_24h
