@@ -99,8 +99,10 @@ export function PersonSheet({ person, onClose }: Props) {
               const age = (ident?.age as number | null) ?? person.age;
               const mandats = (ident?.n_mandats_actifs as number | null)
                 ?? (g?.n_mandats_actifs as number | null) ?? person.mandats;
-              const nSci = (g?.n_sci as number | null)
-                ?? (data?.sci_patrimoine as { n_sci?: number } | null)?.n_sci
+              // Préférer silver.dirigeant_sci_patrimoine (4 SCI Vincent Lamour)
+              // au n_sci Neo4j (qui retourne 1 à cause des md5 mismatches).
+              const nSci = (data?.sci_patrimoine as { n_sci?: number } | null)?.n_sci
+                ?? (g?.n_sci as number | null)
                 ?? person.sci;
               return (
                 <div style={{
