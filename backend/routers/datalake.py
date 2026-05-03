@@ -1162,6 +1162,11 @@ async def _dirigeant_full(
     nom_for_sql_na = _stripcc(nom_for_sql)
     prenom_for_sql_na = _stripcc(prenom_for_sql)
 
+    # Tie-break sur array_length(sirens_mandats) DESC AVANT n_mandats_total :
+    # Vincent LAMOUR a 6 rows homonymes ; certaines ont n_mandats_actifs=23
+    # mais sirens_mandats=NULL (data quality silver). Sans ce tri Postgres
+    # peut retourner la row vide (LIMIT 1 sans ORDER BY stable). Bug observé
+    # en navigateur 2026-05-03 : drawer affichait "23 / 0" + arrays "—".
     inpi = await _safe(pool.fetchrow(
         """SELECT
               nom, prenom, date_naissance, age_2026 AS age,
@@ -1173,7 +1178,9 @@ async def _dirigeant_full(
            WHERE nom IN ($1, $2)
              AND prenom IN ($3, $4)
              AND ($5::text IS NULL OR date_naissance LIKE $5 || '%')
-           ORDER BY coalesce(n_mandats_total, n_mandats_actifs, 0) DESC
+           ORDER BY
+              coalesce(array_length(sirens_mandats, 1), 0) DESC,
+              coalesce(n_mandats_total, n_mandats_actifs, 0) DESC
            LIMIT 1""",
         nom_for_sql, nom_for_sql_na, prenom_for_sql, prenom_for_sql_na, date_n,
     ))
