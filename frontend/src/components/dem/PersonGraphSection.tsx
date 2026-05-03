@@ -433,6 +433,8 @@ export function PersonGraphSection({
           fullName={effectiveFullName}
           onClose={() => { setGraphOpen(false); setNavTarget(null); }}
           onNavigate={(t) => setNavTarget(t)}
+          coMandatairesDetail={navTarget == null ? coMandatairesDetail : undefined}
+          selfMandatsActifs={navTarget == null ? kpiMandatsActifs : undefined}
         />
       )}
     </>

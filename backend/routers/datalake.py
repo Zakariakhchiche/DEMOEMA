@@ -629,7 +629,10 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
 
     # Dirigeants détaillés — top 10 par mandats actifs, joint avec patrimoine SCI.
     # On essaie d'abord en silver (8M dirigeants), fallback sur l'API gouv si vide.
-    dirigeants_silver = await pool.fetch(
+    # Wrappé _safe pour éviter HTTP 500 si la query timeout (Carrefour 652014051
+    # avec 12+ filiales prend >30s en mode prepare → TimeoutError remontait
+    # au front en 500. Maintenant : timeout=20s + fallback gracieux sur gouv).
+    dirigeants_silver = await _safe(pool.fetch(
         """WITH dirig_raw AS (
               -- Identité = (nom, prenom, date_naissance). Si silver a plusieurs
               -- rows pour la même personne (ex : 1 par siren_main), on garde la
@@ -782,7 +785,7 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
            ) os ON true
            ORDER BY d.n_mandats_actifs DESC NULLS LAST""",
         siren,
-    )
+    ), default=[], timeout_s=20.0)
 
     # Fallback : si silver vide, dérive depuis le gouv API (déjà fetché).
     # Gestion des 2 types de dirigeants :
@@ -840,7 +843,9 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
     # API gov BODACC live si vide.
     signaux: list = []
     if await _table_exists(pool, "silver", "bodacc_annonces"):
-        signaux = await pool.fetch(
+        # Wrappé _safe : sur sirens groupes (Carrefour 652014051), la query
+        # sans index peut prendre >5s → fallback gracieux sur API BODACC live.
+        signaux = await _safe(pool.fetch(
             """SELECT date_parution AS event_date,
                       typeavis_lib AS signal_type,
                       familleavis_lib AS severity,
@@ -852,7 +857,7 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
                ORDER BY date_parution DESC
                LIMIT 20""",
             siren,
-        )
+        ), default=[], timeout_s=8.0)
 
     if not signaux:
         # Fallback live BODACC datadila API. Si succès, on récupère aussi le
@@ -971,7 +976,9 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
     # sirens). Fallback : dirigeants gouv API qui ont un siren (personnes morales).
     network: list = []
     if await _table_exists(pool, "silver", "inpi_dirigeants"):
-        network = await pool.fetch(
+        # Wrappé _safe : sur sirens groupes avec >100 dirigeants, la query
+        # peut prendre >5s. Fallback sur gouv API moral_dirigs si timeout.
+        network = await _safe(pool.fetch(
             """WITH top_dirig AS (
                   SELECT nom, prenom, sirens_mandats, denominations
                   FROM silver.inpi_dirigeants
@@ -997,7 +1004,7 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
                ORDER BY max(other_deno)
                LIMIT 20""",
             siren,
-        )
+        ), default=[], timeout_s=8.0)
 
     if not network and gouv:
         # Fallback : personnes morales dans dirigeants gouv API ARE co-mandats.
@@ -1162,6 +1169,12 @@ async def _dirigeant_full(
     nom_for_sql_na = _stripcc(nom_for_sql)
     prenom_for_sql_na = _stripcc(prenom_for_sql)
 
+    # Sans date_naissance fournie par le frontend, la WHERE est moins sélective
+    # et la query peut timeout à cold cache → tombait en fallback gold (qui
+    # renvoie n_mandats_actifs=23 mais arrays=NULL et date=NULL). Bug observé
+    # en navigateur 2026-05-03 : drawer Vincent LAMOUR via chat (sans dn)
+    # affichait "23 / 0" + arrays "—" alors que la même fiche via card avec
+    # dn=1974-04 marchait. Bump timeout 4s → 12s pour rester sur silver.
     inpi = await _safe(pool.fetchrow(
         """SELECT
               nom, prenom, date_naissance, age_2026 AS age,
@@ -1176,7 +1189,7 @@ async def _dirigeant_full(
            ORDER BY coalesce(n_mandats_total, n_mandats_actifs, 0) DESC
            LIMIT 1""",
         nom_for_sql, nom_for_sql_na, prenom_for_sql, prenom_for_sql_na, date_n,
-    ))
+    ), timeout_s=12.0)
 
     # Pour les fallbacks ci-dessous, on UPPER + strip-accents côté Python pour
     # exploiter les index btree (nom) / btree (nom, prenom) sur
@@ -2784,23 +2797,33 @@ async def entreprise_search(
     if not q or len(q.strip()) < 2:
         raise HTTPException(status_code=400, detail="q (>= 2 chars) requis")
     q_clean = q.strip()
+    is_siren = q_clean.isdigit() and len(q_clean) == 9
     pattern = f"%{q_clean}%"
     pool = _pool(req)
 
     # Étape 1 : silver.inpi_comptes — DISTINCT ON (siren) sur date_cloture DESC
     # pour récupérer le dernier dépôt connu par siren. Index trigram sur
     # denomination requis pour la perf ILIKE (sinon seq scan 6M rows).
-    rows_inpi = await _safe(pool.fetch(
-        """SELECT DISTINCT ON (siren)
-              siren, denomination,
-              ca_net AS ca_dernier,
-              date_cloture
-           FROM silver.inpi_comptes
-           WHERE denomination ILIKE $1
-           ORDER BY siren, date_cloture DESC NULLS LAST
-           LIMIT $2""",
-        pattern, limit,
-    ), default=[], timeout_s=8.0)
+    if is_siren:
+        rows_inpi = await _safe(pool.fetch(
+            """SELECT DISTINCT ON (siren)
+                  siren, denomination, ca_net AS ca_dernier, date_cloture
+               FROM silver.inpi_comptes
+               WHERE siren = $1
+               ORDER BY siren, date_cloture DESC NULLS LAST
+               LIMIT $2""",
+            q_clean, limit,
+        ), default=[], timeout_s=8.0)
+    else:
+        rows_inpi = await _safe(pool.fetch(
+            """SELECT DISTINCT ON (siren)
+                  siren, denomination, ca_net AS ca_dernier, date_cloture
+               FROM silver.inpi_comptes
+               WHERE denomination ILIKE $1
+               ORDER BY siren, date_cloture DESC NULLS LAST
+               LIMIT $2""",
+            pattern, limit,
+        ), default=[], timeout_s=8.0)
 
     found_sirens = {r["siren"] for r in rows_inpi if r.get("siren")}
 
@@ -2809,13 +2832,18 @@ async def entreprise_search(
     # remontés en étape 1.
     if len(rows_inpi) < limit:
         remaining = limit - len(rows_inpi)
-        if found_sirens:
+        if is_siren:
+            # Match siren direct (le pk de la table) — cas user fournit un siren.
+            params = [q_clean, remaining]
+            where_clause = "siren = $1"
+            params_idx_limit = "$2"
+        elif found_sirens:
             params = [pattern, list(found_sirens), remaining]
-            extra_where = "AND siren <> ALL($2::text[])"
+            where_clause = "denomination_unite ILIKE $1 AND siren <> ALL($2::text[])"
             params_idx_limit = "$3"
         else:
             params = [pattern, remaining]
-            extra_where = ""
+            where_clause = "denomination_unite ILIKE $1"
             params_idx_limit = "$2"
         rows_insee = await _safe(pool.fetch(
             f"""SELECT
@@ -2827,8 +2855,7 @@ async def entreprise_search(
                    etat_administratif,
                    code_ape
                 FROM silver.insee_unites_legales
-                WHERE denomination_unite ILIKE $1
-                  {extra_where}
+                WHERE {where_clause}
                 ORDER BY siren
                 LIMIT {params_idx_limit}""",
             *params,
@@ -2836,37 +2863,242 @@ async def entreprise_search(
     else:
         rows_insee = []
 
-    # Enrichir étape 1 avec INSEE (forme/etat/code_ape) en un seul aller-retour.
+    # Étape 3 : silver.inpi_dirigeants — fallback final pour les SCIs et
+    # structures patrimoniales que ni inpi_comptes (pas de dépôt) ni insee
+    # (souvent NULL denomination_unite pour SCI) n'ont. Les arrays
+    # `sirens_mandats[]` / `denominations[]` parallèles donnent le mapping
+    # siren -> denomination depuis les déclarations dirigeants INPI.
+    # Coûteux (no GIN sur ILIKE d'array) — gardé en dernier recours,
+    # gated sur restant > 0 et seulement si ni inpi_comptes ni insee n'a
+    # rien trouvé pour pas perdre du temps inutilement.
+    seen_sirens = found_sirens | {r["siren"] for r in rows_insee if r.get("siren")}
+    rows_inpi_dirig: list = []
+    if len(rows_inpi) + len(rows_insee) < limit and not is_siren:
+        remaining = limit - len(rows_inpi) - len(rows_insee)
+        rows_inpi_dirig = await _safe(pool.fetch(
+            """WITH expanded AS (
+                  SELECT DISTINCT
+                         d.sirens_mandats[i] AS siren,
+                         d.denominations[i] AS denomination
+                  FROM silver.inpi_dirigeants d
+                  CROSS JOIN generate_subscripts(d.denominations, 1) AS i
+                  WHERE d.denominations[i] ILIKE $1
+                    AND d.sirens_mandats[i] IS NOT NULL
+                  LIMIT $2 * 3
+               )
+               SELECT siren, denomination,
+                      NULL::numeric AS ca_dernier,
+                      NULL::date AS date_cloture
+               FROM expanded
+               WHERE siren <> ALL($3::text[])
+               ORDER BY denomination
+               LIMIT $2""",
+            pattern, remaining, list(seen_sirens) if seen_sirens else [""],
+        ), default=[], timeout_s=10.0)
+
+    # Enrichissement post-collection : pour CHAQUE siren matché (toute source
+    # confondue), JOIN les tables silver / gold pour donner à TargetCard de
+    # quoi afficher CA / EBITDA / NAF / dept / effectif / forme / ville /
+    # score_ma. Sans cet enrichissement, les cards rendues dans le chat ont
+    # CA "—", EBITDA "—", NAF "—", Dept "—" (rapport user 2026-05-03).
+    all_sirens = (
+        {r["siren"] for r in rows_inpi if r.get("siren")}
+        | {r["siren"] for r in rows_insee if r.get("siren")}
+        | {r["siren"] for r in rows_inpi_dirig if r.get("siren")}
+    )
+
     insee_extra: dict[str, dict] = {}
-    if found_sirens:
-        rows_extra = await _safe(pool.fetch(
-            """SELECT siren, categorie_juridique AS forme_juridique,
-                      etat_administratif, code_ape
+    es_extra: dict[str, dict] = {}
+    comptes_extra: dict[str, dict] = {}
+    scoring_extra: dict[str, dict] = {}
+    sci_extra: dict[str, dict] = {}
+
+    if all_sirens:
+        sirens_list = list(all_sirens)
+        # 1) INSEE — denomination canonique + forme + etat + code_ape +
+        # tranche_effectifs + date_creation.
+        rows_insee_full = await _safe(pool.fetch(
+            """SELECT siren, denomination_unite,
+                      categorie_juridique AS forme_juridique,
+                      etat_administratif, code_ape,
+                      tranche_effectifs, date_creation
                FROM silver.insee_unites_legales
                WHERE siren = ANY($1::text[])""",
-            list(found_sirens),
+            sirens_list,
         ), default=[], timeout_s=4.0)
-        for r in rows_extra:
+        for r in rows_insee_full:
             insee_extra[r["siren"]] = dict(r)
 
-    def _enrich(r: dict) -> dict:
+        # 2) silver.entreprises_signals — code_ape (override INSEE) + forme +
+        # adresse complète + date_immatriculation. Source la plus complète.
+        if await _table_exists(pool, "silver", "entreprises_signals"):
+            rows_es = await _safe(pool.fetch(
+                """SELECT siren, code_ape, forme_juridique,
+                          adresse_code_postal,
+                          adresse_commune AS ville,
+                          COALESCE(adresse_dept, LEFT(adresse_code_postal, 2)) AS dept,
+                          date_immatriculation
+                   FROM silver.entreprises_signals
+                   WHERE siren = ANY($1::text[])""",
+                sirens_list,
+            ), default=[], timeout_s=4.0)
+            for r in rows_es:
+                es_extra[r["siren"]] = dict(r)
+
+        # 3) silver.inpi_comptes derniers dépôts — CA, EBITDA proxy
+        # (resultat_net), capitaux propres, effectif moyen, capital social.
+        rows_comptes = await _safe(pool.fetch(
+            """SELECT DISTINCT ON (siren)
+                  siren, ca_net AS ca_dernier, resultat_net AS ebitda_dernier,
+                  capitaux_propres, effectif_moyen, capital_social,
+                  date_cloture
+               FROM silver.inpi_comptes
+               WHERE siren = ANY($1::text[])
+               ORDER BY siren, date_cloture DESC NULLS LAST""",
+            sirens_list,
+        ), default=[], timeout_s=4.0)
+        for r in rows_comptes:
+            comptes_extra[r["siren"]] = dict(r)
+
+        # 4) gold.scoring_ma si dispo (score M&A, tier, axes v3, EV).
+        if await _table_exists(pool, "gold", "scoring_ma"):
+            rows_scoring = await _safe(pool.fetch(
+                """SELECT siren,
+                          COALESCE(deal_score_raw, score_total) AS score_ma,
+                          tier, deal_percentile,
+                          transmission_score, attractivity_score,
+                          scale_score, structure_score,
+                          risk_multiplier, ev_estimated_eur
+                   FROM gold.scoring_ma
+                   WHERE siren = ANY($1::text[])""",
+                sirens_list,
+            ), default=[], timeout_s=4.0)
+            for r in rows_scoring:
+                scoring_extra[r["siren"]] = dict(r)
+
+        # 5) gold.sci_master — feature store SCI / holdings patrimoniales
+        # avec adresse_dept + ownership_type + scoring patrimoine + valuation.
+        # Comble les SCIs absentes de entreprises_signals/scoring_ma (filtres
+        # M&A excluent les patrimoniales sans CA).
+        if await _table_exists(pool, "gold", "sci_master"):
+            # Schema gold.sci_master V2 (sans dirigeants_individus_noms,
+            # age_dirigeant_max, has_famille_unique, dvf_zone_* — ces enrichissements
+            # ont été retirés de silver.sci_master pour permettre une matérialisation
+            # rapide en 1 min au lieu de 1h+. À ré-ajouter en V3 via JOINs séparés
+            # ou pré-aggregation silver.dvf_zone_summary.
+            rows_sci = await _safe(pool.fetch(
+                """SELECT siren,
+                          denomination, forme_juridique, code_ape, sigle,
+                          adresse_code_postal, adresse_dept, adresse_voie,
+                          date_immatriculation, age_entreprise,
+                          capital_social, total_actif, immo_corporelles,
+                          capitaux_propres, emprunts_dettes,
+                          patrimoine_net_estime, ca_net, resultat_net,
+                          effectif_moyen, date_cloture_dernier_bilan,
+                          has_bilan_recent,
+                          n_dirigeants_individu, n_dirigeants_morale,
+                          ownership_type,
+                          parent_sirens, parent_denominations,
+                          deal_score, tier,
+                          patrimoine_net_score, transmission_score,
+                          compliance_score, structure_score,
+                          liquidite_score, diversification_geo_score,
+                          valuation_estimee_eur,
+                          bodacc_n_events_24m, bodacc_has_cession_event,
+                          has_sanction, has_offshore_match, has_judilibre_decision,
+                          is_sci, is_holding_patrimoniale,
+                          data_quality_score
+                   FROM gold.sci_master
+                   WHERE siren = ANY($1::text[])""",
+                sirens_list,
+            ), default=[], timeout_s=4.0)
+            for r in rows_sci:
+                sci_extra[r["siren"]] = dict(r)
+
+    def _enrich(r: dict, source: str) -> dict:
         siren = r.get("siren")
-        extra = insee_extra.get(siren, {})
+        ie = insee_extra.get(siren, {})
+        es = es_extra.get(siren, {})
+        ce = comptes_extra.get(siren, {})
+        sc = scoring_extra.get(siren, {})
+        sci = sci_extra.get(siren, {})
+        etat = r.get("etat_administratif") or ie.get("etat_administratif")
         return {
             "siren": siren,
-            "denomination": r.get("denomination"),
-            "ca_dernier": r.get("ca_dernier"),
-            "date_cloture": r.get("date_cloture"),
-            "forme_juridique": r.get("forme_juridique") or extra.get("forme_juridique"),
-            "etat_administratif": r.get("etat_administratif") or extra.get("etat_administratif"),
-            "code_ape": r.get("code_ape") or extra.get("code_ape"),
-            "actif": (r.get("etat_administratif") or extra.get("etat_administratif")) == "A"
-                if (r.get("etat_administratif") or extra.get("etat_administratif")) is not None else None,
-            "source": "inpi_comptes" if siren in found_sirens else "insee_unites_legales",
+            "denomination": r.get("denomination") or ie.get("denomination_unite"),
+            # Financier — silver.inpi_comptes
+            "ca_dernier": r.get("ca_dernier") or ce.get("ca_dernier"),
+            "ebitda_dernier": ce.get("ebitda_dernier"),
+            "capitaux_propres": ce.get("capitaux_propres"),
+            "capital_social": ce.get("capital_social"),
+            "effectif_moyen": ce.get("effectif_moyen"),
+            "effectif_exact": ce.get("effectif_moyen"),
+            "date_cloture": r.get("date_cloture") or ce.get("date_cloture"),
+            # Identité — INSEE / entreprises_signals
+            "forme_juridique": (r.get("forme_juridique") or es.get("forme_juridique")
+                                or ie.get("forme_juridique") or sci.get("forme_juridique")),
+            "etat_administratif": etat,
+            "actif": etat == "A" if etat is not None else None,
+            "code_ape": (r.get("code_ape") or es.get("code_ape") or ie.get("code_ape")
+                         or sci.get("code_ape")),
+            "naf": (r.get("code_ape") or es.get("code_ape") or ie.get("code_ape")
+                    or sci.get("code_ape")),
+            "tranche_effectifs": ie.get("tranche_effectifs"),
+            # Adresse — entreprises_signals + fallback gold.sci_master
+            "adresse_code_postal": (es.get("adresse_code_postal")
+                                    or sci.get("adresse_code_postal")),
+            "ville": es.get("ville"),
+            "dept": (es.get("dept") or sci.get("adresse_dept")),
+            "date_immatriculation": (es.get("date_immatriculation")
+                                     or sci.get("date_immatriculation")),
+            "date_creation": (es.get("date_immatriculation") or ie.get("date_creation")
+                              or sci.get("date_immatriculation")),
+            # Scoring M&A — gold.scoring_ma (entreprises classiques)
+            #            ou gold.sci_master.deal_score (SCIs/holdings patrimoniales)
+            "score_ma": sc.get("score_ma") or sci.get("deal_score"),
+            "tier": sc.get("tier") or sci.get("tier"),
+            "deal_percentile": sc.get("deal_percentile"),
+            "transmission_score": sc.get("transmission_score") or sci.get("transmission_score"),
+            "attractivity_score": sc.get("attractivity_score"),
+            "scale_score": sc.get("scale_score"),
+            "structure_score": sc.get("structure_score") or sci.get("structure_score"),
+            "risk_multiplier": sc.get("risk_multiplier"),
+            "ev_estimated_eur": sc.get("ev_estimated_eur") or sci.get("valuation_estimee_eur"),
+            # ⭐ Bloc SCI / patrimoine — uniquement si la siren matche gold.sci_master
+            "is_sci": sci.get("is_sci"),
+            "is_holding_patrimoniale": sci.get("is_holding_patrimoniale"),
+            "patrimoine_net_estime": sci.get("patrimoine_net_estime"),
+            "total_actif": sci.get("total_actif") or ce.get("ca_dernier"),  # fallback inpi_comptes
+            "immo_corporelles": sci.get("immo_corporelles"),
+            "ownership_type": sci.get("ownership_type"),
+            "n_dirigeants_individu": sci.get("n_dirigeants_individu"),
+            "n_dirigeants_morale": sci.get("n_dirigeants_morale"),
+            "dirigeants_individus_noms": sci.get("dirigeants_individus_noms"),
+            "dirigeants_individus_ages": sci.get("dirigeants_individus_ages"),
+            "has_famille_unique": sci.get("has_famille_unique"),
+            "famille_dominante_nom": sci.get("famille_dominante_nom"),
+            "parent_sirens": sci.get("parent_sirens"),
+            "parent_denominations": sci.get("parent_denominations"),
+            "dvf_zone_n_transactions_5y": sci.get("dvf_zone_n_transactions_5y"),
+            "dvf_zone_prix_m2_median": sci.get("dvf_zone_prix_m2_median"),
+            "dvf_zone_total_volume_eur": sci.get("dvf_zone_total_volume_eur"),
+            "valuation_estimee_eur": sci.get("valuation_estimee_eur"),
+            "patrimoine_net_score": sci.get("patrimoine_net_score"),
+            "compliance_score": sci.get("compliance_score"),
+            "liquidite_score": sci.get("liquidite_score"),
+            "diversification_geo_score": sci.get("diversification_geo_score"),
+            "bodacc_n_events_24m": sci.get("bodacc_n_events_24m"),
+            "bodacc_has_cession_event": sci.get("bodacc_has_cession_event"),
+            "has_sanction": sci.get("has_sanction"),
+            "has_offshore_match": sci.get("has_offshore_match"),
+            "data_quality_score": sci.get("data_quality_score"),
+            # Provenance — préfère sci_master pour les SCIs
+            "source": "gold.sci_master" if siren in sci_extra else source,
         }
 
-    results = [_enrich(_serialize(r)) for r in rows_inpi]
-    results.extend(_enrich(_serialize(r)) for r in rows_insee)
+    results = [_enrich(_serialize(r), "inpi_comptes") for r in rows_inpi]
+    results.extend(_enrich(_serialize(r), "insee_unites_legales") for r in rows_insee)
+    results.extend(_enrich(_serialize(r), "inpi_dirigeants") for r in rows_inpi_dirig)
     return {"q": q_clean, "n": len(results), "results": results}
 
 
