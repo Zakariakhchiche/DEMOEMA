@@ -1,0 +1,84 @@
+name: QA — Data Quality (Soda Core)
+
+# Sprint 2 / L4 dim 8 (data_quality 30→100%).
+# Tourne tous les jours à 06h UTC sur le datalake DEMOEMA via user RO.
+# Manual trigger possible via `workflow_dispatch`.
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # 06:00 UTC daily
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'qa/soda/**'
+      - '.github/workflows/qa-data-quality.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  soda-scan:
+    name: Soda Core scan (silver + gold)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      POSTGRES_HOST:        ${{ secrets.DEMOEMA_PG_HOST }}
+      POSTGRES_PORT:        ${{ secrets.DEMOEMA_PG_PORT }}
+      POSTGRES_DB:          ${{ secrets.DEMOEMA_PG_DB }}
+      POSTGRES_USER_RO:     ${{ secrets.DEMOEMA_PG_USER_RO }}
+      POSTGRES_PASSWORD_RO: ${{ secrets.DEMOEMA_PG_PASSWORD_RO }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install Soda Core (postgres)
+        run: |
+          python -m pip install --upgrade pip
+          pip install 'soda-core-postgres==3.3.*' pyyaml
+
+      - name: Validate Soda YAML structure (offline)
+        # Rapide check parse avant connexion réelle — coupe le run tôt si YAML cassé.
+        run: |
+          pip install pytest
+          pytest backend/tests/test_soda_config_valid.py -v
+
+      - name: Run Soda scan
+        # PR / manual trigger sans secrets RO : skip le scan réel et n'échoue pas.
+        if: ${{ env.POSTGRES_HOST != '' }}
+        run: |
+          mkdir -p artifacts
+          soda scan \
+            -d demoema \
+            -c qa/soda/configuration.yml \
+            qa/soda/checks/ \
+            -srf artifacts/scan-results.json \
+          | tee artifacts/scan-output.txt
+
+      - name: Upload Soda scan artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soda-scan-${{ github.run_id }}
+          path: artifacts/
+          retention-days: 30
+
+      - name: Notify Slack on failure
+        if: failure() && env.POSTGRES_HOST != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.QA_SLACK_WEBHOOK }}
+        run: |
+          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
+            echo "::warning::QA_SLACK_WEBHOOK not configured — skipping notification."
+            exit 0
+          fi
+          curl -X POST -H 'Content-Type: application/json' \
+            --data "{\"text\":\":rotating_light: Soda scan FAILED — run ${{ github.run_id }} on ${{ github.ref }}. https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+            "${SLACK_WEBHOOK_URL}"

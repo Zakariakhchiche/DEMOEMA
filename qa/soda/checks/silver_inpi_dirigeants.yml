@@ -1,0 +1,13 @@
+# silver.inpi_dirigeants — dirigeants RNE INPI (~8.1M rows)
+# Source : INPI RNE (gratuit).
+
+checks for silver.inpi_dirigeants:
+  - row_count > 8000000:
+      name: row_count_above_8M
+  - missing_count(siren) = 0:
+      name: siren_not_null
+  - invalid_count(siren) = 0:
+      name: siren_format_valid
+      valid regex: '^\d{9}$'
+  - freshness(loaded_at) < 24h:
+      name: freshness_under_24h

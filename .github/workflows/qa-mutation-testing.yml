@@ -1,0 +1,95 @@
+name: QA — Mutation Testing (mutmut)
+
+# Sprint 2 / L4 dim 4 (mutation 0→80%).
+# Tourne le lundi 04h UTC sur 5 modules critiques (deepseek, scoring,
+# validators, main::copilot_query, main::_PROMPT_INJECTION_PATTERNS).
+#
+# IMPORTANT : mutmut ne fonctionne pas sur Windows natif (issue #397) —
+# ce workflow est CI-only sur ubuntu-latest.
+
+on:
+  schedule:
+    - cron: '0 4 * * 1'   # Mondays 04:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mutmut:
+    name: mutmut run (≥ 80% mutation score required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install backend deps + mutmut
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install 'mutmut>=2.4,<3' pytest pytest-asyncio
+
+      - name: Run mutmut on critical modules
+        # Pilote depuis backend/ pour que mutmut trouve mutmut_config.py.
+        # Les 5 cibles sont alignées avec backend/mutmut_config.py::PATHS_TO_MUTATE.
+        run: |
+          cd backend
+          mutmut run \
+            --paths-to-mutate clients/deepseek.py,domain/scoring.py,domain/validators.py,main.py \
+            --runner "python -m pytest -p no:schemathesis tests/ --no-cov -x -q" \
+            --simple-output \
+          || true   # mutmut exits non-zero si survivants — on évalue le score nous-mêmes.
+
+      - name: Generate mutmut HTML report
+        run: |
+          cd backend
+          mutmut html || true
+          mutmut results > mutmut-results.txt || true
+
+      - name: Compute mutation score and enforce 80% threshold
+        id: score
+        run: |
+          cd backend
+          python - <<'PY'
+          import re, subprocess, sys
+          out = subprocess.run(["mutmut", "results"], capture_output=True, text=True).stdout
+          # mutmut prints e.g. "Survived ⠞ (12)" / "Killed 🎉 (88)" / "Timeout ⏰ (1)"
+          def _grab(label: str) -> int:
+              m = re.search(rf"{label}.*?\((\d+)\)", out)
+              return int(m.group(1)) if m else 0
+          killed     = _grab("Killed")
+          survived   = _grab("Survived")
+          timeout    = _grab("Timeout")
+          suspicious = _grab("Suspicious")
+          total = killed + survived + timeout + suspicious
+          score = (killed / total * 100) if total else 0.0
+          print(f"Killed={killed} Survived={survived} Timeout={timeout} Suspicious={suspicious}")
+          print(f"Mutation score: {score:.1f}% (target ≥ 80%)")
+          with open("mutation-score.txt", "w") as f:
+              f.write(f"{score:.1f}\n")
+          if score < 80.0:
+              print("::error::Mutation score below 80% threshold")
+              sys.exit(1)
+          PY
+
+      - name: Upload mutmut artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutmut-${{ github.run_id }}
+          path: |
+            backend/html/
+            backend/mutmut-results.txt
+            backend/mutation-score.txt
+          retention-days: 30

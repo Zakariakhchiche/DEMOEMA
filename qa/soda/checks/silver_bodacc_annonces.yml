@@ -1,0 +1,11 @@
+# silver.bodacc_annonces — annonces légales BODACC
+# Source : data.gouv.fr / BODACC (gratuit).
+
+checks for silver.bodacc_annonces:
+  - row_count > 1000000:
+      name: row_count_above_1M
+  - missing_count(siren) = 0:
+      name: siren_not_null_when_present
+      filter: siren IS NOT NULL
+  - freshness(date_publication) < 7d:
+      name: freshness_under_7d

@@ -1,0 +1,24 @@
+# Soda Core configuration — DEMOEMA datalake (L4 Sprint 2)
+# -----------------------------------------------------------
+# Usage:
+#   export POSTGRES_HOST=...
+#   export POSTGRES_PORT=5432
+#   export POSTGRES_DB=demoema
+#   export POSTGRES_USER_RO=soda_ro
+#   export POSTGRES_PASSWORD_RO=...
+#   soda scan -d demoema -c qa/soda/configuration.yml qa/soda/checks/
+#
+# Branche connexion read-only (least-privilege) — jamais le user app.
+# Schema par défaut : silver. Les checks gold.* spécifient leur schéma
+# explicitement dans le bloc `checks for gold.<table>:`.
+
+data_source demoema:
+  type: postgres
+  connection:
+    host: ${POSTGRES_HOST}
+    port: ${POSTGRES_PORT}
+    database: ${POSTGRES_DB}
+    username: ${POSTGRES_USER_RO}
+    password: ${POSTGRES_PASSWORD_RO}
+    sslmode: prefer
+  schema: silver
