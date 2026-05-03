@@ -7,6 +7,14 @@ import { Icon } from "./Icon";
 
 type GraphData = Awaited<ReturnType<typeof datalakeApi.personGraph>>;
 
+/** Co-mandataire issu de silver.inpi_dirigeants (reverse-lookup sirens_mandats). */
+interface CoMandataireDetail {
+  nom?: string | null;
+  prenom?: string | null;
+  date_naissance?: string | null;
+  n_shared?: number | null;
+}
+
 interface Props {
   nom: string;
   prenom: string;
@@ -14,6 +22,11 @@ interface Props {
   onClose: () => void;
   /** Si renseigné, click sur un co-mandataire bascule la modal vers cette personne. */
   onNavigate?: (target: { nom: string; prenom: string; fullName: string }) => void;
+  /** Co-mandataires depuis silver INPI (préféré au Neo4j incomplet par md5
+   * mismatch — Vincent LAMOUR : Neo4j renvoie 1 co-mandataire vs silver 4+). */
+  coMandatairesDetail?: CoMandataireDetail[];
+  /** Total mandats du sujet (silver) pour l'étiquette du node self. */
+  selfMandatsActifs?: number | null;
 }
 
 interface NodeDatum {
@@ -52,35 +65,88 @@ function colorForPerson(p: { is_sanctioned?: boolean; has_offshore?: boolean; is
   return "#6366f1"; // indigo neutral
 }
 
-export function PersonGraphModal({ nom, prenom, fullName, onClose, onNavigate }: Props) {
+export function PersonGraphModal({
+  nom, prenom, fullName, onClose, onNavigate,
+  coMandatairesDetail, selfMandatsActifs,
+}: Props) {
   const [data, setData] = useState<GraphData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<G6Graph | null>(null);
 
-  // Fetch
+  // Source-of-truth Postgres : si coMandatairesDetail fourni & non-vide, on
+  // l'utilise (fiche silver). Neo4j reste tenté en arrière-plan pour
+  // récupérer les flags compliance (sanctions/offshore/lobby) du sujet.
+  const hasPostgresSource = (coMandatairesDetail?.length ?? 0) > 0;
+
+  // Fetch Neo4j — pour les flags compliance + fallback si pas de source PG.
   useEffect(() => {
     setLoading(true);
     setError(null);
     datalakeApi
       .personGraph(nom, prenom, 20)
       .then((d) => setData(d))
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e) => {
+        // Si on a la source Postgres on tolère l'échec Neo4j (graph reste
+        // affichable sans flags). Sinon : erreur visible.
+        if (!hasPostgresSource) setError(e instanceof Error ? e.message : String(e));
+      })
       .finally(() => setLoading(false));
-  }, [nom, prenom]);
+  }, [nom, prenom, hasPostgresSource]);
 
   // Render G6
   useEffect(() => {
-    if (!containerRef.current || !data || !data.person) return;
+    if (!containerRef.current) return;
+    // Source : silver Postgres si dispo, sinon Neo4j.
+    if (!hasPostgresSource && (!data || !data.person)) return;
 
     // G6 v5 attend les styles INLINES par node (pas un callback `style` au
     // niveau du `node:` config). On suit le pattern de
     // components/graph/GraphCanvas.tsx qui marche en prod.
-    const center = data.person;
-    const centerLabel = center.full_name || `${center.prenom} ${center.nom}`;
+    const center = data?.person;
+    const centerLabel = (center?.full_name || `${prenom} ${nom}`).trim();
+    const centerMandats = selfMandatsActifs ?? center?.n_mandats_actifs ?? null;
     const SIZE_SELF = 56;
     const SIZE_COMAND = 36;
+
+    // Liste des co-mandataires : Postgres prioritaire (silver INPI =
+    // ground-truth), sinon Neo4j top_co_mandataires (incomplet par md5
+    // mismatch lors du bulk import).
+    type RenderedCoMand = {
+      key: string;
+      label: string;
+      nom: string;
+      prenom: string;
+      n_shared: number;
+      is_sanctioned?: boolean;
+      has_offshore?: boolean;
+      is_lobbyist?: boolean;
+    };
+    const renderedCo: RenderedCoMand[] = hasPostgresSource
+      ? (coMandatairesDetail ?? []).map((co) => {
+          const cn = (co.nom ?? "").trim();
+          const cp = (co.prenom ?? "").trim();
+          const lbl = `${cp} ${cn}`.trim() || cn || cp || "—";
+          return {
+            key: `${cn}|${cp}|${co.date_naissance ?? ""}`,
+            label: lbl,
+            nom: cn,
+            prenom: cp,
+            n_shared: Number(co.n_shared ?? 0),
+          };
+        })
+      : (data?.top_co_mandataires ?? []).map((co) => ({
+          key: `${co.nom}|${co.prenom}`,
+          label: co.full_name,
+          nom: co.nom,
+          prenom: co.prenom,
+          n_shared: Number(co.n_shared ?? 0),
+          is_sanctioned: co.other_sanctioned,
+          has_offshore: co.other_offshore,
+          is_lobbyist: co.other_lobbyist,
+        }));
+
     // Le layout G6 "radial" positionne automatiquement les nodes : focus
     // au centre + leaves sur cercles concentriques selon distance topo.
     const styledNodes = [
@@ -89,12 +155,12 @@ export function PersonGraphModal({ nom, prenom, fullName, onClose, onNavigate }:
         data: {
           type: "self" as const,
           label: centerLabel,
-          sub: center.n_mandats_actifs ? `${center.n_mandats_actifs} mandats` : undefined,
-          nom: center.nom,
-          prenom: center.prenom,
-          is_sanctioned: center.is_sanctioned,
-          has_offshore: center.has_offshore,
-          is_lobbyist: center.is_lobbyist,
+          sub: centerMandats ? `${centerMandats} mandats` : undefined,
+          nom: center?.nom ?? nom,
+          prenom: center?.prenom ?? prenom,
+          is_sanctioned: center?.is_sanctioned,
+          has_offshore: center?.has_offshore,
+          is_lobbyist: center?.is_lobbyist,
         },
         style: {
           size: SIZE_SELF,
@@ -108,36 +174,36 @@ export function PersonGraphModal({ nom, prenom, fullName, onClose, onNavigate }:
           labelOffsetY: SIZE_SELF / 2 + 10,
         },
       },
-      ...data.top_co_mandataires.map((co, i) => ({
+      ...renderedCo.map((co, i) => ({
         id: `co_${i}_${co.nom}_${co.prenom}`,
         data: {
           type: "comand" as const,
-          label: co.full_name,
+          label: co.label,
           sub: `${co.n_shared} société${co.n_shared > 1 ? "s" : ""}`,
           nom: co.nom,
           prenom: co.prenom,
-          is_sanctioned: co.other_sanctioned,
-          has_offshore: co.other_offshore,
-          is_lobbyist: co.other_lobbyist,
+          is_sanctioned: co.is_sanctioned,
+          has_offshore: co.has_offshore,
+          is_lobbyist: co.is_lobbyist,
           n_shared: co.n_shared,
         },
         style: {
           size: SIZE_COMAND,
           fill: colorForPerson({
-            is_sanctioned: co.other_sanctioned,
-            has_offshore: co.other_offshore,
-            is_lobbyist: co.other_lobbyist,
+            is_sanctioned: co.is_sanctioned,
+            has_offshore: co.has_offshore,
+            is_lobbyist: co.is_lobbyist,
           }),
           stroke: "rgba(255,255,255,0.2)",
           lineWidth: 1,
-          labelText: co.full_name,
+          labelText: co.label,
           labelFill: "rgba(255,255,255,0.85)",
           labelFontSize: 11,
           labelOffsetY: SIZE_COMAND / 2 + 8,
         },
       })),
     ];
-    const styledEdges = data.top_co_mandataires.map((co, i) => ({
+    const styledEdges = renderedCo.map((co, i) => ({
       source: "self",
       target: `co_${i}_${co.nom}_${co.prenom}`,
       style: {
@@ -215,7 +281,7 @@ export function PersonGraphModal({ nom, prenom, fullName, onClose, onNavigate }:
         graphRef.current = null;
       }
     };
-  }, [data, onNavigate]);
+  }, [data, onNavigate, hasPostgresSource, coMandatairesDetail, selfMandatsActifs, nom, prenom]);
 
   // Esc close
   useEffect(() => {
@@ -260,21 +326,26 @@ export function PersonGraphModal({ nom, prenom, fullName, onClose, onNavigate }:
               fontSize: 11, color: "var(--text-tertiary)",
               textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600,
             }}>
-              Réseau co-mandataires · Neo4j (1 hop)
+              Réseau co-mandataires · {hasPostgresSource ? "INPI silver" : "Neo4j"} (1 hop)
             </div>
             <div style={{
               fontSize: 18, fontWeight: 700, color: "var(--text-primary)",
               marginTop: 4,
             }}>
               {fullName || `${prenom} ${nom}`}
-              {data?.top_co_mandataires.length ? (
-                <span style={{
-                  marginLeft: 12, fontSize: 13, fontWeight: 500,
-                  color: "var(--text-tertiary)",
-                }}>
-                  {data.top_co_mandataires.length} associés
-                </span>
-              ) : null}
+              {(() => {
+                const n = hasPostgresSource
+                  ? (coMandatairesDetail?.length ?? 0)
+                  : (data?.top_co_mandataires.length ?? 0);
+                return n > 0 ? (
+                  <span style={{
+                    marginLeft: 12, fontSize: 13, fontWeight: 500,
+                    color: "var(--text-tertiary)",
+                  }}>
+                    {n} associés
+                  </span>
+                ) : null;
+              })()}
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
@@ -290,7 +361,7 @@ export function PersonGraphModal({ nom, prenom, fullName, onClose, onNavigate }:
         </div>
 
         <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
-          {loading && (
+          {loading && !hasPostgresSource && (
             <div style={{
               position: "absolute", inset: 0, display: "grid", placeItems: "center",
               color: "var(--text-tertiary)", fontSize: 14,
@@ -298,7 +369,7 @@ export function PersonGraphModal({ nom, prenom, fullName, onClose, onNavigate }:
               Chargement du graphe…
             </div>
           )}
-          {error && (
+          {error && !hasPostgresSource && (
             <div style={{
               position: "absolute", inset: 0, display: "grid", placeItems: "center",
               color: "var(--accent-rose, #fb7185)", fontSize: 13, padding: 24,
@@ -315,7 +386,7 @@ export function PersonGraphModal({ nom, prenom, fullName, onClose, onNavigate }:
               </div>
             </div>
           )}
-          {!loading && !error && data && data.top_co_mandataires.length === 0 && (
+          {!loading && !error && !hasPostgresSource && data && data.top_co_mandataires.length === 0 && (
             <div style={{
               position: "absolute", inset: 0, display: "grid", placeItems: "center",
               color: "var(--text-tertiary)", fontSize: 13, padding: 24, textAlign: "center",
