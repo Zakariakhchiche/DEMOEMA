@@ -1,0 +1,494 @@
+gold_name: gold.sci_master
+goal: >
+  🏠💎 FEATURE STORE M&A SCI — La référence consolidée pour qualifier les
+  SCIs / holdings patrimoniales en cible M&A.
+
+  Un row par SIREN SCI (forme 65xx + holdings SARL/SAS patrimoniales détectées),
+  avec 80+ colonnes couvrant : identité, patrimoine financier, ownership
+  (individual/mixed/corporate), dirigeants individus, parents corporate,
+  estimation immobilière via DVF zone, signaux compliance/BODACC/réseau,
+  scoring M&A composite + tier + valuation estimée.
+
+  Comble les trous de gold.entreprises_master (filtre M&A standard >100k€
+  capital exclut SCIs) et de gold.parcelles_cibles (structure existante mais
+  matview vide en prod 2026-05-03 : 226k rows sans valeur).
+
+  Volume cible : ~3.5M SCIs + ~50k holdings patrimoniales = ~3.55M rows.
+
+source_silvers:
+  - silver.sci_master                    # base identity + ownership + financier (à matérialiser d'abord)
+  - silver.inpi_comptes                  # bilans détaillés
+  - silver.dvf_transactions              # zone DVF par CP
+  - silver.bodacc_annonces               # events 24m
+  - silver.opensanctions                 # compliance
+  - silver.icij_offshore_match          # offshore
+  - silver.judilibre_decisions          # litigation
+  - silver.gleif_lei                    # parent LEI
+  - silver.dirigeant_sci_patrimoine     # cross-check patrimoine
+  - silver.inpi_dirigeants              # dirigeants individus
+
+source_bronzes_via_silver_master:
+  - bronze.inpi_formalites_entreprises  # identité (via silver.sci_master)
+  - bronze.inpi_formalites_personnes    # ownership_type (via silver.sci_master)
+
+grain: "1 row par SIREN SCI (clé = siren)"
+
+key_columns:
+  - siren
+
+dependencies:
+  - silver.sci_master      # MUST be materialized first
+
+# ═══════════════════════════════════════════════════════════════════
+#  SCHÉMA — 10 LAYERS
+# ═══════════════════════════════════════════════════════════════════
+
+schema: |
+
+  ─────────── LAYER 1 — IDENTITÉ ───────────
+  siren                       CHAR(9)        PK
+  denomination                TEXT
+  forme_juridique             TEXT           -- '6540' / '5499' / '5710' etc.
+  forme_juridique_libelle     TEXT           -- 'Société civile immobilière' etc.
+  code_ape                    TEXT           -- '6820B' (location logement)
+  code_ape_libelle            TEXT
+  sigle                       TEXT
+  nom_commercial              TEXT
+  is_sci                      BOOLEAN        -- forme LIKE '65%'
+  is_holding_patrimoniale     BOOLEAN        -- denomination ILIKE '%PATRIMOINE/HOLDING%' AND forme 5499/5710
+
+  ─────────── LAYER 2 — ADRESSE ───────────
+  adresse_voie                TEXT
+  adresse_code_postal         CHAR(5)
+  adresse_commune             TEXT
+  adresse_dept                CHAR(2)
+  adresse_region              TEXT
+  adresse_pays                TEXT
+  date_immatriculation        DATE
+  date_radiation              DATE
+  age_entreprise              INTEGER        -- années depuis date_immatriculation
+  statut_actif                BOOLEAN        -- date_radiation IS NULL
+
+  ─────────── LAYER 3 — PATRIMOINE FINANCIER (silver.inpi_comptes dernier bilan) ───────────
+  capital_social              NUMERIC        -- statutaire (souvent 1200€ pour SCI)
+  total_actif                 NUMERIC        -- proxy valeur enveloppe (15M€ pour ATRIUM PATRIMOINE)
+  immo_corporelles            NUMERIC        -- biens immo en propre
+  immo_financieres            NUMERIC        -- titres de participation (calculé)
+  immo_total                  NUMERIC        -- immo_corp + immo_fin
+  capitaux_propres            NUMERIC        -- valeur nette associés
+  emprunts_dettes             NUMERIC        -- effet de levier
+  patrimoine_net_estime       NUMERIC        -- ⭐ KPI : total_actif - dettes
+  ca_net                      NUMERIC        -- typiquement 0 pour SCI patrimoniale
+  resultat_net                NUMERIC        -- signal rentabilité location
+  effectif_moyen              NUMERIC
+  date_cloture_dernier_bilan  DATE
+  has_bilan_recent            BOOLEAN        -- date_cloture >= now - 2 ans
+  n_exercices_deposes         INTEGER        -- nb dépôts INPI distincts
+  capital_evolution_pct       NUMERIC        -- % growth capital_social N vs N-3
+  patrimoine_evolution_pct    NUMERIC        -- % growth total_actif N vs N-3
+
+  ─────────── LAYER 4 — OWNERSHIP (silver.sci_master) ───────────
+  n_dirigeants_individu       BIGINT
+  n_dirigeants_morale         BIGINT
+  ownership_type              TEXT           -- ⭐ 'individual' / 'mixed' / 'corporate' / 'unknown'
+  ownership_concentration     NUMERIC        -- 1.0 = 1 seul prop, plus bas = éclaté
+
+  ─────────── LAYER 5 — DIRIGEANTS INDIVIDUS (silver.inpi_dirigeants reverse) ───────────
+  dirigeants_individus_uids       TEXT[]      -- person_uid des top 5 par n_mandats
+  dirigeants_individus_noms       TEXT[]
+  dirigeants_individus_ages       INTEGER[]   -- parallèle aux noms
+  dirigeants_individus_n_mandats  INTEGER[]   -- parallèle
+  has_famille_unique              BOOLEAN     -- tous même nom de famille (signal "MAISON LAMOUR")
+  famille_dominante_nom           TEXT        -- nom famille majoritaire
+  has_dirigeant_senior            BOOLEAN     -- ≥ 60 ans
+  age_dirigeant_max               INTEGER
+  age_dirigeant_min               INTEGER
+  has_minor_dirigeant             BOOLEAN     -- < 18 ans (signal transmission)
+  has_successeur                  BOOLEAN     -- dirigeant < 45 ans même nom de famille
+
+  ─────────── LAYER 6 — PARENTS CORPORATE (si ownership_type ≠ individual) ───────────
+  parent_sirens                   CHAR(9)[]
+  parent_denominations            TEXT[]
+  has_holding_parent              BOOLEAN     -- parent forme 5710/5499 + PATRIMOINE/HOLDING
+  has_lei_parent                  BOOLEAN     -- parent dans silver.gleif_lei
+  ultimate_parent_lei             TEXT        -- chaîne LEI complète
+  ultimate_parent_country         CHAR(2)     -- pays maison-mère
+
+  ─────────── LAYER 7 — ESTIMATION IMMOBILIÈRE (silver.dvf_transactions par CP, 5 ans) ───────────
+  dvf_zone_n_transactions_5y      BIGINT
+  dvf_zone_prix_m2_median         NUMERIC     -- € / m² médian zone CP
+  dvf_zone_prix_m2_p25            NUMERIC
+  dvf_zone_prix_m2_p75            NUMERIC
+  dvf_zone_appartement_prix_m2    NUMERIC     -- filtré type 'Appartement'
+  dvf_zone_maison_prix_m2         NUMERIC
+  dvf_zone_total_volume_eur       NUMERIC     -- volume agrégé 5 ans
+  -- Estimation valuation immo (3 niveaux croissants)
+  estimation_value_min_eur        NUMERIC     -- = immo_corporelles (valeur comptable)
+  estimation_value_avg_eur        NUMERIC     -- = (immo_corp + total_actif - dettes) / 2
+  estimation_value_max_eur        NUMERIC     -- = total_actif (vision optimiste)
+  -- Si gold.parcelles_cibles matérialisée un jour :
+  n_parcelles_cadastrales         INTEGER     -- DGFiP
+  surface_totale_m2               NUMERIC     -- DGFiP cadastre
+  valeur_immo_dvf_calculee_eur    NUMERIC     -- = surface × dvf_zone_prix_m2_median (vrai estimate)
+
+  ─────────── LAYER 8 — SIGNAUX M&A (BODACC + sanctions + litigation) ───────────
+  bodacc_n_events_24m                  BIGINT
+  bodacc_has_cession_event             BOOLEAN     -- ⭐ signal vente
+  bodacc_has_modif_capital_event       BOOLEAN
+  bodacc_has_modif_dirigeant_event     BOOLEAN
+  bodacc_has_dissolution_event         BOOLEAN
+  bodacc_last_event_date               DATE
+  has_late_filing                      BOOLEAN     -- retard dépôt comptes (signal stress)
+  has_radiation_recent                 BOOLEAN     -- < 12 mois
+  has_sanction                         BOOLEAN     -- silver.opensanctions
+  has_offshore_match                   BOOLEAN     -- silver.icij_offshore_match
+  has_judilibre_decision               BOOLEAN     -- silver.judilibre_decisions
+
+  ─────────── LAYER 9 — RÉSEAU DIRIGEANTS ───────────
+  n_co_sci_partenaires            INTEGER     -- nombre d'autres SCIs partageant un dirigeant
+  co_dirigeants_total_mandats     BIGINT      -- somme n_mandats des co-dirigeants
+  partenaire_principal_uid        TEXT        -- person_uid du dirigeant le + lié
+
+  ─────────── LAYER 10 — SCORING M&A PATRIMOINE & TIER (computed) ───────────
+  patrimoine_net_score            INTEGER     -- 0-100, normalisé log(patrimoine_net_estime)
+  transmission_score              INTEGER     -- 0-100, age_dirigeant_max + has_successeur
+  diversification_geo_score       INTEGER     -- 0-100, n_codes_postaux distincts si multi-SCI
+  liquidite_score                 INTEGER     -- 0-100, ca_net/total_actif (loyers vs patrimoine)
+  compliance_score                INTEGER     -- 0-100, inverse signaux compliance
+  structure_score                 INTEGER     -- 0-100, simplicité ownership
+
+  deal_score                      INTEGER     -- ⭐ 0-100, composite pondéré des 6 axes
+  tier                            TEXT        -- ⭐ 'A_HOT' (≥80) / 'B_WARM' (60-80) / 'C_PIPELINE' (40-60) / 'D_WATCH' (20-40) / 'E_REJECT' (<20)
+  valuation_estimee_eur           NUMERIC     -- ⭐ patrimoine_net_estime × multiple sectoriel SCI (1.0-1.3x)
+
+  ─────────── METADATA ───────────
+  source_priority                 TEXT        -- 'silver_complete' / 'silver_partial' / 'bronze_only'
+  data_quality_score              INTEGER     -- 0-100 (pourcentage de colonnes non-NULL)
+  materialized_at                 TIMESTAMPTZ DEFAULT now()
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  BUSINESS LOGIC — Calculs M&A clés
+# ═══════════════════════════════════════════════════════════════════
+
+business_logic: |
+
+  PATRIMOINE_NET_ESTIME — KPI principal
+  =====================================
+  CASE
+    WHEN total_actif IS NOT NULL THEN total_actif - COALESCE(emprunts_dettes, 0)
+    WHEN immo_corporelles IS NOT NULL THEN immo_corporelles
+    WHEN capital_social IS NOT NULL THEN capital_social * 50  -- proxy 50x si rien d'autre
+    ELSE NULL
+  END
+
+  OWNERSHIP_TYPE
+  ==============
+  CASE
+    WHEN n_dirigeants_morale = 0 AND n_dirigeants_individu > 0 THEN 'individual'
+    WHEN n_dirigeants_individu = 0 AND n_dirigeants_morale > 0 THEN 'corporate'
+    WHEN n_dirigeants_individu > 0 AND n_dirigeants_morale > 0 THEN 'mixed'
+    ELSE 'unknown'
+  END
+
+  DEAL_SCORE (composite pondéré 6 axes)
+  =====================================
+  ROUND(
+      0.30 * patrimoine_net_score      -- poids principal : taille
+    + 0.20 * transmission_score        -- prêt à céder
+    + 0.15 * compliance_score          -- propre = bankable
+    + 0.15 * structure_score           -- simple = transactionnable
+    + 0.10 * liquidite_score           -- loyers stables
+    + 0.10 * diversification_geo_score -- portefeuille équilibré
+  )
+
+  TIER
+  ====
+  CASE
+    WHEN deal_score >= 80 THEN 'A_HOT'
+    WHEN deal_score >= 60 THEN 'B_WARM'
+    WHEN deal_score >= 40 THEN 'C_PIPELINE'
+    WHEN deal_score >= 20 THEN 'D_WATCH'
+    ELSE 'E_REJECT'
+  END
+
+  VALUATION_ESTIMEE_EUR (multiples sectoriels SCI)
+  ================================================
+  CASE
+    WHEN ownership_type = 'individual' AND has_famille_unique THEN patrimoine_net_estime * 1.0   -- prix net
+    WHEN ownership_type = 'corporate' THEN patrimoine_net_estime * 1.2                            -- prime structure
+    WHEN ownership_type = 'mixed' THEN patrimoine_net_estime * 1.1                                -- intermédiaire
+    ELSE patrimoine_net_estime
+  END
+
+  Si valeur_immo_dvf_calculee_eur dispo (gold.parcelles_cibles populé) :
+  → override valuation_estimee_eur = MAX(patrimoine_net_estime × multiple, valeur_immo_dvf_calculee_eur × 0.95)
+
+  HAS_FAMILLE_UNIQUE
+  ==================
+  count(DISTINCT individu_nom) FILTER (
+    WHERE p.siren = sci.siren AND p.type_de_personne = 'INDIVIDU' AND p.actif = true
+  ) = 1
+
+  PATRIMOINE_NET_SCORE (log normalisé)
+  ====================================
+  -- Échelle log car patrimoines vont de 1k€ à 1Md€
+  ROUND(
+    LEAST(100,
+      GREATEST(0,
+        20 * (LOG(GREATEST(patrimoine_net_estime, 1) + 1) - LOG(100_000))
+        / (LOG(50_000_000) - LOG(100_000))
+      )
+    )
+  )
+  -- 100k€ → 0 / 50M€ → 100 (linéaire en log)
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  STRATÉGIE DATA — 4 PHASES DE DÉPLOIEMENT
+# ═══════════════════════════════════════════════════════════════════
+
+deployment_strategy: |
+
+  PHASE 0 — IMMÉDIAT (code-only, pas de bootstrap)
+  ================================================
+  ✅ Enrichir /api/datalake/entreprise/search runtime avec :
+     - silver.inpi_comptes (total_actif, immo_corporelles, capitaux_propres,
+       emprunts_dettes, patrimoine_net_estime calculé)
+     - silver.inpi_dirigeants.formes_juridiques[i] (forme par siren)
+     - silver.dirigeant_sci_patrimoine.sci_code_postaux[] (CP des SCIs)
+  ⏱️ Coût : 30 min code, deploy backend seulement
+  📊 Couverture : ~50% des SCIs (celles avec dirigeants individus connus)
+  ❌ Manque : ownership_type, NAF pour SCIs hors silver, DVF zone, scoring
+
+  PHASE 1 — BOOTSTRAP silver.sci_master (intermediate)
+  ====================================================
+  ✅ Spec déjà créée : silver_specs/sci_master.yaml
+  ✅ Source : bronze.inpi_formalites_entreprises (identité + capital + adresse)
+            + bronze.inpi_formalites_personnes (ownership_type)
+            + silver.inpi_comptes (financier dernier bilan)
+            + silver.inpi_dirigeants (dirigeants individus)
+            + silver.dvf_transactions (zone DVF prix m²)
+  ⏱️ Coût : 30 min refresh silver_runner sur VPS (~3-4M rows à matérialiser)
+  📊 Couverture : 100% des SCIs (forme 65xx + holdings patrimoniales SARL/SAS)
+  ✅ Tout ce qui manque en Phase 0 sauf scoring M&A composite + estimation valuation
+
+  PHASE 2 — BOOTSTRAP gold.sci_master (cible finale, ce document)
+  ===============================================================
+  ✅ Source primaire : silver.sci_master (Phase 1)
+  ✅ Enrichissements gold : BODACC events + sanctions + offshore + LEI parents
+                           + scoring 6 axes + tier + valuation
+  ⏱️ Coût : 45 min refresh gold_runner (calculs scoring sur 3.55M rows)
+  📊 Couverture : Identique Phase 1 + scoring M&A + valuation
+  ✅ Endpoint /api/datalake/sci/{siren} + LLM tool get_fiche_sci + UI Fiche SCI drawer
+
+  PHASE 3 — INTÉGRATION FRONTEND + LLM
+  =====================================
+  ✅ /api/datalake/sci/{siren} : fiche complète SCI (analogue /dirigeant/{nom}/{prenom})
+  ✅ LLM tool get_fiche_sci : invocable par le copilot
+  ✅ UI : drawer "Fiche SCI" avec toutes les sections (Identité, Patrimoine,
+         Ownership, Dirigeants, Parents corporate, Estimation immo, Signaux,
+         Scoring) — pattern identique à PersonSheet pour dirigeants
+  ⏱️ Coût : 1-2 jours dev frontend + tests browser
+
+  PHASE 4 — ENRICHISSEMENTS FUTURS (roadmap)
+  ===========================================
+  📌 Matérialiser gold.parcelles_cibles via DGFiP cadastre + jointure SIREN
+     → surface_totale_m2 réelle + valeur_immo_dvf_calculee_eur exacte
+  📌 Ajouter signaux marché : presse récente sur la SCI (silver.press_mentions_matched)
+  📌 Calcul réseau : co-investissement entre SCIs (graphe Neo4j)
+  📌 Veille événementielle : alertes BODACC nouveaux events (Phase Watchlist)
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  COÛT & VOLUME
+# ═══════════════════════════════════════════════════════════════════
+
+estimated_volume: |
+
+  VOLUME (cible Phase 2 — gold.sci_master) :
+  - ~3.5M SCIs en France (forme 65xx)
+  - + ~50k holdings patrimoniales SARL/SAS détectées
+  - = ~3.55M rows total
+
+  STORAGE :
+  - ~80 colonnes × 3.55M rows × ~200 bytes/row moyen
+  - = ~6 GB matview (avec indices : ~10 GB total)
+
+  REFRESH :
+  - Phase 1 (silver.sci_master) : ~30 min
+  - Phase 2 (gold.sci_master) : ~45 min (calculs scoring)
+  - Total cron 24h : ~1h15
+
+  COMPUTE :
+  - Postgres VPS IONOS actuel : suffisant (déjà 100M+ rows total)
+  - Pas besoin scale-out
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  INDEXES
+# ═══════════════════════════════════════════════════════════════════
+
+indexes:
+  - siren                                          # PK lookup direct
+  - "patrimoine_net_estime DESC NULLS LAST"        # top patrimoine
+  - "deal_score DESC"                              # top M&A targets
+  - tier                                           # filtre tier
+  - ownership_type                                 # filtre individual/corporate
+  - adresse_dept                                   # filtre géo
+  - "is_sci"                                       # boolean partiel
+  - "GIN(dirigeants_individus_uids)"               # search par dirigeant
+  - "GIN(parent_sirens)"                           # search par groupe parent
+
+refresh_trigger: "interval_hours=24"
+sla_minutes: 1500
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  EXEMPLE CONCRET — ATRIUM PATRIMOINE 897992525
+# ═══════════════════════════════════════════════════════════════════
+
+example_row: |
+
+  Pour ATRIUM PATRIMOINE 897992525, après Phase 2 :
+
+  {
+    siren: "897992525",
+    denomination: "ATRIUM PATRIMOINE",
+    forme_juridique: "5499",
+    is_sci: false,
+    is_holding_patrimoniale: true,                  -- ATRIUM PATRIMOINE déclenche la heuristique
+
+    adresse_code_postal: "75016",                   -- via dirigeant_sci_patrimoine ou bronze
+    adresse_dept: "75",
+    age_entreprise: 5,                              -- 2021 -> 2026
+
+    capital_social: 1200,
+    total_actif: 15039011,                          -- 15 M€
+    immo_corporelles: 14675,
+    capitaux_propres: NULL,                         -- non renseigné dans silver.inpi_comptes
+    emprunts_dettes: NULL,
+    patrimoine_net_estime: 15039011,                -- ⭐ 15 M€ (= total_actif si dette inconnue)
+    has_bilan_recent: true,                         -- 2023-12-31 < 2 ans
+
+    n_dirigeants_individu: 2,                       -- Vincent LAMOUR + Estelle DUBERNARD
+    n_dirigeants_morale: 0,                         -- aucun
+    ownership_type: "individual",                   -- ⭐ patrimoine personnel
+    has_famille_unique: false,                      -- 2 noms différents (LAMOUR, DUBERNARD)
+
+    dirigeants_individus_noms: ["Vincent LAMOUR", "Estelle DUBERNARD"],
+    dirigeants_individus_ages: [52, 51],
+    dirigeants_individus_n_mandats: [23, 19],
+    age_dirigeant_max: 52,
+    has_dirigeant_senior: false,                    -- pas encore 60 ans
+
+    parent_sirens: [],                              -- pas corporate
+    parent_denominations: [],
+
+    dvf_zone_n_transactions_5y: 27026,              -- 75016 (Paris 16e) déjà connu via fiche dirigeant
+    dvf_zone_prix_m2_median: 12500,                 -- € / m² médian Paris 16e
+    dvf_zone_total_volume_eur: 38_600_000_000,      -- 38.6 Md€
+
+    estimation_value_min_eur: 14675,                -- = immo_corporelles
+    estimation_value_avg_eur: 7_519_505,
+    estimation_value_max_eur: 15039011,             -- = total_actif
+
+    bodacc_n_events_24m: 7,
+    bodacc_has_modif_dirigeant_event: true,         -- vu dans le test browser
+
+    patrimoine_net_score: 78,                       -- 15 M€ → log normalisé
+    transmission_score: 30,                         -- dirigeants 51-52 ans, pas senior
+    compliance_score: 100,                          -- aucun signal
+    structure_score: 90,                            -- ownership simple individual
+    liquidite_score: 5,                             -- ca_net=0 (patrimoniale dormant)
+    diversification_geo_score: 20,                  -- 1 seul CP
+
+    deal_score: 64,                                 -- ⭐ composite
+    tier: "B_WARM",                                 -- 60-80
+    valuation_estimee_eur: 15_039_011,              -- patrimoine_net × multiple individual 1.0x
+
+    materialized_at: "2026-05-03T..."
+  }
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  PROTOTYPE SQL — COMPUTE deal_score / tier / valuation
+# ═══════════════════════════════════════════════════════════════════
+
+scoring_sql_excerpt: |
+
+  -- Materialized view body (extract)
+  WITH base AS (
+    SELECT * FROM silver.sci_master
+  ),
+  bodacc_agg AS (
+    SELECT siren,
+           count(*) FILTER (WHERE date_parution >= now() - interval '24 months') AS bodacc_n_events_24m,
+           bool_or(type_avis ILIKE '%cession%') AS bodacc_has_cession_event,
+           bool_or(type_avis ILIKE '%dirigeant%') AS bodacc_has_modif_dirigeant_event,
+           max(date_parution) AS bodacc_last_event_date
+    FROM silver.bodacc_annonces
+    WHERE date_parution >= now() - interval '24 months'
+    GROUP BY siren
+  ),
+  scored AS (
+    SELECT
+      b.*,
+      -- 6 axes 0-100
+      ROUND(LEAST(100, GREATEST(0,
+        20 * (LOG(GREATEST(b.patrimoine_net_estime, 1) + 1) - LOG(100000))
+        / NULLIF(LOG(50000000) - LOG(100000), 0)
+      ))) AS patrimoine_net_score,
+      CASE
+        WHEN b.age_dirigeant_max >= 70 THEN 90
+        WHEN b.age_dirigeant_max >= 60 AND b.has_successeur THEN 80
+        WHEN b.age_dirigeant_max >= 60 THEN 70
+        WHEN b.age_dirigeant_max >= 50 THEN 50
+        ELSE 30
+      END AS transmission_score,
+      CASE
+        WHEN b.has_sanction OR b.has_offshore_match OR b.has_judilibre_decision THEN 0
+        WHEN b.has_late_filing OR b.has_radiation_recent THEN 50
+        ELSE 100
+      END AS compliance_score,
+      CASE
+        WHEN b.ownership_type = 'individual' THEN 95
+        WHEN b.ownership_type = 'mixed' THEN 70
+        WHEN b.ownership_type = 'corporate' AND NOT b.has_holding_parent THEN 60
+        WHEN b.ownership_type = 'corporate' AND b.has_holding_parent THEN 40
+        ELSE 50
+      END AS structure_score,
+      ROUND(LEAST(100, GREATEST(0,
+        100 * COALESCE(b.ca_net / NULLIF(b.total_actif, 0), 0)
+      ))) AS liquidite_score,
+      LEAST(100, COALESCE(array_length(b.adresse_code_postal_distincts, 1), 1) * 25) AS diversification_geo_score
+    FROM base b
+    LEFT JOIN bodacc_agg ba ON ba.siren = b.siren
+  ),
+  composite AS (
+    SELECT *,
+      ROUND(
+        0.30 * patrimoine_net_score
+      + 0.20 * transmission_score
+      + 0.15 * compliance_score
+      + 0.15 * structure_score
+      + 0.10 * liquidite_score
+      + 0.10 * diversification_geo_score
+      ) AS deal_score
+    FROM scored
+  )
+  SELECT *,
+    CASE
+      WHEN deal_score >= 80 THEN 'A_HOT'
+      WHEN deal_score >= 60 THEN 'B_WARM'
+      WHEN deal_score >= 40 THEN 'C_PIPELINE'
+      WHEN deal_score >= 20 THEN 'D_WATCH'
+      ELSE 'E_REJECT'
+    END AS tier,
+    CASE
+      WHEN ownership_type = 'individual' THEN COALESCE(patrimoine_net_estime, 0) * 1.0
+      WHEN ownership_type = 'corporate' THEN COALESCE(patrimoine_net_estime, 0) * 1.2
+      WHEN ownership_type = 'mixed' THEN COALESCE(patrimoine_net_estime, 0) * 1.1
+      ELSE COALESCE(patrimoine_net_estime, 0)
+    END AS valuation_estimee_eur
+  FROM composite
