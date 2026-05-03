@@ -160,6 +160,32 @@ COPILOT_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "search_entreprise_by_name",
+            "description": (
+                "Recherche LARGE d'entreprise par nom — sans filtre M&A, sans "
+                "floor CA. Couvre SCIs patrimoniales, holdings, structures non-"
+                "cotées (typiquement absentes de search_cibles qui filtre par "
+                "CA min 1M€). Source : silver.inpi_comptes denomination ILIKE "
+                "+ fallback silver.insee_unites_legales.denomination_unite. "
+                "Retourne siren + denomination + ca_dernier (si dispo) + "
+                "forme_juridique + etat_administratif. À utiliser en premier "
+                "quand l'utilisateur demande 'qui est <nom de société>' ou "
+                "'fiche de <nom>' avant de tenter search_cibles. Si trouvé, "
+                "enchaîner avec get_fiche_entreprise(siren) pour le détail."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "q": {"type": "string", "description": "Nom ou fragment de raison sociale (>= 2 chars). Ex: 'ATRIUM PATRIMOINE'"},
+                    "limit": {"type": "integer", "description": "Nombre de résultats max (default 10, max 30)"},
+                },
+                "required": ["q"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_dirigeant",
             "description": (
                 "Profil complet dirigeant: identité INPI (mandats, formes, rôles), "
@@ -542,6 +568,25 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
                         for c in cibles
                     ]}
                 return {"error": f"HTTP {r.status_code}", "cibles": []}
+
+        elif name == "search_entreprise_by_name":
+            q = (args.get("q") or "").strip()
+            if len(q) < 2:
+                return {"error": "q (>= 2 chars) requis"}
+            limit = max(1, min(int(args.get("limit", 10)), 30))
+            async with httpx.AsyncClient(timeout=12) as client:
+                r = await client.get(
+                    f"{datalake_base}/api/datalake/entreprise/search",
+                    params={"q": q, "limit": limit},
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    return {
+                        "n": data.get("n", 0),
+                        "results": data.get("results", []),
+                        "source": "silver.inpi_comptes + silver.insee_unites_legales (sans floor CA)",
+                    }
+                return {"error": f"HTTP {r.status_code}", "n": 0, "results": []}
 
         elif name == "get_fiche_entreprise":
             siren = args.get("siren", "")
@@ -1038,7 +1083,8 @@ _SYSTEM_PROMPT_TOOLS = (
     "Réponds en français, concis et professionnel, en markdown.\n\n"
     "Tu as accès au datalake DEMOEMA (107M rows silver) + Neo4j graphe (18.6M nodes, 7.7M relations CO_MANDATE) via 18 tools :\n"
     "**Identité & sourcing** :\n"
-    "- search_cibles : cibles M&A par texte/dept/score\n"
+    "- search_entreprise_by_name : recherche LARGE par dénomination (sans floor CA, couvre SCIs/holdings/structures non-cotées)\n"
+    "- search_cibles : cibles M&A par texte/dept/score (filtre CA ≥ 1M€)\n"
     "- get_fiche_entreprise : fiche complète par SIREN\n"
     "- search_dirigeants_60plus : dirigeants 60+ multi-mandats (succession)\n"
     "- search_sci_patrimoine : top dirigeants par capital SCI cumulé\n"
@@ -1072,7 +1118,13 @@ _SYSTEM_PROMPT_TOOLS = (
     "(PAS département 28 Eure-et-Loir) ; 'Q1/55 fusion vs acquisition' = définition M&A "
     "(PAS sociétés du dept 1 ni T1 2026).\n\n"
     "**RÈGLE CRITIQUE** : tu DOIS appeler les tools pour répondre. Ne jamais halluciner de données.\n"
-    "Si on te demande une entreprise (TotalEnergies, Renault, Carrefour...), appelle search_cibles ou get_fiche_entreprise.\n"
+    "Pour une entreprise : appelle d'abord `search_entreprise_by_name(q=...)` (couverture maximale, "
+    "SCIs/holdings/non-cotées incluses), puis `get_fiche_entreprise(siren)` pour le détail. "
+    "`search_cibles` est M&A-only (CA ≥ 1M€) — à utiliser quand l'utilisateur demande des cibles "
+    "qualifiées (sourcing par secteur/dept/score), pas pour une recherche par nom exact. "
+    "Exemple : 'qui est ATRIUM PATRIMOINE' → search_entreprise_by_name(q='ATRIUM PATRIMOINE') "
+    "→ get_fiche_entreprise(siren='798303731') ; ne JAMAIS conclure 'pas trouvé' sans avoir "
+    "essayé search_entreprise_by_name d'abord.\n"
     "Combine plusieurs tools si pertinent (ex: get_fiche + check_offshore + check_lobbying pour DD).\n"
     "Si tu ne trouves rien, dis-le clairement plutôt qu'inventer.\n"
     "Si un tool retourne `\"degraded\": true` (fallback cache local), mentionne-le explicitement à l'utilisateur.\n"

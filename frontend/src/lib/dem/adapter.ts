@@ -43,6 +43,28 @@ import type { Target, Person } from "./types";
  * normalise déjà côté Python (UPPER + strip accents), donc on renvoie la
  * casse originale ; PersonSheet drawer fera le reste.
  */
+/** Mots qui trahissent un nom d'entreprise quand ils apparaissent dans
+ * candidate.nom ou candidate.prenom — utilisé pour rejeter "ATRIUM PATRIMOINE",
+ * "MESANGE CAPITAL", "MAISON LAMOUR", etc. dans extractFocusPersonFromQuery
+ * (ils tomberont alors dans extractFocusEntrepriseFromQuery). */
+const CORPORATE_SUFFIX_TOKENS = new Set([
+  "patrimoine", "capital", "holding", "holdings", "groupe", "group",
+  "société", "societe", "compagnie", "company", "industries", "industrie",
+  "finance", "finances", "investissement", "investissements", "invest",
+  "consulting", "conseil", "conseils", "services", "service",
+  "immobilier", "immobiliere", "immobiliers",
+  "sci", "sas", "sasu", "sarl", "eurl", "snc", "sa",
+  "association", "fondation", "fonds",
+  "banque", "assurance", "assurances",
+  "energie", "energies", "telecom", "telecoms",
+  "international", "france", "europe", "monde",
+  "gestion", "management", "partners", "partenaires",
+  "technologie", "technologies", "tech", "labs", "lab",
+  "solutions", "solution", "systems", "system", "studio", "studios",
+  "media", "medias", "edition", "editions",
+  "immobiliere", "patrimoines",
+]);
+
 export function extractFocusPersonFromQuery(text: string): { nom: string; prenom: string } | null {
   if (!text || text.length < 5 || text.length > 500) return null;
 
@@ -56,11 +78,18 @@ export function extractFocusPersonFromQuery(text: string): { nom: string; prenom
     "au", "aux", "que", "qui", "comment", "pourquoi", "quand", "où",
   ]);
 
+  const hasCorporateToken = (s: string): boolean => {
+    return s.toLowerCase().split(/[\s\-']+/).some(t => CORPORATE_SUFFIX_TOKENS.has(t));
+  };
+
   const isPersonName = (prenom: string, nom: string): boolean => {
     if (prenom.length < 2 || prenom.length > 30) return false;
     if (nom.length < 2 || nom.length > 60) return false;
     if (blacklist.has(prenom.toLowerCase())) return false;
     if (blacklist.has(nom.toLowerCase().split(" ")[0])) return false;
+    // Reject si l'un des tokens trahit une entreprise (PATRIMOINE, CAPITAL, SCI…).
+    // L'extraction entreprise prendra alors le relai.
+    if (hasCorporateToken(prenom) || hasCorporateToken(nom)) return false;
     // Nom doit contenir uniquement lettres/-/'/espace
     if (!/^[A-Za-zÀ-ÿ\-' ]+$/.test(prenom)) return false;
     if (!/^[A-Za-zÀ-ÿ\-' ]+$/.test(nom)) return false;
@@ -100,6 +129,78 @@ export function extractFocusPersonFromQuery(text: string): { nom: string; prenom
   }
 
   return null;
+}
+
+/** Extrait le nom d'entreprise FOCUS d'une question utilisateur.
+ *
+ * Couvre les patterns :
+ *   - "qui est ATRIUM PATRIMOINE" / "qui est atrium patrimoine"
+ *   - "fiche de MESANGE CAPITAL"
+ *   - "infos sur Maison Lamour"
+ *   - "PUMA CAPITAL" tout court (token entreprise dominant, query courte)
+ *   - "TotalEnergies", "Carrefour" (single capitalized word, query <= 4 mots)
+ *
+ * Stratégie :
+ *   1. Marqueur d'intention (qui est, fiche de, infos sur…) suivi de N mots.
+ *   2. Si la query est courte (≤ 5 mots) sans marqueur d'intention, cherche un
+ *      groupe de mots dont au moins un est un token "corporate" (PATRIMOINE,
+ *      CAPITAL, HOLDING, SCI, etc.) ou tout en majuscules.
+ *
+ * Returns la dénomination (telle que tapée, capitalisation préservée — le
+ * backend silver fait ILIKE % donc casse-insensible).
+ */
+export function extractFocusEntrepriseFromQuery(text: string): { q: string } | null {
+  if (!text || text.length < 3 || text.length > 500) return null;
+  const trimmed = text.trim();
+
+  const hasCorporateToken = (s: string): boolean => {
+    return s.toLowerCase().split(/[\s\-']+/).some(t => CORPORATE_SUFFIX_TOKENS.has(t));
+  };
+
+  // 1. Intent-based : "qui est <X>", "fiche de <X>", "infos sur <X>".
+  const reIntent = /(?:qui\s+(?:est|sont)|fiche\s+(?:de|du|d'|détaillée\s+de)|infos?\s+sur|recherche|donne[ -]moi(?:\s+(?:la\s+fiche|le\s+profil|les?\s+infos))?\s+(?:de|sur|pour|du|d')|montre[ -]moi(?:\s+la\s+fiche)?\s+(?:de|d')|parle[ -]moi\s+de)\s+(?:l['ea]\s+)?([A-Za-zÀ-ÿ0-9][A-Za-zÀ-ÿ0-9\-' ]{1,80})\??\s*$/i;
+  const mIntent = reIntent.exec(trimmed);
+  if (mIntent) {
+    const candidate = mIntent[1].trim().replace(/\s+/g, " ");
+    // Filtrer si trop court ou si c'est un single common word (pas distinctif).
+    if (candidate.length >= 3 && /[A-Za-zÀ-ÿ]/.test(candidate)) {
+      return { q: candidate };
+    }
+  }
+
+  // 2. Query courte (≤ 6 mots) + au moins un token corporate ou un mot all-caps.
+  const words = trimmed.split(/\s+/);
+  if (words.length <= 6) {
+    const hasUpperWord = words.some(w => /^[A-ZÀ-ÖØ-Ý]{3,}/.test(w) && w.length >= 3);
+    if (hasCorporateToken(trimmed) || hasUpperWord) {
+      // Strip filler words at start ("la", "le", "les", "société", "groupe")
+      const cleaned = trimmed
+        .replace(/^(la|le|les|société|societe|groupe|group)\s+/i, "")
+        .trim();
+      if (cleaned.length >= 3) {
+        return { q: cleaned };
+      }
+    }
+  }
+
+  return null;
+}
+
+/** Cherche une entreprise par nom en backend silver (sans floor CA). */
+export async function searchEntrepriseByName(q: string, limit = 5): Promise<Target[]> {
+  if (!q || q.length < 2) return [];
+  try {
+    const res = await fetch(
+      `/api/datalake/entreprise/search?q=${encodeURIComponent(q)}&limit=${limit}`,
+      { credentials: "same-origin" }
+    );
+    if (!res.ok) return [];
+    const data = (await res.json()) as { results?: Record<string, unknown>[] };
+    const results = data.results ?? [];
+    return results.map((r) => rowToTarget(r));
+  } catch {
+    return [];
+  }
 }
 
 export function extractDirigeantsFromText(text: string): Person[] {
