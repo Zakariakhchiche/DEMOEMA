@@ -96,13 +96,23 @@ export function extractFocusPersonFromQuery(text: string): { nom: string; prenom
     return true;
   };
 
+  // Strippe les suffixes "né en 1974" / "née le 12 mars" / "born in 1974"
+  // qui polluent le nom quand le user tape "qui est vincent lamour né en 1974".
+  // Sans ce strip, mIntent[2] = "lamour né en" et /dirigeant/lamour%20né%20en
+  // remonte 404 + PersonCard reste à "—".
+  const stripDateSuffix = (s: string): string => {
+    return s
+      .replace(/\s+(?:né\(e\)|née?|ne|nee|born)\s+.*$/i, "")
+      .trim();
+  };
+
   // 1. LLM-style strict : "Prénom NOMCAPS" — peut apparaître au milieu d'une
   //    phrase ("Profil compliance et reseau de Bernard ARNAULT").
   const reLLM = /(?<![A-Za-zÀ-ÿ])([A-ZÀ-ÖØ-Ý][a-zà-öø-ÿ\-']{1,30})\s+([A-ZÀ-ÖØ-Ý][A-ZÀ-ÖØ-Ý\-']{1,40}(?:\s+[A-ZÀ-ÖØ-Ý][A-ZÀ-ÖØ-Ý\-']{1,40}){0,3})(?![A-Za-zÀ-ÿ])/;
   const mLLM = reLLM.exec(text);
   if (mLLM) {
     const prenom = mLLM[1].trim();
-    const nom = mLLM[2].trim().replace(/\s+/g, " ");
+    const nom = stripDateSuffix(mLLM[2].trim().replace(/\s+/g, " "));
     if (isPersonName(prenom, nom)) return { nom, prenom };
   }
 
@@ -113,7 +123,7 @@ export function extractFocusPersonFromQuery(text: string): { nom: string; prenom
   const mIntent = reIntent.exec(text);
   if (mIntent) {
     const prenom = mIntent[1].trim();
-    const nom = mIntent[2].trim().replace(/\s+/g, " ");
+    const nom = stripDateSuffix(mIntent[2].trim().replace(/\s+/g, " "));
     if (isPersonName(prenom, nom)) return { nom, prenom };
   }
 
@@ -124,7 +134,7 @@ export function extractFocusPersonFromQuery(text: string): { nom: string; prenom
   const mTitle = reTitle.exec(text);
   if (mTitle) {
     const prenom = mTitle[1].trim();
-    const nom = mTitle[2].trim();
+    const nom = stripDateSuffix(mTitle[2].trim());
     if (isPersonName(prenom, nom)) return { nom, prenom };
   }
 
