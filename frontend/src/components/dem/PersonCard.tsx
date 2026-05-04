@@ -30,8 +30,12 @@ export function PersonCard({ person, onOpen }: Props) {
     const { nom, prenom } = splitNomPrenom(person);
     if (!nom || !prenom) return;
     let cancelled = false;
-    const dn = person.date_naissance && person.date_naissance.length >= 7
-      ? person.date_naissance.slice(0, 7)
+    // Backend accepte 1974 (LIKE '1974%') ou 1974-04 (LIKE '1974-04%') ou
+    // 1974-04-12 (exact). On passe ce qu'on a — au minimum l'année suffit
+    // pour disambiguer 6 homonymes Vincent LAMOUR. Cf. SKILL demoema-fiche-dirigeant
+    // : la clé d'unicité silver.inpi_dirigeants = (nom, prenom, date_naissance).
+    const dn = person.date_naissance && person.date_naissance.length >= 4
+      ? (person.date_naissance.length >= 7 ? person.date_naissance.slice(0, 7) : person.date_naissance.slice(0, 4))
       : undefined;
     datalakeApi
       .dirigeantFull(nom, prenom, dn)

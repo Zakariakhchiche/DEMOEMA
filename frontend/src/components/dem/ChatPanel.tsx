@@ -365,7 +365,7 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
           age: 0, score: 0, mandats: 0, sci: 0, entreprises: [],
           event: null, dept: "",
           nom_raw: focusPersonRaw.nom, prenom_raw: focusPersonRaw.prenom,
-          date_naissance: null,
+          date_naissance: focusPersonRaw.dateNaissance ?? null,
         }
       : null;
 
