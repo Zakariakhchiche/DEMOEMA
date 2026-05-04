@@ -65,8 +65,18 @@ const CORPORATE_SUFFIX_TOKENS = new Set([
   "immobiliere", "patrimoines",
 ]);
 
-export function extractFocusPersonFromQuery(text: string): { nom: string; prenom: string } | null {
+export function extractFocusPersonFromQuery(text: string): { nom: string; prenom: string; dateNaissance?: string } | null {
   if (!text || text.length < 5 || text.length > 500) return null;
+
+  // Capture optionnelle de l'année de naissance pour disambiguer homonymes.
+  // Ex: "vincent lamour né en 1974" -> 1974. Backend silver fait LIKE '1974%'
+  // donc match les formats 1974, 1974-04-12, etc. CRITIQUE: silver.inpi_dirigeants
+  // a 6 Vincent LAMOUR distincts (clé d'unicité = nom+prenom+date_naissance).
+  // Sans date, le tie-breaker prend un autre Vincent et la fiche affiche
+  // 1 mandat + Pascale NICOL au lieu de 23 mandats + Estelle DUBERNARD.
+  const reYear = /\b(?:né\(?e?\)?|nee?|ne|born)\s+(?:en|le|in|à)?\s*(?:\d{1,2}[\/\-\s])*(\d{4})\b/i;
+  const mYear = reYear.exec(text);
+  const dateNaissance = mYear?.[1];
 
   const blacklist = new Set([
     "donne", "liste", "fiche", "profil", "recherche", "cherche", "trouve",
@@ -113,7 +123,7 @@ export function extractFocusPersonFromQuery(text: string): { nom: string; prenom
   if (mLLM) {
     const prenom = mLLM[1].trim();
     const nom = stripDateSuffix(mLLM[2].trim().replace(/\s+/g, " "));
-    if (isPersonName(prenom, nom)) return { nom, prenom };
+    if (isPersonName(prenom, nom)) return { nom, prenom, ...(dateNaissance && { dateNaissance }) };
   }
 
   // 2. Intent-based : extraction après marqueur d'intention (case-insensitive).
@@ -124,7 +134,7 @@ export function extractFocusPersonFromQuery(text: string): { nom: string; prenom
   if (mIntent) {
     const prenom = mIntent[1].trim();
     const nom = stripDateSuffix(mIntent[2].trim().replace(/\s+/g, " "));
-    if (isPersonName(prenom, nom)) return { nom, prenom };
+    if (isPersonName(prenom, nom)) return { nom, prenom, ...(dateNaissance && { dateNaissance }) };
   }
 
   // 3. Fallback : 2 mots Title-case consécutifs (Vincent Lamour) sans intent.
@@ -135,7 +145,7 @@ export function extractFocusPersonFromQuery(text: string): { nom: string; prenom
   if (mTitle) {
     const prenom = mTitle[1].trim();
     const nom = stripDateSuffix(mTitle[2].trim());
-    if (isPersonName(prenom, nom)) return { nom, prenom };
+    if (isPersonName(prenom, nom)) return { nom, prenom, ...(dateNaissance && { dateNaissance }) };
   }
 
   return null;

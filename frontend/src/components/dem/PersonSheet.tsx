@@ -31,8 +31,13 @@ export function PersonSheet({ person, onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const { nom, prenom } = splitNomPrenom(person);
-  const dn = person.date_naissance && person.date_naissance.length >= 10
-    ? person.date_naissance.slice(0, 10)
+  // Backend accepte 1974 (LIKE) | 1974-04 | 1974-04-12 — silver fait LIKE $1||'%'
+  // donc tout préfixe valable. CRITIQUE pour disambiguer 6 homonymes Vincent
+  // LAMOUR : sans dn, tie-breaker prend un autre Vincent.
+  const dn = person.date_naissance && person.date_naissance.length >= 4
+    ? (person.date_naissance.length >= 10 ? person.date_naissance.slice(0, 10)
+       : person.date_naissance.length >= 7 ? person.date_naissance.slice(0, 7)
+       : person.date_naissance.slice(0, 4))
     : undefined;
 
   useEffect(() => {
