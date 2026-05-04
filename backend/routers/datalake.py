@@ -1622,13 +1622,48 @@ async def _dirigeant_full(
         ]
         if sci_mandats:
             sci_sirens_fallback = [m["siren"] for m in sci_mandats if m.get("siren")]
+            # Récupère les denominations correctes par siren depuis silver.inpi_comptes
+            # ou gold.entreprises_master (denomination autoritative — surtout pas
+            # les arrays denominations[i] mal alignés).
+            deno_rows = await _safe(pool.fetch(
+                """SELECT siren, denomination FROM (
+                       SELECT em.siren, em.denomination, 1 AS prio
+                       FROM gold.entreprises_master em
+                       WHERE em.siren = ANY($1::char(9)[])
+                       UNION ALL
+                       SELECT ic.siren,
+                              first_value(ic.denomination) OVER (
+                                  PARTITION BY ic.siren
+                                  ORDER BY ic.date_cloture DESC NULLS LAST
+                              ) AS denomination,
+                              2 AS prio
+                       FROM silver.inpi_comptes ic
+                       WHERE ic.siren = ANY($1::char(9)[])
+                       UNION ALL
+                       SELECT ul.siren, ul.denomination_unite AS denomination, 3 AS prio
+                       FROM silver.insee_unites_legales ul
+                       WHERE ul.siren = ANY($1::char(9)[])
+                   ) sub
+                   WHERE denomination IS NOT NULL
+                   GROUP BY siren, denomination, prio
+                   ORDER BY siren, prio""",
+                sci_sirens_fallback,
+            ), default=[], timeout_s=4.0)
+            siren_to_deno = {}
+            for r in (deno_rows or []):
+                if r["siren"] not in siren_to_deno and r.get("denomination"):
+                    siren_to_deno[r["siren"]] = r["denomination"]
             sci = {
                 "n_sci": len(sci_mandats),
                 "total_capital_sci": sum(
                     float(m["capital"]) for m in sci_mandats
                     if m.get("capital") is not None
                 ) or None,
-                "sci_denominations": [m.get("denomination") for m in sci_mandats if m.get("denomination")],
+                "sci_denominations": [
+                    siren_to_deno.get(m["siren"], m.get("denomination"))
+                    for m in sci_mandats
+                    if siren_to_deno.get(m["siren"]) or m.get("denomination")
+                ],
                 "sci_sirens": sci_sirens_fallback,
                 "sci_code_postaux": [],
                 "first_sci_date": None,
