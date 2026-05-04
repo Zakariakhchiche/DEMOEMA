@@ -1622,53 +1622,21 @@ async def _dirigeant_full(
         ]
         if sci_mandats:
             sci_sirens_fallback = [m["siren"] for m in sci_mandats if m.get("siren")]
-            # Récupère les denominations correctes par siren depuis silver.inpi_comptes
-            # ou gold.entreprises_master (denomination autoritative — surtout pas
-            # les arrays denominations[i] mal alignés).
-            deno_rows = await _safe(pool.fetch(
-                """SELECT siren, denomination FROM (
-                       SELECT em.siren, em.denomination, 1 AS prio
-                       FROM gold.entreprises_master em
-                       WHERE em.siren = ANY($1::char(9)[])
-                       UNION ALL
-                       SELECT ic.siren,
-                              first_value(ic.denomination) OVER (
-                                  PARTITION BY ic.siren
-                                  ORDER BY ic.date_cloture DESC NULLS LAST
-                              ) AS denomination,
-                              2 AS prio
-                       FROM silver.inpi_comptes ic
-                       WHERE ic.siren = ANY($1::char(9)[])
-                       UNION ALL
-                       SELECT ul.siren, ul.denomination_unite AS denomination, 3 AS prio
-                       FROM silver.insee_unites_legales ul
-                       WHERE ul.siren = ANY($1::char(9)[])
-                   ) sub
-                   WHERE denomination IS NOT NULL
-                   GROUP BY siren, denomination, prio
-                   ORDER BY siren, prio""",
-                sci_sirens_fallback,
-            ), default=[], timeout_s=4.0)
-            siren_to_deno = {}
-            for r in (deno_rows or []):
-                if r["siren"] not in siren_to_deno and r.get("denomination"):
-                    siren_to_deno[r["siren"]] = r["denomination"]
             sci = {
                 "n_sci": len(sci_mandats),
                 "total_capital_sci": sum(
                     float(m["capital"]) for m in sci_mandats
                     if m.get("capital") is not None
                 ) or None,
-                "sci_denominations": [
-                    siren_to_deno.get(m["siren"], m.get("denomination"))
-                    for m in sci_mandats
-                    if siren_to_deno.get(m["siren"]) or m.get("denomination")
-                ],
+                "sci_denominations": [],  # rempli plus bas via sci_values (silver.inpi_comptes)
                 "sci_sirens": sci_sirens_fallback,
                 "sci_code_postaux": [],
                 "first_sci_date": None,
             }
             # Re-fetch sci_value depuis silver.inpi_comptes (rapide, par siren).
+            # Cette query ramène DISTINCT ON (siren) avec denomination + bilan,
+            # donc sert AUSSI à peupler sci_denominations correctement (par siren
+            # autoritaire, pas via les arrays denominations[i] mal alignés).
             if sci_sirens_fallback and not sci_value_total:
                 rows = await _safe(pool.fetch(
                     """SELECT DISTINCT ON (siren)
@@ -1681,6 +1649,11 @@ async def _dirigeant_full(
                        ORDER BY siren, date_cloture DESC NULLS LAST""",
                     sci_sirens_fallback,
                 ), default=[], timeout_s=6.0)
+                # Peuple sci_denominations à partir de silver.inpi_comptes (autoritatif
+                # par siren) AU LIEU des arrays denominations[i] désalignés.
+                sci["sci_denominations"] = [
+                    r["denomination"] for r in (rows or []) if r.get("denomination")
+                ]
                 sci_values = [_serialize(r) for r in (rows or [])]
                 sum_actif = sum(float(r["total_actif"]) for r in rows if r.get("total_actif"))
                 sum_immo = sum(float(r["immo_corporelles"]) for r in rows if r.get("immo_corporelles"))
