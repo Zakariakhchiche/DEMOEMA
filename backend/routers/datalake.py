@@ -787,46 +787,102 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
         siren,
     ), default=None, timeout_s=15.0)
 
-    # Fallback CTE simple si le big CTE a timeout. Sur grands groupes
+    # Fallback "medium" si le big CTE a timeout. Sur grands groupes
     # (EQUANS/ELENGY/Carrefour avec 10+ filiales), le JOIN opensanctions ILIKE
-    # + sci_patrimoine_value LATERAL pousse à >15s. Sans ce fallback, la fiche
-    # remonte dirigeants=[] et tab "Dirigeants" reste vide.
+    # est ~90% du coût total (~20s). On le drop pour passer en <8s tout en
+    # conservant SCI + OSINT + flags calculés (is_pro_ma/is_senior/is_asset_rich).
+    # Sanctions reste False par défaut — affichage gracieux, pas de faux positif.
     if dirigeants_silver is None:
-        rows = await _safe(pool.fetch(
-            """SELECT DISTINCT ON (UPPER(unaccent(nom)),
-                                    UPPER(unaccent(prenom)),
-                                    COALESCE(date_naissance, ''))
-                      nom, prenom, date_naissance, age_2026 AS age,
-                      n_mandats_actifs, n_mandats_total,
-                      sirens_mandats, denominations, formes_juridiques,
-                      roles, is_multi_mandat,
-                      first_mandat_date, last_mandat_date
-               FROM silver.inpi_dirigeants
-               WHERE $1::char(9) = ANY(sirens_mandats)
-               ORDER BY UPPER(unaccent(nom)),
-                        UPPER(unaccent(prenom)),
-                        COALESCE(date_naissance, ''),
-                        n_mandats_actifs DESC NULLS LAST
-               LIMIT 10""",
+        dirigeants_silver = await _safe(pool.fetch(
+            """WITH dirig_raw AS (
+                  SELECT DISTINCT ON (
+                           UPPER(unaccent(nom)),
+                           UPPER(unaccent(prenom)),
+                           COALESCE(date_naissance, '')
+                         )
+                         nom, prenom, date_naissance, age_2026 AS age,
+                         n_mandats_actifs, n_mandats_total,
+                         sirens_mandats, denominations, formes_juridiques,
+                         roles, is_multi_mandat,
+                         first_mandat_date, last_mandat_date
+                  FROM silver.inpi_dirigeants
+                  WHERE $1::char(9) = ANY(sirens_mandats)
+                  ORDER BY UPPER(unaccent(nom)),
+                           UPPER(unaccent(prenom)),
+                           COALESCE(date_naissance, ''),
+                           n_mandats_actifs DESC NULLS LAST
+               ),
+               dirig AS (
+                  SELECT * FROM dirig_raw
+                  ORDER BY n_mandats_actifs DESC NULLS LAST
+                  LIMIT 10
+               ),
+               sci_agg AS (
+                  SELECT nom, prenom, date_naissance,
+                         SUM(n_sci) AS n_sci,
+                         SUM(total_capital_sci) AS total_capital_sci,
+                         ARRAY(SELECT DISTINCT unnest(array_agg(sci_denominations))) AS sci_denominations,
+                         ARRAY(SELECT DISTINCT unnest(array_agg(sci_sirens))) AS sci_sirens,
+                         ARRAY(SELECT DISTINCT unnest(array_agg(sci_code_postaux))) AS sci_code_postaux,
+                         MIN(first_sci_date) AS first_sci_date
+                  FROM silver.dirigeant_sci_patrimoine
+                  WHERE (nom, prenom) IN (SELECT nom, prenom FROM dirig)
+                  GROUP BY nom, prenom, date_naissance
+               )
+               SELECT d.*,
+                      sci.n_sci, sci.total_capital_sci,
+                      sci.sci_denominations, sci.sci_sirens,
+                      sci.sci_code_postaux, sci.first_sci_date,
+                      NULL::numeric AS sci_total_actif,
+                      NULL::numeric AS sci_immo_corporelles,
+                      NULL::numeric AS sci_capitaux_propres,
+                      NULL::numeric AS sci_ca_net,
+                      NULL::int AS sci_n_with_comptes,
+                      os.person_uid,
+                      os.has_linkedin, os.has_github, os.has_any_social,
+                      os.n_linkedin, os.n_github, os.n_twitter,
+                      os.n_other_sites, os.n_total_social,
+                      os.denomination_main_company AS osint_main_deno,
+                      os.forme_juridique_main AS osint_main_forme,
+                      os.capital_main AS osint_main_capital,
+                      os.date_immat_main AS osint_main_immat,
+                      os.n_mandats_inpi AS osint_n_mandats,
+                      os.last_scanned_at AS osint_scanned_at,
+                      false AS is_sanctioned,
+                      NULL::text[] AS sanction_ids,
+                      NULL::text[] AS sanction_captions,
+                      NULL::text[] AS sanction_topics,
+                      NULL::text[] AS sanction_countries,
+                      NULL::text[] AS sanction_programs,
+                      (d.n_mandats_actifs >= 5
+                       AND COALESCE(sci.n_sci, 0) >= 1
+                       AND COALESCE(d.age, 0) >= 50) AS is_pro_ma,
+                      (COALESCE(d.age, 0) >= 60) AS is_senior,
+                      (COALESCE(sci.total_capital_sci, 0) >= 500000) AS is_asset_rich
+               FROM dirig d
+               LEFT JOIN sci_agg sci
+                      ON UPPER(unaccent(sci.nom)) = UPPER(unaccent(d.nom))
+                     AND UPPER(unaccent(sci.prenom)) = UPPER(unaccent(d.prenom))
+                     AND COALESCE(sci.date_naissance, '') = COALESCE(d.date_naissance, '')
+               LEFT JOIN LATERAL (
+                      SELECT person_uid, has_linkedin, has_github, has_any_social,
+                             n_linkedin, n_github, n_twitter, n_other_sites,
+                             n_total_social, denomination_main_company,
+                             forme_juridique_main, capital_main, date_immat_main,
+                             n_mandats_inpi, last_scanned_at
+                      FROM silver.osint_persons_enriched os2
+                      WHERE UPPER(unaccent(os2.nom)) = UPPER(unaccent(d.nom))
+                        AND EXISTS (
+                              SELECT 1 FROM unnest(os2.prenoms) p
+                              WHERE UPPER(unaccent(p)) = UPPER(unaccent(d.prenom))
+                        )
+                        AND COALESCE(os2.date_naissance, '') = COALESCE(d.date_naissance, '')
+                      ORDER BY n_total_social DESC NULLS LAST
+                      LIMIT 1
+               ) os ON true
+               ORDER BY d.n_mandats_actifs DESC NULLS LAST""",
             siren,
-        ), default=[], timeout_s=8.0)
-        # Pad les colonnes enrichissement (SCI / sanctions / social) à NULL
-        # pour que le format match le big CTE côté frontend.
-        dirigeants_silver = [
-            {**dict(r),
-             "n_sci": None, "total_capital_sci": None,
-             "sci_denominations": None, "sci_sirens": None,
-             "sci_code_postaux": None, "first_sci_date": None,
-             "sci_total_actif": None, "sci_immo_corporelles": None,
-             "sci_capitaux_propres": None, "sci_ca_net": None,
-             "sci_n_with_comptes": None,
-             "is_sanctioned": False, "sanction_ids": None,
-             "sanction_captions": None, "sanction_topics": None,
-             "sanction_countries": None, "sanction_programs": None,
-             "has_linkedin": None, "has_github": None,
-             "has_other_socials": None, "n_total_social": None}
-            for r in (rows or [])
-        ]
+        ), default=[], timeout_s=10.0)
 
     # Fallback : si silver vide, dérive depuis le gouv API (déjà fetché).
     # Gestion des 2 types de dirigeants :
