@@ -1421,7 +1421,7 @@ async def _dirigeant_full(
               MIN(first_sci_date) AS first_sci_date
            FROM src""",
         nom_for_sql, nom_for_sql_na, prenom_for_sql, prenom_for_sql_na, date_n,
-    ), timeout_s=10.0)
+    ), timeout_s=18.0)
 
     # 2 bis. Valeur réelle du patrimoine SCI : agrégation des derniers comptes
     # déposés à l'INPI pour chaque siren SCI du dirigeant.
