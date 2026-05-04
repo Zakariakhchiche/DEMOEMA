@@ -1635,6 +1635,48 @@ async def _dirigeant_full(
                     "n_sci_with_comptes": len(rows or []),
                 }
 
+    # 6 ter. Enrich SCI value from gold.sci_master (matview enrichi par siren).
+    # Souvent plus complet que silver.inpi_comptes (mat view nightly aggregate
+    # immo_corporelles, emprunts_dettes, etc.). Useful when silver query
+    # timeouted ou les SCI nouvellement créées n'ont pas encore comptes INPI.
+    if sci and sci.get("sci_sirens"):
+        sirens_for_master = [s for s in sci.get("sci_sirens") or [] if s]
+        if sirens_for_master and await _table_exists(pool, "gold", "sci_master"):
+            master_rows = await _safe(pool.fetch(
+                """SELECT siren, total_actif, immo_corporelles, capitaux_propres,
+                          ca_net, emprunts_dettes, capital_social,
+                          patrimoine_net_estime
+                   FROM gold.sci_master
+                   WHERE siren = ANY($1::char(9)[])""",
+                sirens_for_master,
+            ), default=[], timeout_s=4.0)
+            if master_rows:
+                # Somme les colonnes ne nécessitant pas un agg distinct
+                def _sum_col(rows, col):
+                    return sum(float(r[col]) for r in rows if r.get(col)) or None
+                sum_actif = _sum_col(master_rows, "total_actif")
+                sum_immo = _sum_col(master_rows, "immo_corporelles")
+                sum_cp = _sum_col(master_rows, "capitaux_propres")
+                sum_ca = _sum_col(master_rows, "ca_net")
+                sum_dettes = _sum_col(master_rows, "emprunts_dettes")
+                sum_cap = _sum_col(master_rows, "capital_social")
+                # Met à jour sci_value_total (init si vide)
+                if sci_value_total is None:
+                    sci_value_total = {}
+                sci_value_total["sci_total_actif"] = sci_value_total.get("sci_total_actif") or sum_actif
+                sci_value_total["sci_immo_corporelles"] = sci_value_total.get("sci_immo_corporelles") or sum_immo
+                sci_value_total["sci_capitaux_propres"] = sci_value_total.get("sci_capitaux_propres") or sum_cp
+                sci_value_total["sci_ca_net"] = sci_value_total.get("sci_ca_net") or sum_ca
+                sci_value_total["emprunts_dettes"] = sci_value_total.get("emprunts_dettes") or sum_dettes
+                sci_value_total["n_sci_with_comptes"] = max(
+                    sci_value_total.get("n_sci_with_comptes") or 0,
+                    len(master_rows),
+                )
+                # Met à jour total_capital_sci si silver.dirigeant_sci_patrimoine
+                # n'avait pas pu le calculer (cas de timeout).
+                if sci and not sci.get("total_capital_sci") and sum_cap:
+                    sci["total_capital_sci"] = sum_cap
+
     # 7. Co-mandataires détaillés — silver only.
     # Reverse-lookup : trouver tous les autres dirigeants dont sirens_mandats
     # intersecte celui de la cible. Index GIN sur silver.inpi_dirigeants.
