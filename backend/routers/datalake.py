@@ -1572,7 +1572,11 @@ async def _dirigeant_full(
                   -- sirens_mandats[i] pour beaucoup de dirigeants (bug INPI).
                   -- Mieux vaut NULL que de mauvaises infos. Vérifié sur
                   -- Vincent LAMOUR : 798303731 array=ATRIUM mais réel=VLED.
-                  COALESCE(em.denomination, ul.denomination_unite) AS denomination,
+                  -- Source autoritative par siren : gold.entreprises_master,
+                  -- silver.insee_unites_legales, puis silver.inpi_comptes.
+                  COALESCE(em.denomination,
+                           ul.denomination_unite,
+                           ic.denomination)                        AS denomination,
                   COALESCE(em.insee_categorie_juridique,
                            ul.categorie_juridique)                 AS forme_juridique,
                   d.roles[i]                                       AS role,
@@ -1589,14 +1593,14 @@ async def _dirigeant_full(
                LEFT JOIN silver.insee_unites_legales ul
                   ON ul.siren = d.sirens_mandats[i]
                LEFT JOIN LATERAL (
-                  SELECT capital_social
+                  SELECT capital_social, denomination
                   FROM silver.inpi_comptes
                   WHERE siren = d.sirens_mandats[i]
                   ORDER BY date_cloture DESC NULLS LAST
                   LIMIT 1
                ) ic ON true
                ORDER BY COALESCE(em.capital_social, ic.capital_social) DESC NULLS LAST,
-                        COALESCE(em.denomination, ul.denomination_unite)
+                        COALESCE(em.denomination, ul.denomination_unite, ic.denomination)
                LIMIT 100""",
             nom_for_sql, nom_for_sql_na, prenom_for_sql, prenom_for_sql_na, date_n,
         ), default=[], timeout_s=12.0)
