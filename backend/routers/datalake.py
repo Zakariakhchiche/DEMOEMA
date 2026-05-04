@@ -1557,7 +1557,7 @@ async def _dirigeant_full(
         # JOIN gold.entreprises_master par siren (authoritative).
         mandats_detail = await _safe(pool.fetch(
             """WITH dirigeant AS (
-                  SELECT sirens_mandats, roles
+                  SELECT sirens_mandats, denominations, formes_juridiques, roles
                   FROM silver.inpi_dirigeants
                   WHERE nom IN ($1, $2)
                     AND prenom IN ($3, $4)
@@ -1567,9 +1567,11 @@ async def _dirigeant_full(
                )
                SELECT
                   d.sirens_mandats[i]                              AS siren,
-                  COALESCE(em.denomination, ul.denomination_unite)       AS denomination,
+                  COALESCE(em.denomination, ul.denomination_unite,
+                           d.denominations[i])                     AS denomination,
                   COALESCE(em.insee_categorie_juridique,
-                           ul.categorie_juridique)                 AS forme_juridique,
+                           ul.categorie_juridique,
+                           d.formes_juridiques[i])                 AS forme_juridique,
                   d.roles[i]                                       AS role,
                   COALESCE(em.capital_social, ic.capital_social)   AS capital,
                   COALESCE(em.code_ape, ul.code_ape)               AS code_ape,
@@ -1591,7 +1593,8 @@ async def _dirigeant_full(
                   LIMIT 1
                ) ic ON true
                ORDER BY COALESCE(em.capital_social, ic.capital_social) DESC NULLS LAST,
-                        COALESCE(em.denomination, ul.denomination_unite)
+                        COALESCE(em.denomination, ul.denomination_unite,
+                                 d.denominations[i])
                LIMIT 100""",
             nom_for_sql, nom_for_sql_na, prenom_for_sql, prenom_for_sql_na, date_n,
         ), default=[], timeout_s=12.0)
