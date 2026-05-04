@@ -28,5 +28,21 @@ bronze_fields:
   - {name: categorie, type: "VARCHAR(16)", source_path: "categorie_entreprise"}
 conflict_strategy: "ON CONFLICT (siren) DO UPDATE SET payload = EXCLUDED.payload, ingested_at = now()"
 query_seed:
-  description: "On enrichit par batch les SIRENs BODACC qui manquent dans recherche_entreprises"
-  source_sql: "SELECT DISTINCT siren FROM bronze.bodacc_annonces_raw WHERE siren IS NOT NULL AND siren NOT IN (SELECT siren FROM bronze.recherche_entreprises_raw) LIMIT 1000"
+  description: |
+    Enrichit par batch les SIRENs absents de bronze.recherche_entreprises_raw mais
+    présents dans des sources prioritaires :
+    - bronze.bodacc_annonces_raw (annonces légales)
+    - silver.inpi_dirigeants.sirens_mandats[] (mandats des dirigeants — couvre
+      les SCI patrimoniales récentes que le dump INSEE/INPI dirigé ne capture pas)
+  source_sql: |
+    SELECT DISTINCT siren FROM (
+        SELECT siren FROM bronze.bodacc_annonces_raw WHERE siren IS NOT NULL
+        UNION ALL
+        SELECT unnest(sirens_mandats) AS siren
+        FROM silver.inpi_dirigeants
+        WHERE sirens_mandats IS NOT NULL
+          AND COALESCE(n_mandats_actifs, 0) >= 1
+    ) all_sirens
+    WHERE siren IS NOT NULL
+      AND siren NOT IN (SELECT siren FROM bronze.recherche_entreprises_raw WHERE siren IS NOT NULL)
+    LIMIT 2000
