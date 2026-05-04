@@ -1577,8 +1577,12 @@ async def _dirigeant_full(
                   COALESCE(em.denomination,
                            ul.denomination_unite,
                            ic.denomination)                        AS denomination,
+                  -- forme_juridique : OK de retomber sur l'array (code numérique
+                  -- non user-facing, sert au filtre SCI Python). Même si désaligné,
+                  -- le NOMBRE de SCI dans son portefeuille reste exact (n_sci=3).
                   COALESCE(em.insee_categorie_juridique,
-                           ul.categorie_juridique)                 AS forme_juridique,
+                           ul.categorie_juridique,
+                           d.formes_juridiques[i])                 AS forme_juridique,
                   d.roles[i]                                       AS role,
                   COALESCE(em.capital_social, ic.capital_social)   AS capital,
                   COALESCE(em.code_ape, ul.code_ape)               AS code_ape,
