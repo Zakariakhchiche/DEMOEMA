@@ -8,9 +8,18 @@ goal: >
   signaux M&A + compliance + scoring.
 
 source_tables:
-  - silver.insee_unites_legales
+  # === Sources d'identité (UNION ALL pour COUVERTURE LARGE) ===
+  # Le gold doit avoir TOUS les sirens connus du datalake, pas seulement ceux
+  # de silver.insee_unites_legales (dump SIRENE limité). Les sirens des
+  # mandats dirigeants, comptes INPI, BODACC, recherche-entreprises sont à
+  # ingérer aussi pour fiches dirigeants complètes.
+  - silver.insee_unites_legales       # source #1 (autoritaire INSEE)
+  - silver.inpi_dirigeants            # sirens_mandats[] -> universe étendu
+  - silver.inpi_comptes               # siren des SCI patrimoniales avec comptes
+  - bronze.recherche_entreprises_raw  # fallback API gouv (couvre 5M FR actives)
+  - silver.bodacc_annonces            # sirens des annonces légales
+  # === Sources d'enrichissement (LEFT JOIN par siren) ===
   - silver.insee_etablissements
-  - silver.inpi_comptes
   - silver.gleif_lei
   - silver.entreprises_signals
   - silver.balo_operations
@@ -18,7 +27,6 @@ source_tables:
   - silver.juridictions_unifiees
   - silver.opensanctions
   - silver.cession_events
-  - silver.bodacc_annonces
 
 grain: "1 row par siren (UNIQUE)"
 
@@ -117,10 +125,51 @@ business_logic: |
 transformations: |
   Pattern TABLE PHYSIQUE + procedure UPSERT (pas MV).
 
-  WITH base AS (
-    SELECT siren, denomination, naf, ...
-    FROM silver.insee_unites_legales
-    WHERE statut = 'actif'  -- pré-filtre
+  CRITIQUE — universe des sirens : on UNION ALL tous les sirens connus
+  du datalake (pas seulement silver.insee_unites_legales) pour garantir
+  qu'aucune fiche dirigeant n'affiche "—" pour des sirens présents en
+  mandats. Sources d'identité fusionnées par priorité :
+    1. silver.insee_unites_legales (denomination_unite, code_ape, etc.)
+    2. silver.inpi_comptes (denomination depuis comptes annuels)
+    3. bronze.recherche_entreprises_raw (nom_complet API gouv)
+
+  WITH siren_universe AS (
+    -- Tous les sirens du datalake (pas seulement INSEE actifs)
+    SELECT siren FROM silver.insee_unites_legales WHERE siren IS NOT NULL
+    UNION
+    SELECT unnest(sirens_mandats) AS siren
+    FROM silver.inpi_dirigeants WHERE sirens_mandats IS NOT NULL
+    UNION
+    SELECT siren FROM silver.inpi_comptes WHERE siren IS NOT NULL
+    UNION
+    SELECT siren FROM bronze.recherche_entreprises_raw WHERE siren IS NOT NULL
+    UNION
+    SELECT siren FROM silver.bodacc_annonces WHERE siren IS NOT NULL
+  ),
+  base AS (
+    -- Identité COALESCE depuis 3 sources (pas de pré-filtre statut)
+    SELECT
+      su.siren,
+      COALESCE(ul.denomination_unite, ic.denomination, rer.nom_complet) AS denomination,
+      COALESCE(ul.code_ape, rer.naf)                                    AS naf,
+      COALESCE(ul.categorie_juridique, ic.forme_juridique)              AS forme_juridique,
+      COALESCE(ul.date_creation, rer.date_creation)                     AS date_creation,
+      COALESCE(ul.etat_administratif,
+               CASE WHEN rer.etat = 'A' THEN 'A' ELSE 'F' END)          AS etat_administratif,
+      COALESCE(ul.tranche_effectifs, rer.tranche_effectifs)             AS insee_tranche_effectifs,
+      COALESCE(ul.categorie_entreprise, rer.categorie)                  AS categorie_entreprise,
+      ul.sigle, ul.nom_usage, ul.nic_siege
+    FROM siren_universe su
+    LEFT JOIN silver.insee_unites_legales ul ON ul.siren = su.siren
+    LEFT JOIN LATERAL (
+       SELECT denomination, capital_social AS forme_juridique
+       FROM silver.inpi_comptes
+       WHERE siren = su.siren
+       ORDER BY date_cloture DESC NULLS LAST
+       LIMIT 1
+    ) ic ON true
+    LEFT JOIN bronze.recherche_entreprises_raw rer ON rer.siren = su.siren
+    WHERE COALESCE(ul.denomination_unite, ic.denomination, rer.nom_complet) IS NOT NULL
   ),
   with_etab AS (
     SELECT b.*, e.siret AS siege_siret,
