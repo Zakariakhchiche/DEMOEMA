@@ -1583,6 +1583,58 @@ async def _dirigeant_full(
             nom_for_sql, nom_for_sql_na, prenom_for_sql, prenom_for_sql_na, date_n,
         ), default=[], timeout_s=12.0)
 
+    # 6 bis. Fallback SCI patrimoine Python-side si la query silver.dirigeant_sci_patrimoine
+    # (qui n'a pas d'index sur (nom, prenom)) a timeout. mandats_detail contient
+    # déjà siren/denomination/forme_juridique/capital → on filtre les sociétés
+    # civiles (forme_juridique '65xx' ou '5499') et calcule l'agrégat.
+    # Code 65: SCI / Société civile patrimoniale. Code 5499: ancien code SC.
+    if (sci is None or not sci.get("n_sci")) and mandats_detail:
+        sci_mandats = [
+            m for m in mandats_detail
+            if (m.get("forme_juridique") or "").startswith("65")
+            or (m.get("forme_juridique") or "") == "5499"
+        ]
+        if sci_mandats:
+            sci_sirens_fallback = [m["siren"] for m in sci_mandats if m.get("siren")]
+            sci = {
+                "n_sci": len(sci_mandats),
+                "total_capital_sci": sum(
+                    float(m["capital"]) for m in sci_mandats
+                    if m.get("capital") is not None
+                ) or None,
+                "sci_denominations": [m.get("denomination") for m in sci_mandats if m.get("denomination")],
+                "sci_sirens": sci_sirens_fallback,
+                "sci_code_postaux": [],
+                "first_sci_date": None,
+            }
+            # Re-fetch sci_value depuis silver.inpi_comptes (rapide, par siren).
+            if sci_sirens_fallback and not sci_value_total:
+                rows = await _safe(pool.fetch(
+                    """SELECT DISTINCT ON (siren)
+                           siren, denomination, date_cloture,
+                           total_actif, immo_corporelles,
+                           capitaux_propres, ca_net, resultat_net,
+                           capital_social, emprunts_dettes
+                       FROM silver.inpi_comptes
+                       WHERE siren = ANY($1::char(9)[])
+                       ORDER BY siren, date_cloture DESC NULLS LAST""",
+                    sci_sirens_fallback,
+                ), default=[], timeout_s=6.0)
+                sci_values = [_serialize(r) for r in (rows or [])]
+                sum_actif = sum(float(r["total_actif"]) for r in rows if r.get("total_actif"))
+                sum_immo = sum(float(r["immo_corporelles"]) for r in rows if r.get("immo_corporelles"))
+                sum_cp = sum(float(r["capitaux_propres"]) for r in rows if r.get("capitaux_propres"))
+                sum_ca = sum(float(r["ca_net"]) for r in rows if r.get("ca_net"))
+                sum_dettes = sum(float(r["emprunts_dettes"]) for r in rows if r.get("emprunts_dettes"))
+                sci_value_total = {
+                    "sci_total_actif": sum_actif if sum_actif else None,
+                    "sci_immo_corporelles": sum_immo if sum_immo else None,
+                    "sci_capitaux_propres": sum_cp if sum_cp else None,
+                    "sci_ca_net": sum_ca if sum_ca else None,
+                    "emprunts_dettes": sum_dettes if sum_dettes else None,
+                    "n_sci_with_comptes": len(rows or []),
+                }
+
     # 7. Co-mandataires détaillés — silver only.
     # Reverse-lookup : trouver tous les autres dirigeants dont sirens_mandats
     # intersecte celui de la cible. Index GIN sur silver.inpi_dirigeants.
