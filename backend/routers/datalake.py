@@ -1548,9 +1548,16 @@ async def _dirigeant_full(
     sirens_mandats_self = list(inpi.get("sirens_mandats") or []) if inpi else []
     mandats_detail: list = []
     if sirens_mandats_self:
+        # JOIN sur (nom, prenom, date_naissance) du dirigeant pour récupérer
+        # ses sirens_mandats, puis JOIN gold.entreprises_master + silver.insee_unites_legales
+        # par siren pour avoir denomination + forme_juridique AUTHORITATIVE.
+        # IMPORTANT: les arrays denominations[i] / formes_juridiques[i] de
+        # silver.inpi_dirigeants peuvent être DÉSALIGNÉS avec sirens_mandats[i]
+        # (bug d'ingestion INPI). Donc on ne s'en sert PAS comme source ; on
+        # JOIN gold.entreprises_master par siren (authoritative).
         mandats_detail = await _safe(pool.fetch(
             """WITH dirigeant AS (
-                  SELECT sirens_mandats, denominations, formes_juridiques, roles
+                  SELECT sirens_mandats, roles
                   FROM silver.inpi_dirigeants
                   WHERE nom IN ($1, $2)
                     AND prenom IN ($3, $4)
@@ -1559,16 +1566,23 @@ async def _dirigeant_full(
                   LIMIT 1
                )
                SELECT
-                  d.sirens_mandats[i]     AS siren,
-                  d.denominations[i]      AS denomination,
-                  d.formes_juridiques[i]  AS forme_juridique,
-                  d.roles[i]              AS role,
-                  ic.capital_social       AS capital,
-                  ul.code_ape             AS code_ape,
-                  ul.date_creation        AS date_immatriculation,
-                  (ul.etat_administratif = 'A') AS actif
+                  d.sirens_mandats[i]                              AS siren,
+                  COALESCE(em.denomination, ul.denomination)       AS denomination,
+                  COALESCE(em.insee_categorie_juridique,
+                           ul.categorie_juridique)                 AS forme_juridique,
+                  d.roles[i]                                       AS role,
+                  COALESCE(em.capital_social, ic.capital_social)   AS capital,
+                  COALESCE(em.code_ape, ul.code_ape)               AS code_ape,
+                  COALESCE(em.date_immatriculation,
+                           ul.date_creation)                       AS date_immatriculation,
+                  (COALESCE(em.insee_etat_administratif,
+                            ul.etat_administratif) = 'A')          AS actif
                FROM dirigeant d
                CROSS JOIN generate_subscripts(d.sirens_mandats, 1) AS i
+               LEFT JOIN gold.entreprises_master em
+                  ON em.siren = d.sirens_mandats[i]
+               LEFT JOIN silver.insee_unites_legales ul
+                  ON ul.siren = d.sirens_mandats[i]
                LEFT JOIN LATERAL (
                   SELECT capital_social
                   FROM silver.inpi_comptes
@@ -1576,9 +1590,8 @@ async def _dirigeant_full(
                   ORDER BY date_cloture DESC NULLS LAST
                   LIMIT 1
                ) ic ON true
-               LEFT JOIN silver.insee_unites_legales ul
-                  ON ul.siren = d.sirens_mandats[i]
-               ORDER BY ic.capital_social DESC NULLS LAST, d.denominations[i]
+               ORDER BY COALESCE(em.capital_social, ic.capital_social) DESC NULLS LAST,
+                        COALESCE(em.denomination, ul.denomination)
                LIMIT 100""",
             nom_for_sql, nom_for_sql_na, prenom_for_sql, prenom_for_sql_na, date_n,
         ), default=[], timeout_s=12.0)
