@@ -785,7 +785,48 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
            ) os ON true
            ORDER BY d.n_mandats_actifs DESC NULLS LAST""",
         siren,
-    ), default=[], timeout_s=20.0)
+    ), default=None, timeout_s=15.0)
+
+    # Fallback CTE simple si le big CTE a timeout. Sur grands groupes
+    # (EQUANS/ELENGY/Carrefour avec 10+ filiales), le JOIN opensanctions ILIKE
+    # + sci_patrimoine_value LATERAL pousse à >15s. Sans ce fallback, la fiche
+    # remonte dirigeants=[] et tab "Dirigeants" reste vide.
+    if dirigeants_silver is None:
+        rows = await _safe(pool.fetch(
+            """SELECT DISTINCT ON (UPPER(unaccent(nom)),
+                                    UPPER(unaccent(prenom)),
+                                    COALESCE(date_naissance, ''))
+                      nom, prenom, date_naissance, age_2026 AS age,
+                      n_mandats_actifs, n_mandats_total,
+                      sirens_mandats, denominations, formes_juridiques,
+                      roles, is_multi_mandat,
+                      first_mandat_date, last_mandat_date
+               FROM silver.inpi_dirigeants
+               WHERE $1::char(9) = ANY(sirens_mandats)
+               ORDER BY UPPER(unaccent(nom)),
+                        UPPER(unaccent(prenom)),
+                        COALESCE(date_naissance, ''),
+                        n_mandats_actifs DESC NULLS LAST
+               LIMIT 10""",
+            siren,
+        ), default=[], timeout_s=8.0)
+        # Pad les colonnes enrichissement (SCI / sanctions / social) à NULL
+        # pour que le format match le big CTE côté frontend.
+        dirigeants_silver = [
+            {**dict(r),
+             "n_sci": None, "total_capital_sci": None,
+             "sci_denominations": None, "sci_sirens": None,
+             "sci_code_postaux": None, "first_sci_date": None,
+             "sci_total_actif": None, "sci_immo_corporelles": None,
+             "sci_capitaux_propres": None, "sci_ca_net": None,
+             "sci_n_with_comptes": None,
+             "is_sanctioned": False, "sanction_ids": None,
+             "sanction_captions": None, "sanction_topics": None,
+             "sanction_countries": None, "sanction_programs": None,
+             "has_linkedin": None, "has_github": None,
+             "has_other_socials": None, "n_total_social": None}
+            for r in (rows or [])
+        ]
 
     # Fallback : si silver vide, dérive depuis le gouv API (déjà fetché).
     # Gestion des 2 types de dirigeants :
