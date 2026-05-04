@@ -1576,7 +1576,8 @@ async def _dirigeant_full(
                   -- silver.insee_unites_legales, puis silver.inpi_comptes.
                   COALESCE(em.denomination,
                            ul.denomination_unite,
-                           ic.denomination)                        AS denomination,
+                           ic.denomination,
+                           rer.nom_complet)                        AS denomination,
                   -- forme_juridique : OK de retomber sur l'array (code numérique
                   -- non user-facing, sert au filtre SCI Python). Même si désaligné,
                   -- le NOMBRE de SCI dans son portefeuille reste exact (n_sci=3).
@@ -1596,6 +1597,8 @@ async def _dirigeant_full(
                   ON em.siren = d.sirens_mandats[i]
                LEFT JOIN silver.insee_unites_legales ul
                   ON ul.siren = d.sirens_mandats[i]
+               LEFT JOIN bronze.recherche_entreprises_raw rer
+                  ON rer.siren = d.sirens_mandats[i]
                LEFT JOIN LATERAL (
                   SELECT capital_social, denomination
                   FROM silver.inpi_comptes
@@ -1604,7 +1607,8 @@ async def _dirigeant_full(
                   LIMIT 1
                ) ic ON true
                ORDER BY COALESCE(em.capital_social, ic.capital_social) DESC NULLS LAST,
-                        COALESCE(em.denomination, ul.denomination_unite, ic.denomination)
+                        COALESCE(em.denomination, ul.denomination_unite,
+                                 ic.denomination, rer.nom_complet)
                LIMIT 100""",
             nom_for_sql, nom_for_sql_na, prenom_for_sql, prenom_for_sql_na, date_n,
         ), default=[], timeout_s=12.0)
