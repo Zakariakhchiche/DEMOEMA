@@ -2634,24 +2634,24 @@ async def network_for_siren(req: Request, siren: str):
         return {"nodes": [], "links": []}
 
     # Récupère l'entité centrale
-    center = await pool.fetchrow(
+    center = await _safe(pool.fetchrow(
         """SELECT siren, denomination FROM silver.inpi_comptes
            WHERE siren = $1 ORDER BY date_cloture DESC LIMIT 1""",
         siren,
-    )
+    ), timeout_s=3.0)
     if not center:
         center_deno = siren
     else:
         center_deno = center["denomination"] or siren
 
-    dirigeants = await pool.fetch(
+    dirigeants = await _safe(pool.fetch(
         """SELECT nom, prenom, n_mandats_actifs, sirens_mandats, denominations
            FROM silver.inpi_dirigeants
            WHERE $1::char(9) = ANY(sirens_mandats)
            ORDER BY n_mandats_actifs DESC NULLS LAST
            LIMIT 5""",
         siren,
-    )
+    ), default=[], timeout_s=8.0)
 
     nodes = [{"id": f"c_{siren}", "label": center_deno[:30], "type": "target", "x": 0, "y": 0}]
     links = []
@@ -2694,12 +2694,12 @@ async def network_for_siren(req: Request, siren: str):
     # SCI patrimoine
     if await _table_exists(pool, "silver", "dirigeant_sci_patrimoine") and dirigeants:
         for d in dirigeants[:3]:
-            sci_rows = await pool.fetch(
+            sci_rows = await _safe(pool.fetch(
                 """SELECT n_sci, sci_denominations, sci_sirens, total_capital_sci
                    FROM silver.dirigeant_sci_patrimoine
                    WHERE nom = $1 AND prenom = $2 LIMIT 1""",
                 d["nom"], d["prenom"],
-            )
+            ), default=[], timeout_s=2.5)
             if sci_rows and sci_rows[0]["sci_denominations"]:
                 person_id = f"p_{d['nom']}_{d['prenom']}"
                 for k, sd in enumerate(list(sci_rows[0]["sci_denominations"])[:3]):
@@ -2714,7 +2714,10 @@ async def network_for_siren(req: Request, siren: str):
                     links.append({"source": person_id, "target": sci_id, "kind": "sci"})
 
     result = {"nodes": nodes, "links": links}
-    _gen_cache_set(cache_key, result)
+    # Ne cache que si les dirigeants ont été récupérés. Sinon le timeout d'une
+    # 1ère requête lente serait gelé pour 5 min et pénaliserait les suivantes.
+    if dirigeants:
+        _gen_cache_set(cache_key, result)
     return result
 
 
