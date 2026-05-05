@@ -250,7 +250,8 @@ export function DataExplorerView({ onOpenTarget }: Props) {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder={`Rechercher dans ${active.split(".")[1] ?? "…"}…`}
+              placeholder={`Rechercher dans ${active.split(".")[1] ?? "…"} (plusieurs mots = AND, accents ignorés)…`}
+              title="Sépare les mots par espace pour combiner les filtres. Ex: 'lamour 1974' ou 'arnault paris'."
               style={{
                 flex: 1, padding: "6px 10px",
                 background: "rgba(255,255,255,0.02)",
