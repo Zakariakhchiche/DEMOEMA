@@ -1,4 +1,4 @@
-{$DOMAIN:localhost} {
+{$DOMAIN:localhost}, d-ai.fr, www.d-ai.fr {
     encode zstd gzip
 
     # Bug 3.3 rapport QA v4 — headers sécu HTTP
