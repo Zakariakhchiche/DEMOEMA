@@ -1671,72 +1671,9 @@ async def _dirigeant_full(
         nom_u, prenom_u,
     ), default=[])
 
-    # 5. DVF immo — mutations à l'adresse exacte siège des SCI du dirigeant
-    # Source: bronze.dvf_transactions_raw (15M mutations 2021-2025) joint
-    # bronze.inpi_formalites_entreprises (adresse siège num+voie+cp).
-    # Limite: DVF anonymise les acquéreurs → on retrouve les mutations à
-    # l'adresse, pas certifiées comme étant les achats des SCI. Mais
-    # concentration de mutations à l'adresse siège SCI = signal fort.
-    # Implémentation: 1 query par SCI (timeout asyncpg sur LATERAL agrégé).
+    # 5. DVF — placé APRÈS le fallback Python-side qui reconstruit `sci`
+    # depuis mandats_detail (cf. step 6 bis). On y revient en step 7.
     dvf_summary: dict | None = None
-    print(f"[DVF dirigeant DEBUG] sci truthy={bool(sci)} sci_sirens type={type(sci.get('sci_sirens') if sci else None).__name__}", flush=True)
-    if sci and sci.get("sci_sirens") and await _table_exists(pool, "bronze", "dvf_transactions_raw"):
-        sirens_for_dvf = [s for s in sci.get("sci_sirens") or [] if s][:15]
-        if sirens_for_dvf:
-            sci_addrs = await _safe(pool.fetch(
-                """SELECT DISTINCT ON (siren)
-                          siren, denomination, adresse_num_voie,
-                          adresse_voie, adresse_code_postal
-                   FROM bronze.inpi_formalites_entreprises
-                   WHERE siren = ANY($1::char(9)[])
-                     AND adresse_voie IS NOT NULL
-                     AND adresse_num_voie IS NOT NULL
-                   ORDER BY siren, date_immatriculation DESC NULLS LAST""",
-                sirens_for_dvf,
-            ), default=[], timeout_s=10.0)
-            print(f"[DVF dirigeant] sci_addrs count={len(sci_addrs or [])} for sirens={sirens_for_dvf[:3]}...", flush=True)
-            dvf_per_sci: list = []
-            for sa in (sci_addrs or []):
-                row = await _safe(pool.fetchrow(
-                    """SELECT count(*)::int AS n_mutations,
-                              sum(CASE WHEN type_local <> 'Dépendance'
-                                       THEN valeur_fonciere ELSE 0 END)::bigint AS total_value,
-                              sum(surface_reelle_bati)::bigint AS total_surface,
-                              max(date_mutation) AS last_mutation
-                       FROM bronze.dvf_transactions_raw
-                       WHERE code_postal = $1
-                         AND adresse_numero = $2
-                         AND adresse_nom_voie ILIKE '%' || $3 || '%'
-                         AND nature_mutation = 'Vente'""",
-                    sa["adresse_code_postal"],
-                    sa["adresse_num_voie"],
-                    sa["adresse_voie"],
-                ), default=None, timeout_s=10.0)
-                print(f"[DVF dirigeant] {sa['siren']} {sa['denomination']}: row={row}", flush=True)
-                if row and row["n_mutations"]:
-                    dvf_per_sci.append({
-                        "siren": sa["siren"],
-                        "denomination": sa["denomination"],
-                        "adresse_num_voie": sa["adresse_num_voie"],
-                        "adresse_voie": sa["adresse_voie"],
-                        "adresse_code_postal": sa["adresse_code_postal"],
-                        "n_mutations": int(row["n_mutations"]),
-                        "total_value": int(row["total_value"]) if row.get("total_value") else None,
-                        "total_surface": int(row["total_surface"]) if row.get("total_surface") else None,
-                        "last_mutation": row["last_mutation"].isoformat() if row.get("last_mutation") else None,
-                    })
-            dvf_per_sci.sort(key=lambda r: r.get("total_value") or 0, reverse=True)
-            if dvf_per_sci:
-                total_n = sum(r["n_mutations"] for r in dvf_per_sci)
-                total_val = sum(r["total_value"] or 0 for r in dvf_per_sci) or None
-                total_surf = sum(r["total_surface"] or 0 for r in dvf_per_sci) or None
-                dvf_summary = {
-                    "n_sci_with_mutations": len(dvf_per_sci),
-                    "total_n_mutations": total_n,
-                    "total_value_eur": total_val,
-                    "total_surface_m2": total_surf,
-                    "per_sci": dvf_per_sci,
-                }
 
     # 6. Mandats détaillés — silver only (no bronze).
     # silver.inpi_dirigeants stocke déjà les arrays parallèles sirens_mandats /
@@ -1898,6 +1835,65 @@ async def _dirigeant_full(
                     "sci_ca_net": sum_ca if sum_ca else None,
                     "emprunts_dettes": sum_dettes if sum_dettes else None,
                     "n_sci_with_comptes": len(rows or []),
+                }
+
+    # 6 quater. DVF — patrimoine immobilier indicatif via mutations à
+    # l'adresse exacte siège des SCI (placé APRÈS fallback Python sci).
+    # Source: bronze.dvf_transactions_raw (15M mutations 2021-2025).
+    # Limite: DVF anonymise les acquéreurs → mutations à l'adresse siège
+    # ne sont pas certifiées comme étant celles de la SCI. Mais une
+    # concentration de mutations à l'adresse siège SCI = signal fort.
+    if sci and sci.get("sci_sirens") and await _table_exists(pool, "bronze", "dvf_transactions_raw"):
+        sirens_for_dvf = [s for s in sci.get("sci_sirens") or [] if s][:15]
+        if sirens_for_dvf:
+            sci_addrs = await _safe(pool.fetch(
+                """SELECT DISTINCT ON (siren)
+                          siren, denomination, adresse_num_voie,
+                          adresse_voie, adresse_code_postal
+                   FROM bronze.inpi_formalites_entreprises
+                   WHERE siren = ANY($1::char(9)[])
+                     AND adresse_voie IS NOT NULL
+                     AND adresse_num_voie IS NOT NULL
+                   ORDER BY siren, date_immatriculation DESC NULLS LAST""",
+                sirens_for_dvf,
+            ), default=[], timeout_s=8.0)
+            dvf_per_sci: list = []
+            for sa in (sci_addrs or []):
+                row = await _safe(pool.fetchrow(
+                    """SELECT count(*)::int AS n_mutations,
+                              sum(CASE WHEN type_local <> 'Dépendance'
+                                       THEN valeur_fonciere ELSE 0 END)::bigint AS total_value,
+                              sum(surface_reelle_bati)::bigint AS total_surface,
+                              max(date_mutation) AS last_mutation
+                       FROM bronze.dvf_transactions_raw
+                       WHERE code_postal = $1
+                         AND adresse_numero = $2
+                         AND adresse_nom_voie ILIKE '%' || $3 || '%'
+                         AND nature_mutation = 'Vente'""",
+                    sa["adresse_code_postal"],
+                    sa["adresse_num_voie"],
+                    sa["adresse_voie"],
+                ), default=None, timeout_s=6.0)
+                if row and row["n_mutations"]:
+                    dvf_per_sci.append({
+                        "siren": sa["siren"],
+                        "denomination": sa["denomination"],
+                        "adresse_num_voie": sa["adresse_num_voie"],
+                        "adresse_voie": sa["adresse_voie"],
+                        "adresse_code_postal": sa["adresse_code_postal"],
+                        "n_mutations": int(row["n_mutations"]),
+                        "total_value": int(row["total_value"]) if row.get("total_value") else None,
+                        "total_surface": int(row["total_surface"]) if row.get("total_surface") else None,
+                        "last_mutation": row["last_mutation"].isoformat() if row.get("last_mutation") else None,
+                    })
+            dvf_per_sci.sort(key=lambda r: r.get("total_value") or 0, reverse=True)
+            if dvf_per_sci:
+                dvf_summary = {
+                    "n_sci_with_mutations": len(dvf_per_sci),
+                    "total_n_mutations": sum(r["n_mutations"] for r in dvf_per_sci),
+                    "total_value_eur": sum(r["total_value"] or 0 for r in dvf_per_sci) or None,
+                    "total_surface_m2": sum(r["total_surface"] or 0 for r in dvf_per_sci) or None,
+                    "per_sci": dvf_per_sci,
                 }
 
     # 6 ter. Enrich SCI value from gold.sci_master (matview enrichi par siren).
