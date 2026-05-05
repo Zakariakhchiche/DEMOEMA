@@ -1679,6 +1679,7 @@ async def _dirigeant_full(
     # concentration de mutations à l'adresse siège SCI = signal fort.
     # Implémentation: 1 query par SCI (timeout asyncpg sur LATERAL agrégé).
     dvf_summary: dict | None = None
+    print(f"[DVF dirigeant DEBUG] sci truthy={bool(sci)} sci_sirens type={type(sci.get('sci_sirens') if sci else None).__name__}", flush=True)
     if sci and sci.get("sci_sirens") and await _table_exists(pool, "bronze", "dvf_transactions_raw"):
         sirens_for_dvf = [s for s in sci.get("sci_sirens") or [] if s][:15]
         if sirens_for_dvf:
@@ -1693,7 +1694,7 @@ async def _dirigeant_full(
                    ORDER BY siren, date_immatriculation DESC NULLS LAST""",
                 sirens_for_dvf,
             ), default=[], timeout_s=10.0)
-            print(f"[DVF dirigeant] sci_addrs count={len(sci_addrs or [])} for sirens={sirens_for_dvf[:3]}...")
+            print(f"[DVF dirigeant] sci_addrs count={len(sci_addrs or [])} for sirens={sirens_for_dvf[:3]}...", flush=True)
             dvf_per_sci: list = []
             for sa in (sci_addrs or []):
                 row = await _safe(pool.fetchrow(
@@ -1711,7 +1712,7 @@ async def _dirigeant_full(
                     sa["adresse_num_voie"],
                     sa["adresse_voie"],
                 ), default=None, timeout_s=10.0)
-                print(f"[DVF dirigeant] {sa['siren']} {sa['denomination']}: row={row}")
+                print(f"[DVF dirigeant] {sa['siren']} {sa['denomination']}: row={row}", flush=True)
                 if row and row["n_mutations"]:
                     dvf_per_sci.append({
                         "siren": sa["siren"],
