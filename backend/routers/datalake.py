@@ -1352,6 +1352,9 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
     if fiche_cp and await _table_exists(pool, "bronze", "dvf_transactions_raw"):
         # 10a. Mutations à l'adresse exacte (numero + voie + cp)
         if fiche_addr_num and fiche_addr_voie:
+            # unaccent() côté PG — INPI peut stocker "Paul Valéry" alors que
+            # DVF stocke "PAUL VALERY" sans accent. ILIKE sans normalisation
+            # rate les voies avec accents. Cf bug Cyril BOUYGUES SCI 32 PV.
             dvf_at_address = await _safe(pool.fetch(
                 """SELECT date_mutation, valeur_fonciere, adresse_numero,
                           adresse_nom_voie, type_local, surface_reelle_bati,
@@ -1359,7 +1362,7 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
                    FROM bronze.dvf_transactions_raw
                    WHERE code_postal = $1
                      AND adresse_numero = $2
-                     AND adresse_nom_voie ILIKE '%' || $3 || '%'
+                     AND unaccent(adresse_nom_voie) ILIKE '%' || unaccent($3::text) || '%'
                      AND nature_mutation IN ('Vente', 'Vente terrain à bâtir')
                    ORDER BY date_mutation DESC
                    LIMIT 30""",
@@ -1857,7 +1860,13 @@ async def _dirigeant_full(
                 sirens_for_dvf,
             ), default=[], timeout_s=8.0)
             dvf_per_sci: list = []
+            sci_no_match: list = []  # SCI dont siège a 0 mutation DVF — on les liste quand même
             for sa in (sci_addrs or []):
+                # IMPORTANT : utiliser unaccent() côté Postgres pour matcher
+                # malgré les divergences d'accent entre INPI ("Paul Valéry")
+                # et DVF ("PAUL VALERY"). Sans ça, le matching rate les SCI
+                # avec des accents dans le nom de voie. Ex: Cyril BOUYGUES
+                # SCI 32 PV @32 Paul Valéry 75016 → 1 vente DVF mais ratée.
                 row = await _safe(pool.fetchrow(
                     """SELECT count(*)::int AS n_mutations,
                               sum(CASE WHEN type_local <> 'Dépendance'
@@ -1867,54 +1876,64 @@ async def _dirigeant_full(
                        FROM bronze.dvf_transactions_raw
                        WHERE code_postal = $1
                          AND adresse_numero = $2
-                         AND adresse_nom_voie ILIKE '%' || $3 || '%'
+                         AND unaccent(adresse_nom_voie) ILIKE '%' || unaccent($3::text) || '%'
                          AND nature_mutation = 'Vente'""",
                     sa["adresse_code_postal"],
                     sa["adresse_num_voie"],
                     sa["adresse_voie"],
-                ), default=None, timeout_s=6.0)
+                ), default=None, timeout_s=4.0)
+                base = {
+                    "siren": sa["siren"],
+                    "denomination": sa["denomination"],
+                    "adresse_num_voie": sa["adresse_num_voie"],
+                    "adresse_voie": sa["adresse_voie"],
+                    "adresse_code_postal": sa["adresse_code_postal"],
+                }
                 if row and row["n_mutations"]:
                     dvf_per_sci.append({
-                        "siren": sa["siren"],
-                        "denomination": sa["denomination"],
-                        "adresse_num_voie": sa["adresse_num_voie"],
-                        "adresse_voie": sa["adresse_voie"],
-                        "adresse_code_postal": sa["adresse_code_postal"],
+                        **base,
                         "n_mutations": int(row["n_mutations"]),
                         "total_value": int(row["total_value"]) if row.get("total_value") else None,
                         "total_surface": int(row["total_surface"]) if row.get("total_surface") else None,
                         "last_mutation": row["last_mutation"].isoformat() if row.get("last_mutation") else None,
                     })
+                else:
+                    sci_no_match.append(base)
             dvf_per_sci.sort(key=lambda r: r.get("total_value") or 0, reverse=True)
-            if dvf_per_sci:
-                # Dédup par adresse exacte : N SCI au même siège partagent les
-                # mêmes mutations DVF (cf. ARNAULT BA/DA/AFJ + SDG PATRIMOINE
-                # toutes au 25 LA BOETIE 75008). Compter 4× les mêmes 7 muts
-                # gonflerait artificiellement le total. On agrège par adresse
-                # pour le total cumulé, mais on garde le détail par SCI.
-                seen_addr: set = set()
-                dedup_n = 0
-                dedup_val = 0.0
-                dedup_surf = 0.0
-                for r in dvf_per_sci:
-                    key = (
-                        r.get("adresse_code_postal"),
-                        r.get("adresse_num_voie"),
-                        r.get("adresse_voie"),
-                    )
-                    if key in seen_addr:
-                        continue
-                    seen_addr.add(key)
-                    dedup_n += r["n_mutations"]
-                    dedup_val += r.get("total_value") or 0
-                    dedup_surf += r.get("total_surface") or 0
+            # Dédup par adresse exacte : N SCI au même siège partagent les
+            # mêmes mutations DVF (cf. ARNAULT BA/DA/AFJ + SDG PATRIMOINE
+            # toutes au 25 LA BOETIE 75008). On agrège par adresse pour le
+            # total cumulé, mais on garde le détail par SCI.
+            seen_addr: set = set()
+            dedup_n = 0
+            dedup_val = 0.0
+            dedup_surf = 0.0
+            for r in dvf_per_sci:
+                key = (
+                    r.get("adresse_code_postal"),
+                    r.get("adresse_num_voie"),
+                    r.get("adresse_voie"),
+                )
+                if key in seen_addr:
+                    continue
+                seen_addr.add(key)
+                dedup_n += r["n_mutations"]
+                dedup_val += r.get("total_value") or 0
+                dedup_surf += r.get("total_surface") or 0
+            # Toujours retourner dvf_summary si on avait des sirens SCI à
+            # checker, même si dvf_per_sci est vide. Cela permet au frontend
+            # d'afficher la section avec un message "biens stables, aucune
+            # mutation DVF 2021-2025 à l'adresse siège des N SCI".
+            if sci_addrs:
                 dvf_summary = {
+                    "n_sci_total": len(sci_addrs),
                     "n_sci_with_mutations": len(dvf_per_sci),
                     "n_unique_addresses": len(seen_addr),
                     "total_n_mutations": dedup_n,
                     "total_value_eur": dedup_val or None,
                     "total_surface_m2": dedup_surf or None,
                     "per_sci": dvf_per_sci,
+                    "sci_no_match": sci_no_match,
                 }
 
     # 6 ter. Enrich SCI value from gold.sci_master (matview enrichi par siren).
