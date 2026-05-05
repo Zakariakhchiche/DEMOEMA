@@ -1654,20 +1654,34 @@ async def _dirigeant_full(
                   COALESCE(em.denomination,
                            ul.denomination_unite,
                            ic.denomination,
+                           ife.denomination,
                            rer.nom_complet)                        AS denomination,
                   -- forme_juridique : OK de retomber sur l'array (code numérique
                   -- non user-facing, sert au filtre SCI Python). Même si désaligné,
                   -- le NOMBRE de SCI dans son portefeuille reste exact (n_sci=3).
                   COALESCE(em.insee_categorie_juridique,
                            ul.categorie_juridique,
+                           ife.forme_juridique,
                            d.formes_juridiques[i])                 AS forme_juridique,
                   d.roles[i]                                       AS role,
                   COALESCE(em.capital_social, ic.capital_social)   AS capital,
-                  COALESCE(em.code_ape, ul.code_ape)               AS code_ape,
+                  COALESCE(em.code_ape, ul.code_ape, ife.code_ape) AS code_ape,
                   COALESCE(em.date_immatriculation,
-                           ul.date_creation)                       AS date_immatriculation,
-                  (COALESCE(em.insee_etat_administratif,
-                            ul.etat_administratif) = 'A')          AS actif
+                           ul.date_creation,
+                           ife.date_immatriculation)               AS date_immatriculation,
+                  -- actif tri-state : si silver/gold remonte 'A' = actif vrai,
+                  -- 'C' = fermé. Sinon si ife.date_radiation IS NOT NULL = fermé.
+                  -- Sinon si ife.date_immatriculation existe sans radiation = actif.
+                  -- Sinon NULL (inconnu).
+                  CASE
+                    WHEN COALESCE(em.insee_etat_administratif,
+                                  ul.etat_administratif) = 'A' THEN true
+                    WHEN COALESCE(em.insee_etat_administratif,
+                                  ul.etat_administratif) = 'C' THEN false
+                    WHEN ife.date_radiation IS NOT NULL THEN false
+                    WHEN ife.date_immatriculation IS NOT NULL THEN true
+                    ELSE NULL
+                  END                                              AS actif
                FROM dirigeant d
                CROSS JOIN generate_subscripts(d.sirens_mandats, 1) AS i
                LEFT JOIN gold.entreprises_master em
@@ -1683,9 +1697,18 @@ async def _dirigeant_full(
                   ORDER BY date_cloture DESC NULLS LAST
                   LIMIT 1
                ) ic ON true
+               LEFT JOIN LATERAL (
+                  SELECT denomination, forme_juridique, code_ape,
+                         date_immatriculation, date_radiation
+                  FROM bronze.inpi_formalites_entreprises
+                  WHERE siren = d.sirens_mandats[i]
+                    AND denomination IS NOT NULL
+                  ORDER BY date_immatriculation DESC NULLS LAST
+                  LIMIT 1
+               ) ife ON true
                ORDER BY COALESCE(em.capital_social, ic.capital_social) DESC NULLS LAST,
                         COALESCE(em.denomination, ul.denomination_unite,
-                                 ic.denomination, rer.nom_complet)
+                                 ic.denomination, ife.denomination, rer.nom_complet)
                LIMIT 100""",
             nom_for_sql, nom_for_sql_na, prenom_for_sql, prenom_for_sql_na, date_n,
         ), default=[], timeout_s=12.0)
