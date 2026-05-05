@@ -1253,6 +1253,47 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
         else:
             fiche["is_lobbying_registered"] = False
 
+    # 9. SCI détenues par cette entreprise (parent corporate)
+    # Query gold.sci_master pour trouver les SCI dont le parent_sirens contient
+    # le siren de cette entreprise. Permet d'identifier le patrimoine immobilier
+    # caché derrière des SCI sœurs / filles. Cas d'usage M&A : évaluation
+    # asset-rich, sale & lease-back, structuration fiscale, transmission.
+    sci_owned: list = []
+    if await _table_exists(pool, "gold", "sci_master"):
+        sci_owned_rows = await _safe(pool.fetch(
+            """SELECT siren, denomination, forme_juridique, code_ape,
+                      adresse_dept, adresse_commune, adresse_code_postal,
+                      capital_social, total_actif, immo_corporelles,
+                      capitaux_propres, emprunts_dettes,
+                      patrimoine_net_estime, patrimoine_net_score,
+                      ownership_type, n_dirigeants_individu, n_dirigeants_morale,
+                      estimation_value_avg_eur,
+                      date_immatriculation, age_entreprise, statut_actif
+               FROM gold.sci_master
+               WHERE $1 = ANY(parent_sirens)
+               ORDER BY patrimoine_net_estime DESC NULLS LAST,
+                        total_actif DESC NULLS LAST
+               LIMIT 50""",
+            siren,
+        ), default=[], timeout_s=4.0)
+        sci_owned = [_serialize(s) for s in (sci_owned_rows or [])]
+
+    # Agrégats SCI détenues — exposés au frontend pour KPI rapide
+    sci_owned_count = len(sci_owned)
+    sci_owned_total_actif = sum(
+        float(s["total_actif"]) for s in sci_owned if s.get("total_actif")
+    ) or None
+    sci_owned_total_patrimoine = sum(
+        float(s["patrimoine_net_estime"]) for s in sci_owned
+        if s.get("patrimoine_net_estime")
+    ) or None
+    sci_owned_total_capital = sum(
+        float(s["capital_social"]) for s in sci_owned if s.get("capital_social")
+    ) or None
+    sci_owned_total_immo = sum(
+        float(s["immo_corporelles"]) for s in sci_owned if s.get("immo_corporelles")
+    ) or None
+
     return {
         "fiche": _serialize(fiche) if hasattr(fiche, "items") and not isinstance(fiche, dict) else fiche,
         "dirigeants": [_serialize(d) for d in dirigeants],
@@ -1260,6 +1301,12 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
         "red_flags": [_serialize(r) for r in red_flags],
         "network": [_serialize(n) for n in network],
         "presse": [_serialize(p) for p in presse],
+        "sci_owned": sci_owned,
+        "sci_owned_count": sci_owned_count,
+        "sci_owned_total_patrimoine": sci_owned_total_patrimoine,
+        "sci_owned_total_actif": sci_owned_total_actif,
+        "sci_owned_total_capital": sci_owned_total_capital,
+        "sci_owned_total_immo": sci_owned_total_immo,
     }
 
 
