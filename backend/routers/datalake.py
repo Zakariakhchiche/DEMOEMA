@@ -162,11 +162,19 @@ async def query_table(
     if q:
         search_cols = meta.get("search_cols", [])
         if search_cols:
-            cond = " OR ".join(
-                [f"{c}::text ILIKE ${len(params) + 1}" for c in search_cols]
-            )
-            where_parts.append(f"({cond})")
-            params.append(f"%{q}%")
+            # Multi-tokens AND + accent-insensitive ILIKE.
+            # Ex: "ARNAULT 1949" sur inpi_dirigeants (cols nom/prenom/date_naissance)
+            # → (cond_nom OR cond_prenom OR cond_dn match "ARNAULT")
+            #   AND (cond_nom OR cond_prenom OR cond_dn match "1949")
+            # → ne ramène que Bernard ARNAULT 1949-03 (et pas tous les ARNAULT).
+            # unaccent() rend la recherche tolérante aux accents (LAMOUR ↔ Lamour).
+            tokens = [t for t in (q or "").split() if t.strip()]
+            for token in tokens:
+                params.append(f"%{token}%")
+                cond = " OR ".join(
+                    [f"unaccent({c}::text) ILIKE unaccent(${len(params)})" for c in search_cols]
+                )
+                where_parts.append(f"({cond})")
 
     where_sql = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
 

@@ -73,7 +73,7 @@ GOLD_TABLES_WHITELIST: dict[str, dict[str, Any]] = {
         # ont été renommées par le codegen LLM. Sans alignement, l'Explorer renvoie
         # 500 UndefinedColumnError.
         "default_order": "pro_ma_score DESC NULLS LAST",
-        "search_cols": ["denomination", "siren", "code_ape", "adresse_dept"],
+        "search_cols": ["denomination", "siren", "code_ape", "adresse_dept", "adresse_commune"],
         "preview_cols": [
             "siren",
             "denomination",
@@ -91,7 +91,8 @@ GOLD_TABLES_WHITELIST: dict[str, dict[str, Any]] = {
         # score = pro_ma_score, mandats = n_mandats_actifs, age = age_2026.
         "pk": "person_uid",
         "default_order": "pro_ma_score DESC NULLS LAST",
-        "search_cols": ["nom", "prenom"],
+        # Multi-tokens AND : "ARNAULT 1949" → cherche nom AND année naissance.
+        "search_cols": ["nom", "prenom", "date_naissance", "age_2026"],
         "preview_cols": [
             "person_uid",
             "nom",
@@ -107,7 +108,7 @@ GOLD_TABLES_WHITELIST: dict[str, dict[str, Any]] = {
         "pk": "siren",
         # Schema v3 PRO — voir entreprises_master ci-dessus.
         "default_order": "deal_score_raw DESC NULLS LAST",
-        "search_cols": ["denomination", "siren", "code_ape"],
+        "search_cols": ["denomination", "siren", "code_ape", "adresse_dept", "tier"],
         "preview_cols": [
             "siren",
             "denomination",
@@ -289,7 +290,7 @@ GOLD_TABLES_WHITELIST: dict[str, dict[str, Any]] = {
         # Vrais champs : person_uid + n_mandats_actifs + n_companies + ca_total + pro_ma_score.
         "pk": "person_uid",
         "default_order": "pro_ma_score DESC NULLS LAST",
-        "search_cols": ["nom", "prenom"],
+        "search_cols": ["nom", "prenom", "age_2026"],
         "preview_cols": [
             "person_uid",
             "nom",
@@ -366,7 +367,8 @@ GOLD_TABLES_WHITELIST: dict[str, dict[str, Any]] = {
         "category": "core",
         "pk": "nom",
         "default_order": "n_mandats_actifs DESC NULLS LAST",
-        "search_cols": ["nom", "prenom"],
+        # Multi-tokens AND : "LAMOUR 1974" → BERNARD LAMOUR né 1974-04 uniquement.
+        "search_cols": ["nom", "prenom", "date_naissance"],
         "preview_cols": [
             "nom",
             "prenom",
@@ -384,7 +386,7 @@ GOLD_TABLES_WHITELIST: dict[str, dict[str, Any]] = {
         "category": "patrimoine",
         "pk": "nom",
         "default_order": "total_capital_sci DESC NULLS LAST",
-        "search_cols": ["nom", "prenom"],
+        "search_cols": ["nom", "prenom", "date_naissance"],
         "preview_cols": [
             "nom",
             "prenom",
