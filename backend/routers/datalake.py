@@ -1278,7 +1278,7 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
                       COALESCE(sm.forme_juridique, em.insee_categorie_juridique, ul.categorie_juridique) AS forme_juridique,
                       COALESCE(sm.code_ape, em.code_ape, ul.code_ape) AS code_ape,
                       COALESCE(sm.adresse_dept, em.adresse_dept) AS adresse_dept,
-                      COALESCE(sm.adresse_commune, em.adresse_commune) AS adresse_commune,
+                      em.adresse_commune AS adresse_commune,  -- gold.sci_master n'a pas adresse_commune
                       sm.adresse_code_postal,
                       COALESCE(sm.capital_social, em.capital_social) AS capital_social,
                       sm.total_actif, sm.immo_corporelles,
