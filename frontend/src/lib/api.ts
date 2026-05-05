@@ -139,6 +139,12 @@ export const datalakeApi = {
       red_flags: Record<string, unknown>[];
       network: Record<string, unknown>[];
       presse: Record<string, unknown>[];
+      sci_owned?: Record<string, unknown>[];
+      sci_owned_count?: number;
+      sci_owned_total_patrimoine?: number;
+      sci_owned_total_actif?: number;
+      sci_owned_total_capital?: number;
+      sci_owned_total_immo?: number;
     }>(`/api/datalake/fiche/${siren}`),
 
   /** Fiche complète dirigeant : INPI identité + SCI patrimoine + OSINT + sanctions + DVF.
