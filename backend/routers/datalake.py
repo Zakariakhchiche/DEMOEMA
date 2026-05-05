@@ -1335,6 +1335,20 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
     fiche_addr_num = (fiche or {}).get("adresse_num_voie") or (fiche or {}).get("adresse_numero")
     fiche_addr_voie = (fiche or {}).get("adresse_voie") or (fiche or {}).get("adresse_nom_voie")
     fiche_cp = (fiche or {}).get("adresse_code_postal") or (fiche or {}).get("code_postal")
+    # Si gold ne fournit pas le numéro de voie, on retombe sur bronze.inpi_formalites_entreprises
+    if (not fiche_addr_num or not fiche_addr_voie) and await _table_exists(pool, "bronze", "inpi_formalites_entreprises"):
+        bronze_addr = await _safe(pool.fetchrow(
+            """SELECT adresse_num_voie, adresse_voie, adresse_code_postal
+               FROM bronze.inpi_formalites_entreprises
+               WHERE siren = $1 AND adresse_voie IS NOT NULL
+               ORDER BY date_immatriculation DESC NULLS LAST
+               LIMIT 1""",
+            siren,
+        ), default=None, timeout_s=4.0)
+        if bronze_addr:
+            fiche_addr_num = fiche_addr_num or bronze_addr["adresse_num_voie"]
+            fiche_addr_voie = fiche_addr_voie or bronze_addr["adresse_voie"]
+            fiche_cp = fiche_cp or bronze_addr["adresse_code_postal"]
     if fiche_cp and await _table_exists(pool, "bronze", "dvf_transactions_raw"):
         # 10a. Mutations à l'adresse exacte (numero + voie + cp)
         if fiche_addr_num and fiche_addr_voie:
