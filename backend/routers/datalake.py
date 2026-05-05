@@ -1677,49 +1677,56 @@ async def _dirigeant_full(
     # Limite: DVF anonymise les acquéreurs → on retrouve les mutations à
     # l'adresse, pas certifiées comme étant les achats des SCI. Mais
     # concentration de mutations à l'adresse siège SCI = signal fort.
+    # Implémentation: 1 query par SCI (timeout asyncpg sur LATERAL agrégé).
     dvf_summary: dict | None = None
     if sci and sci.get("sci_sirens") and await _table_exists(pool, "bronze", "dvf_transactions_raw"):
-        sirens_for_dvf = [s for s in sci.get("sci_sirens") or [] if s][:30]
+        sirens_for_dvf = [s for s in sci.get("sci_sirens") or [] if s][:15]
         if sirens_for_dvf:
-            dvf_per_sci = await _safe(pool.fetch(
-                """WITH sci_addr AS (
-                       SELECT DISTINCT ON (ife.siren)
-                              ife.siren, ife.adresse_num_voie,
-                              ife.adresse_voie, ife.adresse_code_postal,
-                              ife.denomination
-                       FROM bronze.inpi_formalites_entreprises ife
-                       WHERE ife.siren = ANY($1::char(9)[])
-                         AND ife.adresse_voie IS NOT NULL
-                         AND ife.adresse_num_voie IS NOT NULL
-                       ORDER BY ife.siren, ife.date_immatriculation DESC NULLS LAST
-                   )
-                   SELECT sa.siren, sa.denomination,
-                          sa.adresse_num_voie, sa.adresse_voie,
-                          sa.adresse_code_postal,
-                          agg.n_mutations, agg.total_value,
-                          agg.total_surface, agg.last_mutation
-                   FROM sci_addr sa
-                   CROSS JOIN LATERAL (
-                       SELECT count(*)::int AS n_mutations,
-                              sum(CASE WHEN d.type_local <> 'Dépendance'
-                                       THEN d.valeur_fonciere ELSE 0 END)::bigint AS total_value,
-                              sum(d.surface_reelle_bati)::bigint AS total_surface,
-                              max(d.date_mutation) AS last_mutation
-                       FROM bronze.dvf_transactions_raw d
-                       WHERE d.code_postal = sa.adresse_code_postal
-                         AND d.adresse_numero = sa.adresse_num_voie
-                         AND d.adresse_nom_voie ILIKE '%' || sa.adresse_voie || '%'
-                         AND d.nature_mutation = 'Vente'
-                   ) AS agg
-                   WHERE agg.n_mutations > 0
-                   ORDER BY agg.total_value DESC NULLS LAST""",
+            sci_addrs = await _safe(pool.fetch(
+                """SELECT DISTINCT ON (siren)
+                          siren, denomination, adresse_num_voie,
+                          adresse_voie, adresse_code_postal
+                   FROM bronze.inpi_formalites_entreprises
+                   WHERE siren = ANY($1::char(9)[])
+                     AND adresse_voie IS NOT NULL
+                     AND adresse_num_voie IS NOT NULL
+                   ORDER BY siren, date_immatriculation DESC NULLS LAST""",
                 sirens_for_dvf,
-            ), default=[], timeout_s=18.0)
-            dvf_per_sci = [_serialize(r) for r in (dvf_per_sci or [])]
+            ), default=[], timeout_s=4.0)
+            dvf_per_sci: list = []
+            for sa in (sci_addrs or []):
+                row = await _safe(pool.fetchrow(
+                    """SELECT count(*)::int AS n_mutations,
+                              sum(CASE WHEN type_local <> 'Dépendance'
+                                       THEN valeur_fonciere ELSE 0 END)::bigint AS total_value,
+                              sum(surface_reelle_bati)::bigint AS total_surface,
+                              max(date_mutation) AS last_mutation
+                       FROM bronze.dvf_transactions_raw
+                       WHERE code_postal = $1
+                         AND adresse_numero = $2
+                         AND adresse_nom_voie ILIKE '%' || $3 || '%'
+                         AND nature_mutation = 'Vente'""",
+                    sa["adresse_code_postal"],
+                    sa["adresse_num_voie"],
+                    sa["adresse_voie"],
+                ), default=None, timeout_s=4.0)
+                if row and row["n_mutations"]:
+                    dvf_per_sci.append({
+                        "siren": sa["siren"],
+                        "denomination": sa["denomination"],
+                        "adresse_num_voie": sa["adresse_num_voie"],
+                        "adresse_voie": sa["adresse_voie"],
+                        "adresse_code_postal": sa["adresse_code_postal"],
+                        "n_mutations": int(row["n_mutations"]),
+                        "total_value": int(row["total_value"]) if row.get("total_value") else None,
+                        "total_surface": int(row["total_surface"]) if row.get("total_surface") else None,
+                        "last_mutation": row["last_mutation"].isoformat() if row.get("last_mutation") else None,
+                    })
+            dvf_per_sci.sort(key=lambda r: r.get("total_value") or 0, reverse=True)
             if dvf_per_sci:
-                total_n = sum(int(r.get("n_mutations") or 0) for r in dvf_per_sci)
-                total_val = sum(float(r.get("total_value") or 0) for r in dvf_per_sci) or None
-                total_surf = sum(float(r.get("total_surface") or 0) for r in dvf_per_sci) or None
+                total_n = sum(r["n_mutations"] for r in dvf_per_sci)
+                total_val = sum(r["total_value"] or 0 for r in dvf_per_sci) or None
+                total_surf = sum(r["total_surface"] or 0 for r in dvf_per_sci) or None
                 dvf_summary = {
                     "n_sci_with_mutations": len(dvf_per_sci),
                     "total_n_mutations": total_n,
