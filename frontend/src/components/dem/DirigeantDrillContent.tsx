@@ -243,8 +243,8 @@ export function DirigeantDrillContent({ data }: { data: Record<string, unknown> 
 
       {dvf && Number(dvf.n_sci_with_mutations) > 0 && Array.isArray(dvf.per_sci) && (
         <Section title="🏛️ Patrimoine immobilier DVF (mutations à l'adresse siège SCI)">
-          <Row label="SCI avec mutations" value={`${dvf.n_sci_with_mutations} / ${(dvf.per_sci as unknown[]).length}`} />
-          <Row label="Total mutations" value={`${dvf.total_n_mutations} ventes`} />
+          <Row label="SCI avec mutations" value={`${dvf.n_sci_with_mutations} SCI · ${dvf.n_unique_addresses ?? "—"} adresses uniques`} />
+          <Row label="Total mutations (dédup adresse)" value={`${dvf.total_n_mutations} ventes`} />
           <Row label="Valeur cumulée" value={fmt(dvf.total_value_eur)} />
           <Row label="Surface cumulée bâtie" value={dvf.total_surface_m2 ? `${Number(dvf.total_surface_m2).toLocaleString("fr-FR")} m²` : "—"} />
           <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-muted)" }}>

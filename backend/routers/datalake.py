@@ -1671,8 +1671,7 @@ async def _dirigeant_full(
         nom_u, prenom_u,
     ), default=[])
 
-    # 5. DVF — placé APRÈS le fallback Python-side qui reconstruit `sci`
-    # depuis mandats_detail (cf. step 6 bis). On y revient en step 7.
+    # 5. DVF — voir step 6 quater plus bas (placé après fallback Python sci).
     dvf_summary: dict | None = None
 
     # 6. Mandats détaillés — silver only (no bronze).
@@ -1888,11 +1887,33 @@ async def _dirigeant_full(
                     })
             dvf_per_sci.sort(key=lambda r: r.get("total_value") or 0, reverse=True)
             if dvf_per_sci:
+                # Dédup par adresse exacte : N SCI au même siège partagent les
+                # mêmes mutations DVF (cf. ARNAULT BA/DA/AFJ + SDG PATRIMOINE
+                # toutes au 25 LA BOETIE 75008). Compter 4× les mêmes 7 muts
+                # gonflerait artificiellement le total. On agrège par adresse
+                # pour le total cumulé, mais on garde le détail par SCI.
+                seen_addr: set = set()
+                dedup_n = 0
+                dedup_val = 0.0
+                dedup_surf = 0.0
+                for r in dvf_per_sci:
+                    key = (
+                        r.get("adresse_code_postal"),
+                        r.get("adresse_num_voie"),
+                        r.get("adresse_voie"),
+                    )
+                    if key in seen_addr:
+                        continue
+                    seen_addr.add(key)
+                    dedup_n += r["n_mutations"]
+                    dedup_val += r.get("total_value") or 0
+                    dedup_surf += r.get("total_surface") or 0
                 dvf_summary = {
                     "n_sci_with_mutations": len(dvf_per_sci),
-                    "total_n_mutations": sum(r["n_mutations"] for r in dvf_per_sci),
-                    "total_value_eur": sum(r["total_value"] or 0 for r in dvf_per_sci) or None,
-                    "total_surface_m2": sum(r["total_surface"] or 0 for r in dvf_per_sci) or None,
+                    "n_unique_addresses": len(seen_addr),
+                    "total_n_mutations": dedup_n,
+                    "total_value_eur": dedup_val or None,
+                    "total_surface_m2": dedup_surf or None,
                     "per_sci": dvf_per_sci,
                 }
 
