@@ -1681,9 +1681,11 @@ async def _dirigeant_full(
         sirens_for_master = [s for s in sci.get("sci_sirens") or [] if s]
         if sirens_for_master and await _table_exists(pool, "gold", "sci_master"):
             master_rows = await _safe(pool.fetch(
-                """SELECT siren, total_actif, immo_corporelles, capitaux_propres,
-                          ca_net, emprunts_dettes, capital_social,
-                          patrimoine_net_estime
+                """SELECT siren, denomination, total_actif, immo_corporelles,
+                          capitaux_propres, ca_net, emprunts_dettes,
+                          capital_social, patrimoine_net_estime,
+                          ownership_type, n_dirigeants_individus,
+                          n_parents_corporate
                    FROM gold.sci_master
                    WHERE siren = ANY($1::char(9)[])""",
                 sirens_for_master,
@@ -1714,6 +1716,27 @@ async def _dirigeant_full(
                 # n'avait pas pu le calculer (cas de timeout).
                 if sci and not sci.get("total_capital_sci") and sum_cap:
                     sci["total_capital_sci"] = sum_cap
+                # Distinction PM (personne morale) vs PP (personne physique)
+                # par SCI. ownership_type vient de gold.sci_master, calculé
+                # via silver.inpi_formalites_personnes (compte associés PP/PM).
+                # Expose un dict siren -> {denomination, ownership_type}
+                # consommé par le frontend pour afficher tag PP/PM/MIXTE.
+                if sci is not None:
+                    sci["sci_per_siren"] = [
+                        {
+                            "siren": r.get("siren"),
+                            "denomination": r.get("denomination"),
+                            "ownership_type": r.get("ownership_type"),  # individual / corporate / mixed / unknown
+                            "n_dirigeants_individus": r.get("n_dirigeants_individus"),
+                            "n_parents_corporate": r.get("n_parents_corporate"),
+                            "patrimoine_net_estime": float(r["patrimoine_net_estime"]) if r.get("patrimoine_net_estime") else None,
+                        }
+                        for r in master_rows
+                    ]
+                    # Compteurs agrégés pour KPI rapide
+                    sci["n_sci_individual"] = sum(1 for r in master_rows if r.get("ownership_type") == "individual")
+                    sci["n_sci_corporate"] = sum(1 for r in master_rows if r.get("ownership_type") == "corporate")
+                    sci["n_sci_mixed"] = sum(1 for r in master_rows if r.get("ownership_type") == "mixed")
 
     # 7. Co-mandataires détaillés — silver only.
     # Reverse-lookup : trouver tous les autres dirigeants dont sirens_mandats
