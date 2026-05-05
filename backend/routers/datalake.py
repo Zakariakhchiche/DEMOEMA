@@ -1324,6 +1324,68 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
         float(s["immo_corporelles"]) for s in sci_owned if s.get("immo_corporelles")
     ) or None
 
+    # 10. DVF — patrimoine immobilier indicatif via mutations à l'adresse siège
+    # Source : bronze.dvf_transactions_raw (15M mutations 2021-2025).
+    # Le DVF public NE contient PAS le siren acquéreur (anonymisé DGFiP), donc
+    # on ne peut pas garantir que les mutations à l'adresse siège SOIENT celles
+    # de l'entreprise. Mais c'est un proxy d'activité immo à cette adresse +
+    # un contexte de marché local pertinent pour M&A.
+    dvf_at_address: list = []
+    dvf_market_local: dict = {}
+    fiche_addr_num = (fiche or {}).get("adresse_num_voie") or (fiche or {}).get("adresse_numero")
+    fiche_addr_voie = (fiche or {}).get("adresse_voie") or (fiche or {}).get("adresse_nom_voie")
+    fiche_cp = (fiche or {}).get("adresse_code_postal") or (fiche or {}).get("code_postal")
+    if fiche_cp and await _table_exists(pool, "bronze", "dvf_transactions_raw"):
+        # 10a. Mutations à l'adresse exacte (numero + voie + cp)
+        if fiche_addr_num and fiche_addr_voie:
+            dvf_at_address = await _safe(pool.fetch(
+                """SELECT date_mutation, valeur_fonciere, adresse_numero,
+                          adresse_nom_voie, type_local, surface_reelle_bati,
+                          nature_mutation, nombre_pieces_principales, id_parcelle
+                   FROM bronze.dvf_transactions_raw
+                   WHERE code_postal = $1
+                     AND adresse_numero = $2
+                     AND adresse_nom_voie ILIKE '%' || $3 || '%'
+                     AND nature_mutation IN ('Vente', 'Vente terrain à bâtir')
+                   ORDER BY date_mutation DESC
+                   LIMIT 30""",
+                str(fiche_cp), str(fiche_addr_num), str(fiche_addr_voie),
+            ), default=[], timeout_s=6.0)
+            dvf_at_address = [_serialize(r) for r in (dvf_at_address or [])]
+
+        # 10b. Marché local : prix médian par type_local sur le CP, 3 dernières années
+        market_rows = await _safe(pool.fetch(
+            """SELECT type_local,
+                      count(*)::int AS n,
+                      round(avg(valeur_fonciere/NULLIF(surface_reelle_bati,0)))::bigint AS prix_m2_moyen,
+                      round(percentile_cont(0.5) WITHIN GROUP
+                        (ORDER BY valeur_fonciere/NULLIF(surface_reelle_bati,0)))::bigint AS prix_m2_median,
+                      round(percentile_cont(0.5) WITHIN GROUP (ORDER BY valeur_fonciere))::bigint AS prix_median
+               FROM bronze.dvf_transactions_raw
+               WHERE code_postal = $1
+                 AND date_mutation >= (current_date - interval '3 years')
+                 AND surface_reelle_bati > 5
+                 AND nature_mutation = 'Vente'
+               GROUP BY type_local
+               ORDER BY n DESC""",
+            str(fiche_cp),
+        ), default=[], timeout_s=8.0)
+        if market_rows:
+            dvf_market_local = {
+                "code_postal": str(fiche_cp),
+                "by_type_local": [_serialize(r) for r in market_rows],
+            }
+
+    dvf_n_at_address = len(dvf_at_address)
+    dvf_total_value_at_address = sum(
+        float(r["valeur_fonciere"]) for r in dvf_at_address
+        if r.get("valeur_fonciere") and r.get("type_local") not in ("Dépendance",)
+    ) or None
+    dvf_total_surface_at_address = sum(
+        float(r["surface_reelle_bati"]) for r in dvf_at_address
+        if r.get("surface_reelle_bati")
+    ) or None
+
     return {
         "fiche": _serialize(fiche) if hasattr(fiche, "items") and not isinstance(fiche, dict) else fiche,
         "dirigeants": [_serialize(d) for d in dirigeants],
@@ -1337,6 +1399,11 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
         "sci_owned_total_actif": sci_owned_total_actif,
         "sci_owned_total_capital": sci_owned_total_capital,
         "sci_owned_total_immo": sci_owned_total_immo,
+        "dvf_at_address": dvf_at_address,
+        "dvf_n_at_address": dvf_n_at_address,
+        "dvf_total_value_at_address": dvf_total_value_at_address,
+        "dvf_total_surface_at_address": dvf_total_surface_at_address,
+        "dvf_market_local": dvf_market_local,
     }
 
 
