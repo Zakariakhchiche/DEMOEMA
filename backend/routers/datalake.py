@@ -1684,8 +1684,8 @@ async def _dirigeant_full(
                 """SELECT siren, denomination, total_actif, immo_corporelles,
                           capitaux_propres, ca_net, emprunts_dettes,
                           capital_social, patrimoine_net_estime,
-                          ownership_type, n_dirigeants_individus,
-                          n_parents_corporate
+                          ownership_type, n_dirigeants_individu,
+                          n_dirigeants_morale
                    FROM gold.sci_master
                    WHERE siren = ANY($1::char(9)[])""",
                 sirens_for_master,
@@ -1727,8 +1727,8 @@ async def _dirigeant_full(
                             "siren": r.get("siren"),
                             "denomination": r.get("denomination"),
                             "ownership_type": r.get("ownership_type"),  # individual / corporate / mixed / unknown
-                            "n_dirigeants_individus": r.get("n_dirigeants_individus"),
-                            "n_parents_corporate": r.get("n_parents_corporate"),
+                            "n_dirigeants_individu": r.get("n_dirigeants_individu"),
+                            "n_dirigeants_morale": r.get("n_dirigeants_morale"),
                             "patrimoine_net_estime": float(r["patrimoine_net_estime"]) if r.get("patrimoine_net_estime") else None,
                         }
                         for r in master_rows
