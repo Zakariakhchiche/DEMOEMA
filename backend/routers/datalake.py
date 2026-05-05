@@ -1692,7 +1692,8 @@ async def _dirigeant_full(
                      AND adresse_num_voie IS NOT NULL
                    ORDER BY siren, date_immatriculation DESC NULLS LAST""",
                 sirens_for_dvf,
-            ), default=[], timeout_s=4.0)
+            ), default=[], timeout_s=10.0)
+            print(f"[DVF dirigeant] sci_addrs count={len(sci_addrs or [])} for sirens={sirens_for_dvf[:3]}...")
             dvf_per_sci: list = []
             for sa in (sci_addrs or []):
                 row = await _safe(pool.fetchrow(
@@ -1709,7 +1710,8 @@ async def _dirigeant_full(
                     sa["adresse_code_postal"],
                     sa["adresse_num_voie"],
                     sa["adresse_voie"],
-                ), default=None, timeout_s=4.0)
+                ), default=None, timeout_s=10.0)
+                print(f"[DVF dirigeant] {sa['siren']} {sa['denomination']}: row={row}")
                 if row and row["n_mutations"]:
                     dvf_per_sci.append({
                         "siren": sa["siren"],
