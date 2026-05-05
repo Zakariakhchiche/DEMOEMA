@@ -145,6 +145,14 @@ export const datalakeApi = {
       sci_owned_total_actif?: number;
       sci_owned_total_capital?: number;
       sci_owned_total_immo?: number;
+      dvf_at_address?: Record<string, unknown>[];
+      dvf_n_at_address?: number;
+      dvf_total_value_at_address?: number;
+      dvf_total_surface_at_address?: number;
+      dvf_market_local?: {
+        code_postal?: string;
+        by_type_local?: Record<string, unknown>[];
+      };
     }>(`/api/datalake/fiche/${siren}`),
 
   /** Fiche complète dirigeant : INPI identité + SCI patrimoine + OSINT + sanctions + DVF.

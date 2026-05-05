@@ -37,6 +37,14 @@ interface FicheData {
   sci_owned_total_actif?: number;
   sci_owned_total_capital?: number;
   sci_owned_total_immo?: number;
+  dvf_at_address?: Record<string, unknown>[];
+  dvf_n_at_address?: number;
+  dvf_total_value_at_address?: number;
+  dvf_total_surface_at_address?: number;
+  dvf_market_local?: {
+    code_postal?: string;
+    by_type_local?: Record<string, unknown>[];
+  };
 }
 
 function fmtEur(v: unknown): string {
@@ -684,6 +692,89 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
                     ) : null}
                   </div>
                 ) : null}
+
+                {/* Patrimoine immobilier — DVF mutations à l'adresse siège + marché local */}
+                {(Number(data?.dvf_n_at_address ?? 0) > 0 || (data?.dvf_market_local?.by_type_local?.length ?? 0) > 0) && (
+                  <div className="dem-glass" style={{
+                    marginTop: 14, padding: "14px 16px", borderRadius: 12,
+                    background: "rgba(168,85,247,0.04)",
+                    border: "1px solid rgba(168,85,247,0.18)",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
+                      <span style={{ fontWeight: 700, color: "var(--accent-purple)", fontSize: 13 }}>🏛️ Patrimoine immobilier (DVF)</span>
+                      {Number(data?.dvf_n_at_address ?? 0) > 0 && (
+                        <>
+                          <span className="dem-mono tab-num" style={{ fontWeight: 700, fontSize: 16 }}>{data?.dvf_n_at_address}</span>
+                          <span style={{ color: "var(--text-muted)", fontSize: 11.5 }}>mutation{Number(data?.dvf_n_at_address ?? 0) > 1 ? "s" : ""} à l&apos;adresse siège</span>
+                        </>
+                      )}
+                    </div>
+                    {Number(data?.dvf_n_at_address ?? 0) > 0 && (
+                      <>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10, marginBottom: 10 }}>
+                          <div>
+                            <div className="section-label">Valeur cumulée transactions</div>
+                            <div className="dem-mono tab-num" style={{ fontSize: 16, fontWeight: 700, color: "var(--accent-purple)" }}>
+                              {Number(data?.dvf_total_value_at_address ?? 0) > 0 ? fmtEur(data?.dvf_total_value_at_address) : "—"}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="section-label">Surface cumulée bâtie</div>
+                            <div className="dem-mono tab-num" style={{ fontSize: 16, fontWeight: 700 }}>
+                              {Number(data?.dvf_total_surface_at_address ?? 0) > 0 ? `${data?.dvf_total_surface_at_address} m²` : "—"}
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, marginBottom: 10 }}>
+                          {(data?.dvf_at_address ?? []).slice(0, 8).map((r, i) => (
+                            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "3px 0", borderBottom: i < Math.min((data?.dvf_at_address ?? []).length, 8) - 1 ? "1px solid var(--border-subtle)" : "none" }}>
+                              <span className="dem-mono" style={{ color: "var(--text-muted)", fontSize: 11, minWidth: 78 }}>
+                                {String(r.date_mutation ?? "").slice(0, 10)}
+                              </span>
+                              <span style={{ flex: 1, color: "var(--text-primary)", fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {String(r.type_local ?? "—")}
+                              </span>
+                              {r.surface_reelle_bati ? (
+                                <span className="dem-mono" style={{ color: "var(--text-tertiary)", fontSize: 11, minWidth: 50, textAlign: "right" }}>{String(r.surface_reelle_bati)} m²</span>
+                              ) : null}
+                              <span className="dem-mono tab-num" style={{ color: "var(--accent-purple)", fontWeight: 600, minWidth: 95, textAlign: "right", fontSize: 12 }}>
+                                {fmtEur(r.valeur_fonciere)}
+                              </span>
+                            </div>
+                          ))}
+                          {(data?.dvf_at_address?.length ?? 0) > 8 && (
+                            <div style={{ color: "var(--text-muted)", fontSize: 11 }}>
+                              + {(data?.dvf_at_address?.length ?? 0) - 8} autres mutations…
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 10.5, color: "var(--text-muted)", fontStyle: "italic", marginBottom: 8 }}>
+                          ⚠ DVF anonymise les acquéreurs : ces mutations sont à l&apos;adresse siège, pas certifiées comme étant celles de cette entreprise.
+                        </div>
+                      </>
+                    )}
+                    {(data?.dvf_market_local?.by_type_local?.length ?? 0) > 0 && (
+                      <div style={{ borderTop: Number(data?.dvf_n_at_address ?? 0) > 0 ? "1px solid var(--border-subtle)" : "none", paddingTop: Number(data?.dvf_n_at_address ?? 0) > 0 ? 10 : 0 }}>
+                        <div className="section-label" style={{ marginBottom: 6 }}>
+                          Marché local · CP {data?.dvf_market_local?.code_postal} · 3 dernières années
+                        </div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: 11.5 }}>
+                          {(data?.dvf_market_local?.by_type_local ?? []).map((m, i) => (
+                            <div key={i}>
+                              <span style={{ color: "var(--text-tertiary)" }}>{String(m.type_local ?? "—")}</span>
+                              <span className="dem-mono tab-num" style={{ marginLeft: 6, color: "var(--text-primary)", fontWeight: 600 }}>
+                                {m.prix_m2_median ? `${Number(m.prix_m2_median).toLocaleString("fr-FR")} €/m²` : "—"}
+                              </span>
+                              <span style={{ marginLeft: 4, color: "var(--text-muted)", fontSize: 10 }}>
+                                ({String(m.n ?? "")} ventes)
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Patrimoine SCI détenues — bronze.inpi_formalites_personnes ENTREPRISE → SCI */}
                 {Number(data?.sci_owned_count ?? 0) > 0 && (
