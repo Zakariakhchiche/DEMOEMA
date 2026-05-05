@@ -1286,7 +1286,8 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
                       sm.patrimoine_net_estime, sm.patrimoine_net_score,
                       sm.ownership_type, sm.n_dirigeants_individu, sm.n_dirigeants_morale,
                       sm.estimation_value_avg_eur,
-                      sm.date_immatriculation, sm.age_entreprise, sm.statut_actif,
+                      sm.date_immatriculation, sm.age_entreprise,
+                      sm.is_sci, sm.is_holding_patrimoniale,
                       fp.role_entreprise AS parent_role
                FROM bronze.inpi_formalites_personnes fp
                LEFT JOIN gold.sci_master sm ON sm.siren = fp.siren
