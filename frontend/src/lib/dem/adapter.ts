@@ -177,6 +177,16 @@ export function extractFocusEntrepriseFromQuery(text: string): { q: string } | n
     return s.toLowerCase().split(/[\s\-']+/).some(t => CORPORATE_SUFFIX_TOKENS.has(t));
   };
 
+  // 0. SIREN brut (9 chiffres) — déclenche TargetCard via /entreprise/search?q=siren.
+  // Ex: "qui est le siren 897992525", "897992525", "fiche siren 892318312".
+  // Sans ce path, le siren brut tombait dans le siren direct lookup côté backend
+  // qui retournait juste markdown texte (R2 audit 2026-05-05) — pas de TargetCard
+  // cliquable avec drawer accessible.
+  const sirenMatch = trimmed.match(/\b(\d{9})\b/);
+  if (sirenMatch) {
+    return { q: sirenMatch[1] };
+  }
+
   // 1. Intent-based : "qui est <X>", "fiche de <X>", "infos sur <X>".
   const reIntent = /(?:qui\s+(?:est|sont)|fiche\s+(?:de|du|d'|détaillée\s+de)|infos?\s+sur|recherche|donne[ -]moi(?:\s+(?:la\s+fiche|le\s+profil|les?\s+infos))?\s+(?:de|sur|pour|du|d')|montre[ -]moi(?:\s+la\s+fiche)?\s+(?:de|d')|parle[ -]moi\s+de)\s+(?:l['ea]\s+)?([A-Za-zÀ-ÿ0-9][A-Za-zÀ-ÿ0-9\-' ]{1,80})\??\s*$/i;
   const mIntent = reIntent.exec(trimmed);
