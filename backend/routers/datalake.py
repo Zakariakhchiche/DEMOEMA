@@ -1261,12 +1261,27 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
     # car le bootstrap silver_codegen ne l'a pas peuplé (TODO: fix spec).
     # Cas d'usage M&A : asset-rich detection, sale & lease-back, transmission.
     sci_owned: list = []
-    if await _table_exists(pool, "bronze", "inpi_formalites_personnes") and await _table_exists(pool, "gold", "sci_master"):
+    if await _table_exists(pool, "bronze", "inpi_formalites_personnes"):
+        # Stratégie:
+        # 1. bronze.inpi_formalites_personnes (siren d'une entité X dont
+        #    entreprise_siren = $1 = parent corporate) → liste sirens enfants
+        # 2. LEFT JOIN gold.sci_master pour enrichir si la SCI est ingérée
+        # 3. LEFT JOIN gold.entreprises_master / silver.insee_unites_legales
+        #    pour fallback denomination + forme si pas en gold.sci_master
+        # 4. Filtre forme_juridique SCI (65xx) ou 5499 (sociétés civiles)
+        # 5. Filtre actif IS NULL OR actif = true (silver bronze a beaucoup
+        #    de NULL pour des associés actifs — pas un signe de fermeture)
         sci_owned_rows = await _safe(pool.fetch(
-            """SELECT DISTINCT ON (sm.siren)
-                      sm.siren, sm.denomination, sm.forme_juridique, sm.code_ape,
-                      sm.adresse_dept, sm.adresse_commune, sm.adresse_code_postal,
-                      sm.capital_social, sm.total_actif, sm.immo_corporelles,
+            """SELECT DISTINCT ON (fp.siren)
+                      fp.siren,
+                      COALESCE(sm.denomination, em.denomination, ul.denomination_unite) AS denomination,
+                      COALESCE(sm.forme_juridique, em.insee_categorie_juridique, ul.categorie_juridique) AS forme_juridique,
+                      COALESCE(sm.code_ape, em.code_ape, ul.code_ape) AS code_ape,
+                      COALESCE(sm.adresse_dept, em.adresse_dept) AS adresse_dept,
+                      COALESCE(sm.adresse_commune, em.adresse_commune) AS adresse_commune,
+                      sm.adresse_code_postal,
+                      COALESCE(sm.capital_social, em.capital_social) AS capital_social,
+                      sm.total_actif, sm.immo_corporelles,
                       sm.capitaux_propres, sm.emprunts_dettes,
                       sm.patrimoine_net_estime, sm.patrimoine_net_score,
                       sm.ownership_type, sm.n_dirigeants_individu, sm.n_dirigeants_morale,
@@ -1274,14 +1289,22 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
                       sm.date_immatriculation, sm.age_entreprise, sm.statut_actif,
                       fp.role_entreprise AS parent_role
                FROM bronze.inpi_formalites_personnes fp
-               JOIN gold.sci_master sm ON sm.siren = fp.siren
+               LEFT JOIN gold.sci_master sm ON sm.siren = fp.siren
+               LEFT JOIN gold.entreprises_master em ON em.siren = fp.siren
+               LEFT JOIN silver.insee_unites_legales ul ON ul.siren = fp.siren
                WHERE fp.type_de_personne = 'ENTREPRISE'
                  AND fp.entreprise_siren = $1
-                 AND fp.actif = true
-               ORDER BY sm.siren, sm.patrimoine_net_estime DESC NULLS LAST
+                 AND (fp.actif IS NULL OR fp.actif = true)
+                 AND (
+                       sm.is_sci = true
+                       OR (sm.forme_juridique LIKE '65%' OR sm.forme_juridique = '5499')
+                       OR (em.insee_categorie_juridique LIKE '65%' OR em.insee_categorie_juridique = '5499')
+                       OR (ul.categorie_juridique LIKE '65%' OR ul.categorie_juridique = '5499')
+                     )
+               ORDER BY fp.siren, sm.patrimoine_net_estime DESC NULLS LAST
                LIMIT 50""",
             siren,
-        ), default=[], timeout_s=6.0)
+        ), default=[], timeout_s=8.0)
         sci_owned = [_serialize(s) for s in (sci_owned_rows or [])]
 
     # Agrégats SCI détenues — exposés au frontend pour KPI rapide
