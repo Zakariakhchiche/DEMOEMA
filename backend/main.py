@@ -1428,7 +1428,12 @@ async def copilot_stream_endpoint(q: str = Query(...)):
                 # ca_dernier vs ca_latest, ebitda_dernier vs resultat_net_latest,
                 # adresse_commune vs ville, etc.). L'endpoint existant fait deja
                 # la fusion gold/silver et expose les bons alias.
-                async with httpx.AsyncClient(timeout=10) as client:
+                # timeout 30s (au lieu de 10s) car /fiche/{siren} sur cold cache
+                # cumule les _safe timeouts (big CTE 12s + medium 18s + sci_value
+                # 6s + co-mandats 12s) et peut dépasser 10s -> tombait sur le
+                # fallback "datalake silver indisponible" alors que la donnée
+                # finit par arriver. CRITIQUE pour SCI/holdings nouvelles.
+                async with httpx.AsyncClient(timeout=30) as client:
                     fiche_resp = await client.get(
                         f"http://localhost:8000/api/datalake/fiche/{siren_val}"
                     )
