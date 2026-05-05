@@ -31,6 +31,12 @@ interface FicheData {
   red_flags: Record<string, unknown>[];
   network: Record<string, unknown>[];
   presse: Record<string, unknown>[];
+  sci_owned?: Record<string, unknown>[];
+  sci_owned_count?: number;
+  sci_owned_total_patrimoine?: number;
+  sci_owned_total_actif?: number;
+  sci_owned_total_capital?: number;
+  sci_owned_total_immo?: number;
 }
 
 function fmtEur(v: unknown): string {
@@ -678,6 +684,76 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
                     ) : null}
                   </div>
                 ) : null}
+
+                {/* Patrimoine SCI détenues — bronze.inpi_formalites_personnes ENTREPRISE → SCI */}
+                {Number(data?.sci_owned_count ?? 0) > 0 && (
+                  <div className="dem-glass" style={{
+                    marginTop: 14, padding: "14px 16px", borderRadius: 12,
+                    background: "rgba(16,185,129,0.04)",
+                    border: "1px solid rgba(16,185,129,0.18)",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
+                      <span style={{ fontWeight: 700, color: "var(--accent-emerald)", fontSize: 13 }}>🏠 SCI détenues</span>
+                      <span className="dem-mono tab-num" style={{ fontWeight: 700, fontSize: 16 }}>{data?.sci_owned_count}</span>
+                      <span style={{ color: "var(--text-muted)", fontSize: 11.5 }}>sociétés civiles immobilières détenues directement (PM)</span>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 10 }}>
+                      <div>
+                        <div className="section-label">Patrimoine net cumulé</div>
+                        <div className="dem-mono tab-num" style={{ fontSize: 16, fontWeight: 700, color: "var(--accent-emerald)" }}>
+                          {Number(data?.sci_owned_total_patrimoine ?? 0) > 0 ? fmtEur(data?.sci_owned_total_patrimoine) : "—"}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="section-label">Actif cumulé</div>
+                        <div className="dem-mono tab-num" style={{ fontSize: 16, fontWeight: 700 }}>
+                          {Number(data?.sci_owned_total_actif ?? 0) > 0 ? fmtEur(data?.sci_owned_total_actif) : "—"}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="section-label">Immo. corporelles</div>
+                        <div className="dem-mono tab-num" style={{ fontSize: 16, fontWeight: 700 }}>
+                          {Number(data?.sci_owned_total_immo ?? 0) > 0 ? fmtEur(data?.sci_owned_total_immo) : "—"}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="section-label">Capital cumulé</div>
+                        <div className="dem-mono tab-num" style={{ fontSize: 16, fontWeight: 700, color: "var(--text-tertiary)" }}>
+                          {Number(data?.sci_owned_total_capital ?? 0) > 0 ? fmtEur(data?.sci_owned_total_capital) : "—"}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+                      {(data?.sci_owned ?? []).slice(0, 20).map((s, i) => {
+                        const own = String(s.ownership_type ?? "");
+                        const ownColor = own === "individual" ? "var(--accent-cyan)"
+                          : own === "morale" ? "var(--accent-purple)"
+                          : own === "mixed" ? "var(--accent-amber)" : "var(--text-muted)";
+                        const ownLabel = own === "individual" ? "PP" : own === "morale" ? "PM" : own === "mixed" ? "MIX" : "—";
+                        return (
+                          <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 0", borderBottom: i < Math.min((data?.sci_owned ?? []).length, 20) - 1 ? "1px solid var(--border-subtle)" : "none" }}>
+                            <span className="dem-mono" style={{ color: "var(--text-muted)", fontSize: 11, minWidth: 80 }}>{String(s.siren ?? "")}</span>
+                            <span style={{ flex: 1, color: "var(--text-primary)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {String(s.denomination ?? "—")}
+                            </span>
+                            {s.adresse_dept ? <span className="dem-mono" style={{ color: "var(--text-tertiary)", fontSize: 11 }}>{String(s.adresse_dept)}</span> : null}
+                            {own && own !== "—" ? <span className="dem-mono" style={{ color: ownColor, fontSize: 10, fontWeight: 700, padding: "1px 6px", border: `1px solid ${ownColor}`, borderRadius: 4 }}>{ownLabel}</span> : null}
+                            {s.patrimoine_net_estime != null && Number(s.patrimoine_net_estime) > 0 ? (
+                              <span className="dem-mono tab-num" style={{ color: "var(--accent-emerald)", fontWeight: 600, minWidth: 80, textAlign: "right" }}>{fmtEur(s.patrimoine_net_estime)}</span>
+                            ) : s.capital_social != null && Number(s.capital_social) > 0 ? (
+                              <span className="dem-mono tab-num" style={{ color: "var(--text-tertiary)", minWidth: 80, textAlign: "right" }}>cap {fmtEur(s.capital_social)}</span>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                      {Number(data?.sci_owned_count ?? 0) > 20 && (
+                        <div style={{ color: "var(--text-muted)", fontSize: 11, marginTop: 4 }}>
+                          + {Number(data?.sci_owned_count ?? 0) - 20} autres SCI…
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
