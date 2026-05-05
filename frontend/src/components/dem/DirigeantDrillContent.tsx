@@ -99,6 +99,36 @@ export function DirigeantDrillContent({ data }: { data: Record<string, unknown> 
 
       <Section title="Patrimoine SCI (capital + valeur bilan)">
         <Row label="Nombre SCI" value={String(sci.n_sci || 0)} />
+        {/* Distinction PM/PP via gold.sci_master.ownership_type. Permet de
+          repérer les SCI familiales (PP) — typiquement transmission patrimoniale
+          M&A — vs structures corporate (PM) — montage holding/investissement. */}
+        {Boolean((sci.n_sci_individual as number) || (sci.n_sci_corporate as number) || (sci.n_sci_mixed as number)) && (
+          <Row label="Composition associés" value={
+            <span style={{ display: "inline-flex", gap: 8, flexWrap: "wrap" }}>
+              {Number(sci.n_sci_individual || 0) > 0 && (
+                <span style={{
+                  fontSize: 11, padding: "2px 8px", borderRadius: 999,
+                  background: "rgba(96,165,250,0.10)", color: "var(--accent-blue)",
+                  border: "1px solid rgba(96,165,250,0.30)", fontWeight: 600,
+                }}>👤 {String(sci.n_sci_individual)} PP (perso. physique)</span>
+              )}
+              {Number(sci.n_sci_corporate || 0) > 0 && (
+                <span style={{
+                  fontSize: 11, padding: "2px 8px", borderRadius: 999,
+                  background: "rgba(167,139,250,0.10)", color: "var(--accent-purple)",
+                  border: "1px solid rgba(167,139,250,0.30)", fontWeight: 600,
+                }}>🏢 {String(sci.n_sci_corporate)} PM (perso. morale)</span>
+              )}
+              {Number(sci.n_sci_mixed || 0) > 0 && (
+                <span style={{
+                  fontSize: 11, padding: "2px 8px", borderRadius: 999,
+                  background: "rgba(251,191,36,0.10)", color: "var(--accent-amber)",
+                  border: "1px solid rgba(251,191,36,0.30)", fontWeight: 600,
+                }}>⚡ {String(sci.n_sci_mixed)} mixte</span>
+              )}
+            </span>
+          } />
+        )}
         <Row label="Capital cumulé (statutaire)" value={fmt(sci.total_capital_sci)} />
         <Row label="Valeur (total actif bilan)" value={<span style={{ fontWeight: 700, color: "var(--accent-emerald)" }}>{fmt(sciVal.total_actif)}</span>} />
         <Row label="Biens immobiliers" value={fmt(sciVal.immo_corporelles)} />
@@ -107,7 +137,39 @@ export function DirigeantDrillContent({ data }: { data: Record<string, unknown> 
         <Row label="Emprunts/dettes" value={fmt(sciVal.emprunts_dettes)} />
         <Row label="SCI ayant déposé comptes" value={`${sciVal.n_sci_with_comptes || 0} / ${sci.n_sci || 0}`} />
         <Row label="1ère SCI" value={sci.first_sci_date ? String(sci.first_sci_date).slice(0, 10) : "—"} />
-        <Row label="Dénominations SCI" value={arr(sci.sci_denominations).join(" · ")} />
+        {/* Détail par SCI : denomination + tag PP/PM/mixte */}
+        {Array.isArray(sci.sci_per_siren) && (sci.sci_per_siren as unknown[]).length > 0 ? (
+          <Row label="SCI détail" value={
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {(sci.sci_per_siren as Array<Record<string, unknown>>).map((s, i) => {
+                const otype = String(s.ownership_type ?? "");
+                const tag = otype === "individual" ? { txt: "PP", c: "var(--accent-blue)", bg: "rgba(96,165,250,0.10)", b: "rgba(96,165,250,0.30)" }
+                  : otype === "corporate" ? { txt: "PM", c: "var(--accent-purple)", bg: "rgba(167,139,250,0.10)", b: "rgba(167,139,250,0.30)" }
+                  : otype === "mixed" ? { txt: "MIX", c: "var(--accent-amber)", bg: "rgba(251,191,36,0.10)", b: "rgba(251,191,36,0.30)" }
+                  : null;
+                return (
+                  <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12 }}>
+                    {tag && (
+                      <span style={{
+                        fontSize: 10, padding: "1px 6px", borderRadius: 4,
+                        background: tag.bg, color: tag.c, border: `1px solid ${tag.b}`,
+                        fontWeight: 700, letterSpacing: "0.04em",
+                      }}>{tag.txt}</span>
+                    )}
+                    <span style={{ fontWeight: 600 }}>{String(s.denomination ?? s.siren ?? "—")}</span>
+                    {Boolean(s.patrimoine_net_estime) && (
+                      <span style={{ color: "var(--text-tertiary)", fontSize: 11 }}>
+                        {fmt(s.patrimoine_net_estime)}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          } />
+        ) : (
+          <Row label="Dénominations SCI" value={arr(sci.sci_denominations).join(" · ")} />
+        )}
         <Row label="Codes postaux SCI" value={arr(sci.sci_code_postaux).join(", ")} />
       </Section>
 
