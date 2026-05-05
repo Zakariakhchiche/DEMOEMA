@@ -241,12 +241,31 @@ export function DirigeantDrillContent({ data }: { data: Record<string, unknown> 
         </Section>
       )}
 
-      {dvf && Number(dvf.n_zones) > 0 && Array.isArray(dvf.by_cp) && (
-        <Section title="Transactions immobilières DVF (zones SCI)">
-          {(dvf.by_cp as unknown[]).map((row, k) => {
-            const r = row as Record<string, unknown>;
-            return <Row key={k} label={`CP ${String(r.code_postal || "")}`} value={`${r.n} transactions · total ${fmt(r.total)}`} />;
-          })}
+      {dvf && Number(dvf.n_sci_with_mutations) > 0 && Array.isArray(dvf.per_sci) && (
+        <Section title="🏛️ Patrimoine immobilier DVF (mutations à l'adresse siège SCI)">
+          <Row label="SCI avec mutations" value={`${dvf.n_sci_with_mutations} / ${(dvf.per_sci as unknown[]).length}`} />
+          <Row label="Total mutations" value={`${dvf.total_n_mutations} ventes`} />
+          <Row label="Valeur cumulée" value={fmt(dvf.total_value_eur)} />
+          <Row label="Surface cumulée bâtie" value={dvf.total_surface_m2 ? `${Number(dvf.total_surface_m2).toLocaleString("fr-FR")} m²` : "—"} />
+          <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-muted)" }}>
+            {(dvf.per_sci as unknown[]).map((row, k) => {
+              const r = row as Record<string, unknown>;
+              return (
+                <div key={k} style={{ padding: "3px 0", borderBottom: k < (dvf.per_sci as unknown[]).length - 1 ? "1px solid var(--border-subtle)" : "none" }}>
+                  <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{String(r.denomination || r.siren)}</span>
+                  <span style={{ marginLeft: 8, color: "var(--text-tertiary)" }}>
+                    {String(r.adresse_num_voie || "")} {String(r.adresse_voie || "")} {String(r.adresse_code_postal || "")}
+                  </span>
+                  <span style={{ marginLeft: 8, color: "var(--accent-purple)" }}>
+                    {String(r.n_mutations ?? "")} mut. · {fmt(r.total_value)} · {r.total_surface ? `${String(r.total_surface)} m²` : ""}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ marginTop: 6, fontSize: 10.5, color: "var(--text-muted)", fontStyle: "italic" }}>
+            ⚠ DVF anonymise les acquéreurs : ces mutations sont à l&apos;adresse siège SCI, pas certifiées comme étant celles de la SCI.
+          </div>
         </Section>
       )}
     </div>
