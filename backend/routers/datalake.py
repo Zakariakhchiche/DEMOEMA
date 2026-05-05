@@ -480,7 +480,7 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
                       adresse_code_postal,
                       EXTRACT(YEAR FROM date_immatriculation)::int AS annee_creation,
                       primary_domain, has_linkedin_page, has_github_org,
-                      linkedin_employees, digital_presence_score, tech_stack
+                      digital_presence_score, tech_stack
                FROM silver.osint_companies_enriched WHERE siren = $1""",
             siren,
         ), timeout_s=6.0)
@@ -597,7 +597,7 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
             "primary_domain": osint["primary_domain"] if osint else None,
             "has_linkedin_page": osint["has_linkedin_page"] if osint else None,
             "has_github_org": osint["has_github_org"] if osint else None,
-            "linkedin_employees": osint["linkedin_employees"] if osint else None,
+            "linkedin_employees": None,  # colonne supprimée du silver — toujours None
             "digital_presence_score": osint["digital_presence_score"] if osint else None,
             "categorie_entreprise": (insee["categorie_entreprise"] if insee else None) or (gouv["categorie_entreprise"] if gouv else None),
             "dept": (osint["adresse_code_postal"][:2] if osint and osint["adresse_code_postal"] else None) or (loc["dept"] if loc else None) or (gouv["dept"] if gouv else None),
