@@ -1524,7 +1524,9 @@ async def copilot_stream_endpoint(q: str = Query(...)):
                             )
                             return
             except Exception as e:
-                print(f"[Stream] SIREN datalake lookup error: {e}")
+                # Log type+repr pour diagnostiquer (un str(exc) vide masque les
+                # exceptions sans message comme TimeoutError, ConnectError, etc.)
+                print(f"[Stream] SIREN datalake lookup error: {type(e).__name__}: {repr(e)}")
 
             # Fallback : datalake silver/gold ne connaît pas ce SIREN → retombe
             # sur recherche-entreprises.api.gouv.fr (live), mais SANS side effect
