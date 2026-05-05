@@ -1692,31 +1692,29 @@ async def _dirigeant_full(
                          AND ife.adresse_voie IS NOT NULL
                          AND ife.adresse_num_voie IS NOT NULL
                        ORDER BY ife.siren, ife.date_immatriculation DESC NULLS LAST
-                   ),
-                   muts AS (
-                       SELECT sa.siren, sa.denomination,
-                              sa.adresse_num_voie, sa.adresse_voie,
-                              sa.adresse_code_postal,
-                              count(d.*)::int AS n_mutations,
+                   )
+                   SELECT sa.siren, sa.denomination,
+                          sa.adresse_num_voie, sa.adresse_voie,
+                          sa.adresse_code_postal,
+                          agg.n_mutations, agg.total_value,
+                          agg.total_surface, agg.last_mutation
+                   FROM sci_addr sa
+                   CROSS JOIN LATERAL (
+                       SELECT count(*)::int AS n_mutations,
                               sum(CASE WHEN d.type_local <> 'Dépendance'
                                        THEN d.valeur_fonciere ELSE 0 END)::bigint AS total_value,
                               sum(d.surface_reelle_bati)::bigint AS total_surface,
                               max(d.date_mutation) AS last_mutation
-                       FROM sci_addr sa
-                       LEFT JOIN bronze.dvf_transactions_raw d
-                         ON d.code_postal = sa.adresse_code_postal
-                        AND d.adresse_numero = sa.adresse_num_voie
-                        AND d.adresse_nom_voie ILIKE '%' || sa.adresse_voie || '%'
-                        AND d.nature_mutation = 'Vente'
-                       GROUP BY sa.siren, sa.denomination, sa.adresse_num_voie,
-                                sa.adresse_voie, sa.adresse_code_postal
-                   )
-                   SELECT * FROM muts
-                   WHERE n_mutations > 0
-                   ORDER BY total_value DESC NULLS LAST
-                   LIMIT 30""",
+                       FROM bronze.dvf_transactions_raw d
+                       WHERE d.code_postal = sa.adresse_code_postal
+                         AND d.adresse_numero = sa.adresse_num_voie
+                         AND d.adresse_nom_voie ILIKE '%' || sa.adresse_voie || '%'
+                         AND d.nature_mutation = 'Vente'
+                   ) AS agg
+                   WHERE agg.n_mutations > 0
+                   ORDER BY agg.total_value DESC NULLS LAST""",
                 sirens_for_dvf,
-            ), default=[], timeout_s=8.0)
+            ), default=[], timeout_s=18.0)
             dvf_per_sci = [_serialize(r) for r in (dvf_per_sci or [])]
             if dvf_per_sci:
                 total_n = sum(int(r.get("n_mutations") or 0) for r in dvf_per_sci)
