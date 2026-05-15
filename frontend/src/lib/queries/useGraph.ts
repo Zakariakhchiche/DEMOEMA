@@ -20,6 +20,9 @@ interface GraphNode {
   ca?: string;
   ebitda?: string;
   priority?: string;
+  has_procedure_collective_active?: boolean;
+  has_mandat_en_procedure?: boolean;
+  has_late_filing?: boolean;
 }
 
 interface GraphLink {

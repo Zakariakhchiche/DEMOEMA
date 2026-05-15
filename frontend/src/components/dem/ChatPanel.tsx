@@ -347,7 +347,46 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
 
     const lower = text.toLowerCase();
     const isCompare = /compare|vs|versus/i.test(text);
-    const isSiren = /^\d{8,9}$/.test(text.trim());
+    // Luhn check pour SIREN 9 digits. SIRENs commençant par 1, 2, 3
+    // (institutions de l'État, La Poste) sont des exceptions historiques —
+    // on les accepte sans Luhn. Évite faux positifs sur 999999999.
+    const trimmed = text.trim();
+    const isNumericLength = /^\d{8,9}$/.test(trimmed);
+    const luhnValid = (() => {
+      if (trimmed.length !== 9) return true; // 8-digit (SIRET partiel) skip
+      if (/^[123]/.test(trimmed)) return true; // exception institutions
+      let sum = 0;
+      for (let i = 0; i < 9; i++) {
+        let d = parseInt(trimmed[i]!, 10);
+        if (i % 2 === 1) {
+          d *= 2;
+          if (d > 9) d -= 9;
+        }
+        sum += d;
+      }
+      return sum % 10 === 0;
+    })();
+    if (isNumericLength && !luhnValid) {
+      // SIREN structurellement invalide — affiche un message d'erreur
+      // immédiat sans appeler le backend.
+      const errResp: AiMessageData = {
+        role: "ai",
+        kind: "siren",
+        header: "SIREN invalide",
+        content: `Le numéro **${trimmed}** ne respecte pas l'algorithme Luhn (somme de contrôle SIREN). Vérifie qu'il est correct — un SIREN valide a 9 chiffres et passe la formule de Luhn.`,
+        cards: [],
+      };
+      setConversations((prev) => prev.map((c) =>
+        c.id === convId
+          ? { ...c, messages: [...c.messages, errResp as ChatMsg], updated_at: Date.now() }
+          : c
+      ));
+      setStreaming(false);
+      clearInterval(elapsedTimer);
+      clearTimeout(timeoutId);
+      return;
+    }
+    const isSiren = isNumericLength && luhnValid;
     const isDirigeants = /dirigeant|holding|patrimoine/i.test(text);
     const isDD = /\bdd\b|compliance|due diligence/i.test(lower);
     // Compliance/network query : red flag, sanctions, offshore, lobbying, réseau,
