@@ -12,15 +12,22 @@ from typing import AsyncIterator
 
 import httpx
 
-# Priorité d'endpoint LLM :
-#   1. Ollama local (zero coût, zero clé) — OLLAMA_BASE_URL défini en docker-compose
-#   2. Vercel AI Gateway (single key, cost tracking, cache, multi-model routing)
-#   3. DeepSeek direct
-# Le user a explicitement demandé "uniquement Ollama" 2026-05-15. La clé
-# DeepSeek a expiré. On garde le fallback dans le code mais en pratique seule
-# l'option Ollama est active en prod sans clé.
+# Priorité d'endpoint LLM (user a basculé vers Ollama Cloud 2026-05-15) :
+#   1. Ollama (Cloud https://ollama.com ou self-hosted) — OpenAI-compat
+#      via /v1/chat/completions, Bearer auth
+#   2. Vercel AI Gateway (legacy)
+#   3. DeepSeek direct (legacy, clé expirée)
+#
+# Modèles Ollama Cloud testés OK avec tool-calling :
+#   - deepseek-v4-flash:cloud (284B MoE, 13B actifs, 1M ctx, thinking)
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "").rstrip("/")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
+OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "deepseek-v4-flash:cloud")
+# Modèles thinking (deepseek-v4-flash, gpt-oss, o1, r1) génèrent un long
+# reasoning AVANT le content. Bumper max_tokens à 3000 pour laisser place
+# au reasoning + content final (sinon réponse vide / truncate).
+_IS_THINKING_MODEL = OLLAMA_MODEL.startswith(("deepseek-v4", "gpt-oss", "o1", "deepseek-r1"))
+_LLM_MAX_TOKENS = 3000 if _IS_THINKING_MODEL else 1536
 AI_GATEWAY_API_KEY = os.getenv("AI_GATEWAY_API_KEY", "")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 
@@ -51,12 +58,13 @@ _SYSTEM_PROMPT_STREAM = (
 def _resolve_endpoint() -> tuple[str, str, str] | None:
     """Retourne (api_key, base_url, model) ou None si aucune option configurée.
 
-    Priorité 1: Ollama local (zero coût, ne demande pas de clé — passe "ollama"
-    comme api_key, ignoré par le serveur Ollama qui accepte tout Bearer).
-    Le user a demandé Ollama-only 2026-05-15.
+    Ollama Cloud (Pro/Max plan) nécessite OLLAMA_API_KEY (Bearer).
+    Ollama self-hosted accepte tout Bearer ou aucun — on envoie "ollama" si
+    pas de clé.
     """
     if OLLAMA_BASE_URL:
-        return ("ollama",
+        api_key = OLLAMA_API_KEY or "ollama"
+        return (api_key,
                 f"{OLLAMA_BASE_URL}/v1/chat/completions",
                 OLLAMA_MODEL)
     if AI_GATEWAY_API_KEY:
@@ -1195,7 +1203,7 @@ async def copilot_ai_query_stream_with_tools(
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={
                         "model": model,
-                        "max_tokens": 1536,  # élargi pour réponses M&A structurées (tableaux, listes)
+                        "max_tokens": _LLM_MAX_TOKENS,  # 3000 pour modèles thinking (deepseek-v4 stream reasoning + content), 1536 sinon
                         "temperature": 0.3,
                         "messages": messages,
                         "tools": COPILOT_TOOLS,
@@ -1296,7 +1304,7 @@ async def copilot_ai_query_stream_with_tools(
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={
                         "model": model,
-                        "max_tokens": 1024,
+                        "max_tokens": _LLM_MAX_TOKENS,
                         "temperature": 0.3,
                         "messages": messages,
                         # Pas de tools cette fois — on force une réponse texte
