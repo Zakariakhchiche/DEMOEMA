@@ -174,8 +174,41 @@ COPILOT_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "check_compliance",
+            "description": (
+                "Vérifie le RISQUE compliance/M&A d'une entreprise par SIREN. "
+                "Retourne risk_score 0-100 (low ≥80, medium ≥50, high ≥20, critical <20) "
+                "composite sur 10 signaux : procédure collective active (deal-killer), "
+                "sanctions OpenSanctions (AMF/OFAC/ICIJ), contentieux silver.juridictions, "
+                "late filing comptes, conciliation amiable, plan de redressement, "
+                "cessions BODACC 24m (signal opportunité M&A), network red flags "
+                "(dirigeants liés à d'autres entreprises en procédure), trends 3y "
+                "CA/résultat/effectif, marge négative récurrente. Tool LÉGER (économise "
+                "les tokens vs get_fiche_entreprise). Utiliser pour : 'est-ce que X est "
+                "compliant', 'risque URSSAF de Y', 'red flags M&A sur Z', 'signaux DD' "
+                "ou question 'à jour cotisations'. Note: pas d'attestation URSSAF "
+                "officielle (API gouv réservée secteur public) — best proxy = procédure "
+                "collective BODACC + sanctions consolidées."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "siren": {"type": "string", "description": "SIREN 9 chiffres"},
+                },
+                "required": ["siren"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_fiche_entreprise",
-            "description": "Fiche complète entreprise par SIREN: identité (NAF, forme, ville, dept), financiers (CA, EBITDA, capital), 10 dirigeants détaillés, BODACC, sanctions, presse, network.",
+            "description": (
+                "Fiche complète entreprise par SIREN: identité (NAF, forme, ville, dept), "
+                "financiers (CA, EBITDA, capital), 10 dirigeants détaillés, BODACC, sanctions, "
+                "presse, network. Inclut aussi le bloc compliance "
+                "(risk_score 0-100, procédure collective, sanctions, trends)."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -652,8 +685,60 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
                         ],
                         "n_signaux_bodacc": len(d.get("signaux") or []),
                         "n_red_flags": len(d.get("red_flags") or []),
+                        # Iter compliance (PRs #182/#184/#187/#188) — risk_score
+                        # composite + procédure collective + sanctions +
+                        # contentieux + trends. Permet au LLM de raisonner sur
+                        # la fiabilité M&A sans 2e appel tool.
+                        "compliance": d.get("compliance"),
                     }
                 return {"error": f"HTTP {r.status_code}"}
+
+        elif name == "check_compliance":
+            # Tool ciblé compliance/risque M&A. Plus léger que get_fiche_entreprise
+            # (ne ramène QUE le bloc compliance — économise les tokens LLM).
+            # Utile pour : "X est-il compliant ?", "risque URSSAF de Y",
+            # "red flags M&A sur Z", "top 5 cibles 75 sans procédure collective".
+            # Structure compliance ground-truth cf. datalake.py:1601-1660.
+            siren = args.get("siren", "")
+            if not siren.isdigit() or len(siren) != 9:
+                return {"error": "siren invalide (doit être 9 chiffres)"}
+            async with httpx.AsyncClient(timeout=30) as client:
+                r = await client.get(f"{datalake_base}/api/datalake/fiche/{siren}")
+                if r.status_code != 200:
+                    return {"error": f"HTTP {r.status_code}"}
+                d = r.json()
+                c = d.get("compliance") or {}
+                fiche = d.get("fiche") or {}
+                # Compact summary pour économiser les tokens LLM. Si tout est OK
+                # on retourne juste les compteurs + flags. Le LLM peut re-appeler
+                # search_sanctions / check_offshore pour le détail si besoin.
+                return {
+                    "siren": siren,
+                    "denomination": fiche.get("denomination"),
+                    # Score composite 0-100. risk_level: low ≥80 / medium ≥50 /
+                    # high ≥20 / critical <20.
+                    "risk_score": c.get("risk_score"),
+                    "risk_level": c.get("risk_level"),
+                    "procedure_collective": c.get("procedure_collective"),
+                    "opensanctions_count": (c.get("opensanctions") or {}).get("count", 0),
+                    "opensanctions_entries": (c.get("opensanctions") or {}).get("entries", [])[:5],
+                    "contentieux_count": (c.get("contentieux") or {}).get("count", 0),
+                    "contentieux_recents": (c.get("contentieux") or {}).get("recents", [])[:3],
+                    "conciliation_count": (c.get("conciliation") or {}).get("count", 0),
+                    "plan_redressement_count": (c.get("plan_redressement") or {}).get("count", 0),
+                    "cession_signal_active_24m": (c.get("cession_signal") or {}).get("active_24m", False),
+                    "cession_signal_count": (c.get("cession_signal") or {}).get("count", 0),
+                    "network_red_flags_count": (c.get("network_red_flags") or {}).get("count", 0),
+                    "network_red_flags_entries": (c.get("network_red_flags") or {}).get("entries", [])[:5],
+                    "late_filing": c.get("late_filing", False),
+                    "dirigeant_senior": c.get("dirigeant_senior", False),
+                    "trends": c.get("trends"),
+                    "disclaimer": c.get("disclaimer") or (
+                        "Pas d'attestation URSSAF officielle (API gouv réservée secteur "
+                        "public). Best proxy open data : procédure collective BODACC + "
+                        "OpenSanctions + silver.juridictions."
+                    ),
+                }
 
         elif name == "get_dirigeant":
             nom = (args.get("nom") or "").upper()
@@ -1131,6 +1216,10 @@ _SYSTEM_PROMPT_TOOLS = (
     "**Scoring M&A** :\n"
     "- get_scoring_detail : score 123 signaux × 13 dimensions\n"
     "**Compliance & DD** :\n"
+    "- check_compliance : risk_score M&A composite 0-100 par SIREN — procédure "
+    "collective BODACC + OpenSanctions + contentieux + trends 3y + network red "
+    "flags. UTILISER en priorité pour 'risque', 'red flag', 'à jour cotisations', "
+    "'est-il compliant', 'signaux DD'. Plus léger que get_fiche_entreprise.\n"
     "- search_sanctions : sanctions consolidées (AMF/OpenSanctions/ICIJ/DGCCRF/CNIL)\n"
     "- check_offshore : match ICIJ Panama/Paradise Papers\n"
     "- check_lobbying : inscription HATVP / lobbying\n"
