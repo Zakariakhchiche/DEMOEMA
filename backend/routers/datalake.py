@@ -3385,8 +3385,11 @@ async def graph_for_siren(req: Request, siren: str, depth: int = Query(1, ge=1, 
     pool = _pool(req)
 
     # Centre = la cible
+    # NB : qualifier em./sm. pour éviter "column reference 'siren' is ambiguous"
+    # (em.siren ET sm.siren existent). Sans qualif, le SELECT échouait silen-
+    # cieusement via _safe → fallback bronze sans proc_active → toujours False.
     center_row = await _safe(pool.fetchrow(
-        """SELECT siren, denomination,
+        """SELECT em.siren, em.denomination,
                   COALESCE(em.code_ape, '') AS code_ape,
                   COALESCE(em.adresse_dept, '') AS dept,
                   em.ca_latest, sm.deal_score_raw, sm.tier,
