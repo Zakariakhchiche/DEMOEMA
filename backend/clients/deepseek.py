@@ -1267,7 +1267,15 @@ async def copilot_ai_query_stream_with_tools(
                         fn_name, fn_args, result = flat[tc["id"]]
                         result_str = json.dumps(result, ensure_ascii=False)[:8000]
                         if not result.get("error"):
-                            tool_results_collected.append({"tool": fn_name, "args": fn_args, "result_preview": result_str[:500]})
+                            # Store result + args complets pour le validator anti-hallucination
+                            # (qui walk recursivement pour extraire tous les chiffres).
+                            # `result_preview` (string tronquée) reste pour debug logs.
+                            tool_results_collected.append({
+                                "tool": fn_name,
+                                "args": fn_args,
+                                "result": result,
+                                "result_preview": result_str[:500],
+                            })
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc["id"],
