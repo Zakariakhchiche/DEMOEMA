@@ -47,12 +47,19 @@ async def fetch_gleif_delta() -> dict:
     total_inserted = 0
     total_skipped = 0
 
+    # Bug 2026-05-15 : parent_lei + ultimate_parent_lei retournaient toujours
+    # vides. JSON:API n'embed pas les related entities sans `include=`. On
+    # demande explicitement direct-parent + ultimate-parent dans la réponse
+    # pour que data.relationships.<type>.data.id soit présent.
     async with httpx.AsyncClient(timeout=30, headers={"User-Agent": "DEMOEMA-Agents/0.1"}) as client:
         async with await psycopg.AsyncConnection.connect(settings.database_url) as conn:
             async with conn.cursor() as cur:
                 for page in range(MAX_PAGES_PER_RUN):
                     params = {
-                        "filter[entity.legalAddress.country]": "FR",
+                        # Pas de filter pays → ingestion mondiale. Les LEI FR
+                        # restent prioritaires (matchent siren_fr), les autres
+                        # parents/filiales étrangers viennent en bonus pour
+                        # mapping groupe international.
                         "page[size]": PAGE_SIZE,
                         "page[number]": page + 1,
                     }
@@ -83,8 +90,19 @@ async def fetch_gleif_delta() -> dict:
                         legal_name = _s(entity.get("legalName", {}).get("name"))[:512] if entity.get("legalName") else ""
                         country = _s(entity.get("legalAddress", {}).get("country"))[:8] or ""
                         status = _s(entity.get("status"))[:32] or ""
-                        parent_lei = _s(relationships.get("direct-parent", {}).get("data", {}).get("id"))[:20] or ""
-                        ultimate_parent_lei = _s(relationships.get("ultimate-parent", {}).get("data", {}).get("id"))[:20] or ""
+                        # JSON:API : relationships.<type>.data peut être :
+                        # - dict {"id": "LEI", "type": "lei-records"} si relation existe
+                        # - null si pas de parent
+                        # - absent si pas demandé via ?include= (cas legacy avant fix)
+                        # On gère les 3 cas.
+                        def _rel_lei(rel_name: str) -> str:
+                            rel = relationships.get(rel_name) or {}
+                            d = rel.get("data") if isinstance(rel, dict) else None
+                            if not d or not isinstance(d, dict):
+                                return ""
+                            return _s(d.get("id"))[:20]
+                        parent_lei = _rel_lei("direct-parent")
+                        ultimate_parent_lei = _rel_lei("ultimate-parent")
                         siren = _s(entity.get("registeredAs"))[:9] or ""
 
                         payload = Jsonb(rec)
