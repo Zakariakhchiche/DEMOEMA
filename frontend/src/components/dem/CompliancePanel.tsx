@@ -54,6 +54,10 @@ export interface DirigeantCompliance {
     count: number;
     entries: Record<string, unknown>[];
   };
+  mandats_en_procedure?: {
+    count: number;
+    entries: Record<string, unknown>[];
+  };
   disclaimer?: string;
 }
 
@@ -428,12 +432,14 @@ export function DirigeantCompliancePanel({
   const sanc = data.opensanctions;
   const hat = data.hatvp_lobbying;
   const tox = data.co_mandataires_toxiques;
+  const mep = data.mandats_en_procedure;
   const hasAnySignal =
     Boolean(inter && inter.count > 0) ||
     Boolean(fail && fail.count > 0) ||
     Boolean(sanc && sanc.count > 0) ||
     Boolean(hat && hat.count > 0) ||
-    Boolean(tox && tox.count > 0);
+    Boolean(tox && tox.count > 0) ||
+    Boolean(mep && mep.count > 0);
 
   return (
     <Section title="Compliance & risque (dirigeant)">
@@ -446,6 +452,13 @@ export function DirigeantCompliancePanel({
       )}
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {mep && mep.count > 0 && (
+          <Badge
+            severity="red"
+            label={`Société(s) en procédure : ${mep.count}`}
+            detail={`mandats actuels en RJ/LJ/sauvegarde`}
+          />
+        )}
         {inter && inter.count > 0 && (
           <Badge
             severity="red"
@@ -478,6 +491,35 @@ export function DirigeantCompliancePanel({
           />
         )}
       </div>
+
+      {mep && mep.entries.length > 0 && (
+        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ fontSize: 11, color: "var(--text-tertiary)", fontWeight: 600 }}>
+            Sociétés dirigées en procédure collective active
+          </div>
+          {mep.entries.slice(0, 10).map((e, k) => (
+            <div
+              key={k}
+              style={{
+                padding: 8,
+                background: "rgba(251,113,133,0.05)",
+                border: "1px solid rgba(251,113,133,0.20)",
+                borderRadius: 6,
+              }}
+            >
+              <div style={{ fontWeight: 600 }}>
+                {String(e.denomination ?? "—")}{" "}
+                <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+                  · SIREN {String(e.siren ?? "—")}
+                </span>
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+                {dateOnly(e.date_proc)} · {String(e.nature ?? "—").slice(0, 110)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {inter && inter.entries.length > 0 && (
         <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>

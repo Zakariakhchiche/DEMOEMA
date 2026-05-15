@@ -2327,6 +2327,27 @@ async def _dirigeant_full(
         nom_for_sql, prenom_for_sql,
     ), default=[], timeout_s=3.0)
 
+    # Mandats en procédure collective active — les sociétés DIRIGÉES par cette
+    # personne qui sont actuellement en RJ/LJ/sauvegarde. Signal direct :
+    # un dirigeant dont une ou plusieurs sociétés sont en procédure mérite un
+    # badge même s'il n'a pas (encore) reçu d'interdiction ou de faillite
+    # personnelle. C'est ce que demandait Zak sur la fiche NATACHA LOEMBA
+    # (dirigeante de CYREA en LJ active 2026-04-19).
+    mandats_en_procedure: list = []
+    if sirens_mandats_self:
+        mandats_en_procedure = await _safe(pool.fetch(
+            """SELECT em.siren,
+                      em.denomination,
+                      em.last_procedure_date AS date_proc,
+                      em.last_procedure_nature AS nature
+               FROM gold.entreprises_master em
+               WHERE em.siren = ANY($1::char(9)[])
+                 AND em.has_procedure_collective_active = TRUE
+               ORDER BY em.last_procedure_date DESC NULLS LAST
+               LIMIT 20""",
+            sirens_mandats_self,
+        ), default=[], timeout_s=4.0)
+
     # Iter 1 — Co-mandataires toxiques : dirigeants qui partagent une société
     # avec la cible ET qui sont eux-mêmes dans une autre société en procédure
     # collective active OU qui ont reçu interdiction de gérer / faillite perso.
@@ -2364,6 +2385,10 @@ async def _dirigeant_full(
         risk_penalty += min(40, 30 + 5 * (len(sanctions) - 1))
     if len(co_toxiques) > 0:
         risk_penalty += min(30, 10 * len(co_toxiques))
+    if len(mandats_en_procedure) > 0:
+        # 25 pour la 1ère société en procédure, +10 par société suivante
+        # (plafond 50). Une seule société en LJ = signal sérieux ; serial = pire.
+        risk_penalty += min(50, 25 + 10 * (len(mandats_en_procedure) - 1))
     if any(bool(r.get("lobbying_actif")) for r in hatvp_lobbying):
         risk_penalty += 5  # signal d'influence, pas du risque dur
     risk_score = max(0, min(100, 100 - risk_penalty))
@@ -2399,6 +2424,10 @@ async def _dirigeant_full(
         "co_mandataires_toxiques": {
             "count": len(co_toxiques),
             "entries": [_serialize(c) for c in co_toxiques],
+        },
+        "mandats_en_procedure": {
+            "count": len(mandats_en_procedure),
+            "entries": [_serialize(m) for m in mandats_en_procedure],
         },
         "disclaimer": (
             "Interdiction/faillite : signal indirect — la sanction concerne "
