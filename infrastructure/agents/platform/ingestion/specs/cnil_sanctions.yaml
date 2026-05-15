@@ -3,14 +3,16 @@ source_num: 36
 layer: 6
 couche: Juridique
 name: CNIL sanctions — amendes RGPD
-description: 'Source #36 ARCHITECTURE_DATA_V2. Bronze ingestion raw — traité ensuite
-  par silver/gold/mart.'
-endpoint: https://www.cnil.fr/fr/la-cnil-sanctionne/json
+description: 'Source open data data.gouv.fr — sanctions formelles prononcées par
+  la formation restreinte de la CNIL (RGPD). Slug data.gouv:
+  "sanctions-prononcees-par-la-cnil". À chaque refresh, lire les resources du
+  dataset (CSV) puis ingérer en bronze.cnil_sanctions_raw.'
+endpoint: https://www.data.gouv.fr/api/1/datasets/sanctions-prononcees-par-la-cnil/
 auth: none
-pattern: rest_json_public
+pattern: data_gouv_dataset_csv
 refresh_trigger: interval_hours=168
 sla_minutes: 10140
-license: Public / Etalab 2.0 par défaut
+license: Etalab 2.0 (libre réutilisation commerciale)
 bronze_table: bronze.cnil_sanctions_raw
 bronze_fields:
 - name: sanction_id
