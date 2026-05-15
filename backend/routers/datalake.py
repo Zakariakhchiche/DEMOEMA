@@ -1411,6 +1411,60 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
         if r.get("surface_reelle_bati")
     ) or None
 
+    # Compliance & risque — agrégation OpenSanctions + procédure collective
+    # (déjà dans fiche gold via SELECT *) + contentieux (juridictions_unifiees).
+    # Aucune source open data publique pour les privilèges URSSAF par SIREN ;
+    # la procédure collective est notre meilleur proxy. Cf. memory
+    # project_demoema_urssaf_signal.md.
+    opensanctions_entries = await _safe(pool.fetch(
+        """SELECT caption, schema, topics, countries, sanctions_programs,
+                  last_seen, last_change
+           FROM silver.opensanctions
+           WHERE $1 = ANY(sirens_fr)
+           ORDER BY last_seen DESC NULLS LAST
+           LIMIT 5""",
+        siren,
+    ), default=[], timeout_s=4.0)
+
+    contentieux_recents = await _safe(pool.fetch(
+        """SELECT decision_id, juridiction_type, juridiction, date_decision, titre
+           FROM silver.juridictions_unifiees
+           WHERE $1 = ANY(sirens_mentioned)
+           ORDER BY date_decision DESC NULLS LAST
+           LIMIT 5""",
+        siren,
+    ), default=[], timeout_s=4.0)
+
+    n_contentieux_total = await _safe(pool.fetchval(
+        "SELECT COUNT(*)::int FROM silver.juridictions_unifiees WHERE $1 = ANY(sirens_mentioned)",
+        siren,
+    ), default=0, timeout_s=4.0) or 0
+
+    fiche_dict = fiche if isinstance(fiche, dict) else dict(fiche)
+    compliance = {
+        "procedure_collective": {
+            "active": fiche_dict.get("has_procedure_collective_active"),
+            "last_date": (
+                fiche_dict["last_procedure_date"].isoformat()
+                if fiche_dict.get("last_procedure_date") and hasattr(fiche_dict["last_procedure_date"], "isoformat")
+                else fiche_dict.get("last_procedure_date")
+            ),
+            "last_nature": fiche_dict.get("last_procedure_nature"),
+        },
+        "opensanctions": {
+            "count": len(opensanctions_entries),
+            "entries": [_serialize(o) for o in opensanctions_entries],
+        },
+        "contentieux": {
+            "count": n_contentieux_total,
+            "recents": [_serialize(c) for c in contentieux_recents],
+        },
+        "disclaimer": (
+            "Signaux issus de sources publiques (BODACC, OpenSanctions, "
+            "juridictions). Ne valent pas attestation officielle URSSAF / DGFiP."
+        ),
+    }
+
     return {
         "fiche": _serialize(fiche) if hasattr(fiche, "items") and not isinstance(fiche, dict) else fiche,
         "dirigeants": [_serialize(d) for d in dirigeants],
@@ -1418,6 +1472,7 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
         "red_flags": [_serialize(r) for r in red_flags],
         "network": [_serialize(n) for n in network],
         "presse": [_serialize(p) for p in presse],
+        "compliance": compliance,
         "sci_owned": sci_owned,
         "sci_owned_count": sci_owned_count,
         "sci_owned_total_patrimoine": sci_owned_total_patrimoine,
@@ -2042,6 +2097,75 @@ async def _dirigeant_full(
         fetch_person_graph_summary_sync, nom_uc, prenom_uc
     )
 
+    # Compliance dirigeant — BODACC interdictions de gérer + faillites
+    # personnelles + HATVP lobbying. Matching :
+    #   - BODACC : siren ∈ sirens_mandats (le jugement est rattaché à une
+    #     société dirigée par la personne ; on filtre par nature). Faux
+    #     positif possible si plusieurs dirigeants partagent la société —
+    #     on expose le complementJugement pour que le user juge.
+    #   - HATVP : nom + prenom uppercase match (silver normalisé en upper).
+    sirens_self = list(inpi["sirens_mandats"]) if inpi and inpi.get("sirens_mandats") else []
+    interdictions_gerer: list = []
+    faillites_personnelles: list = []
+    if sirens_self:
+        interdictions_gerer = await _safe(pool.fetch(
+            """SELECT siren, date_parution,
+                      jugement_details->>'nature' AS nature,
+                      jugement_details->>'complementJugement' AS detail
+               FROM silver.bodacc_annonces
+               WHERE siren = ANY($1::text[])
+                 AND jugement_details->>'nature' ILIKE '%interdiction de g%rer%'
+               ORDER BY date_parution DESC NULLS LAST
+               LIMIT 10""",
+            [str(s).strip() for s in sirens_self],
+        ), default=[], timeout_s=4.0)
+        faillites_personnelles = await _safe(pool.fetch(
+            """SELECT siren, date_parution,
+                      jugement_details->>'nature' AS nature,
+                      jugement_details->>'complementJugement' AS detail
+               FROM silver.bodacc_annonces
+               WHERE siren = ANY($1::text[])
+                 AND jugement_details->>'nature' ILIKE '%faillite personnelle%'
+               ORDER BY date_parution DESC NULLS LAST
+               LIMIT 10""",
+            [str(s).strip() for s in sirens_self],
+        ), default=[], timeout_s=4.0)
+
+    hatvp_lobbying = await _safe(pool.fetch(
+        """SELECT denomination, siren, categorie_organisation,
+                  dirigeant_fonction, lobbying_actif, date_derniere_activite
+           FROM silver.hatvp_lobbying_persons
+           WHERE dirigeant_nom = $1 AND dirigeant_prenom = $2
+           ORDER BY lobbying_actif DESC NULLS LAST, date_derniere_activite DESC NULLS LAST
+           LIMIT 5""",
+        nom_for_sql, prenom_for_sql,
+    ), default=[], timeout_s=3.0)
+
+    compliance = {
+        "interdiction_gerer": {
+            "count": len(interdictions_gerer),
+            "entries": [_serialize(i) for i in interdictions_gerer],
+        },
+        "faillite_personnelle": {
+            "count": len(faillites_personnelles),
+            "entries": [_serialize(f) for f in faillites_personnelles],
+        },
+        "opensanctions": {
+            "count": len(sanctions),
+            "entries": [_serialize(s) for s in sanctions],
+        },
+        "hatvp_lobbying": {
+            "count": len(hatvp_lobbying),
+            "active": any(bool(r.get("lobbying_actif")) for r in hatvp_lobbying),
+            "entries": [_serialize(h) for h in hatvp_lobbying],
+        },
+        "disclaimer": (
+            "Interdiction/faillite : signal indirect — la sanction concerne "
+            "une société dirigée, pas nécessairement cette personne. "
+            "Vérifier le détail du jugement."
+        ),
+    }
+
     return {
         "identity": _serialize(inpi),
         "sci_patrimoine": _serialize(sci) if sci else None,
@@ -2050,6 +2174,7 @@ async def _dirigeant_full(
         "osint": _serialize(osint) if osint else None,
         "osint_raw": _serialize(osint_raw) if osint_raw else None,
         "sanctions": [_serialize(s) for s in sanctions],
+        "compliance": compliance,
         "dvf_zones": dvf_summary,
         "graph": graph_summary,
         # Mandats détaillés — silver.inpi_dirigeants (arrays parallèles
