@@ -246,6 +246,27 @@ export function extractFocusEntrepriseFromQuery(text: string): { q: string } | n
     }
   }
 
+  // 3. Query 1-2 mots capitalisés type "Bouygues", "Renault", "Total Energies".
+  // Aucune des paths 1/1bis/2 ne couvre ce cas si le mot n'est ni ALL-CAPS
+  // ni suivi d'une forme juridique (SE/SA/SAS). Match si: 1-2 tokens, chacun
+  // capitalisé (1ère lettre majuscule) avec ≥4 lettres, pas de mot stop.
+  const STOP_WORDS = new Set([
+    "qui", "quoi", "comment", "pourquoi", "quand", "fiche", "infos", "info",
+    "donne", "montre", "parle", "trouve", "liste", "compare", "audit",
+    "analyse", "check", "vérifie", "verifie", "the", "this", "that",
+  ]);
+  if (words.length <= 2) {
+    const allValid = words.every(w => {
+      const clean = w.replace(/[^\wÀ-ÿ\-']/g, "");
+      if (clean.length < 4) return false;
+      if (STOP_WORDS.has(clean.toLowerCase())) return false;
+      return /^[A-ZÀ-ÖØ-Ý][A-Za-zÀ-ÿ\-']*$/.test(clean);
+    });
+    if (allValid) {
+      return { q: trimmed };
+    }
+  }
+
   return null;
 }
 
