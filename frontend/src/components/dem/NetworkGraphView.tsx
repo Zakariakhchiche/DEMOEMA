@@ -12,6 +12,8 @@ interface Node {
   type: "target" | "person" | "company" | "sci";
   x: number;
   y: number;
+  has_procedure_collective_active?: boolean;
+  has_late_filing?: boolean;
 }
 
 interface Link { source: string; target: string; kind: string }
@@ -22,6 +24,9 @@ const COLORS: Record<string, string> = {
   company: "var(--accent-cyan)",
   sci: "var(--accent-amber)",
 };
+
+// Compliance override : procédure collective active → rouge fort.
+const COMPLIANCE_RED = "#ef4444";
 
 interface Props {
   onOpenTarget?: (t: Target) => void;
@@ -173,8 +178,15 @@ export function NetworkGraphView({ onOpenTarget }: Props) {
                   }}
                 >
                   {isTarget && <circle r={r + 8} fill="url(#halo)" />}
-                  <circle r={r} fill={COLORS[n.type]} fillOpacity="0.18" stroke={COLORS[n.type]} strokeWidth="1.5" />
-                  <text textAnchor="middle" dy={r + 14} fontSize="10.5" fill="var(--text-secondary)" fontFamily="Inter">{n.label}</text>
+                  {n.has_procedure_collective_active ? (
+                    <>
+                      <circle r={r} fill={COMPLIANCE_RED} fillOpacity="0.30" stroke={COMPLIANCE_RED} strokeWidth="2.5" />
+                      <text textAnchor="middle" dy={-r - 6} fontSize="9" fontWeight="700" fill={COMPLIANCE_RED} fontFamily="Inter">RJ</text>
+                    </>
+                  ) : (
+                    <circle r={r} fill={COLORS[n.type]} fillOpacity="0.18" stroke={COLORS[n.type]} strokeWidth="1.5" />
+                  )}
+                  <text textAnchor="middle" dy={r + 14} fontSize="10.5" fill={n.has_procedure_collective_active ? COMPLIANCE_RED : "var(--text-secondary)"} fontWeight={n.has_procedure_collective_active ? "600" : "normal"} fontFamily="Inter">{n.label}</text>
                 </g>
               );
             })}
