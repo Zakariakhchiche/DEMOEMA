@@ -366,6 +366,17 @@ export interface CopilotStreamEvent {
   source?: string;
   targets_updated?: boolean;
   targets_count?: number;
+  // Validation anti-hallucination (backend/clients/llm_validator.py) :
+  // émis comme event final avant le `done`, liste les chiffres non-traceables
+  // dans les tool results. Frontend affiche un bandeau ⚠️ si unverified non vide.
+  validation?: {
+    verified: string[];
+    unverified: string[];
+    n_checks: number;
+    trust_score: number;
+    error?: string;
+  };
+  forced_synthesis?: boolean;  // True si la réponse vient de la branche synthèse forcée (max iterations atteint)
 }
 
 /** Stream le copilot via fetch + ReadableStream (mieux qu'EventSource pour POST/headers). */

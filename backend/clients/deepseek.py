@@ -8,9 +8,11 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from typing import AsyncIterator
+from typing import AsyncIterator, Union
 
 import httpx
+
+from .llm_validator import validate_numbers
 
 # Priorité d'endpoint LLM (user a basculé vers Ollama Cloud 2026-05-15) :
 #   1. Ollama (Cloud https://ollama.com ou self-hosted) — OpenAI-compat
@@ -1168,7 +1170,7 @@ _SYSTEM_PROMPT_TOOLS = (
 
 async def copilot_ai_query_stream_with_tools(
     query: str, datalake_base: str = "http://localhost:8000"
-) -> AsyncIterator[str]:
+) -> AsyncIterator[Union[str, dict]]:
     """Tool-calling loop : LLM appelle des tools datalake jusqu'à ce qu'il
     ait assez d'info pour répondre, puis stream la réponse finale.
 
@@ -1275,10 +1277,22 @@ async def copilot_ai_query_stream_with_tools(
 
                 # Pas de tool_calls → réponse finale
                 content = msg.get("content") or ""
+                # Validator anti-hallucination : check que tous les chiffres de
+                # la réponse markdown sont traceables dans les résultats des
+                # tools appelés. Émet un event meta `{"validation": {...}}` que
+                # le frontend affiche en bandeau ⚠️ si des chiffres non-traceables.
+                # Approche permissive : skip années 1900-2050, %, petits entiers.
+                # Cf. backend/clients/llm_validator.py.
+                try:
+                    validation = validate_numbers(content, tool_results_collected)
+                except Exception as ve:
+                    validation = {"verified": [], "unverified": [], "n_checks": 0, "trust_score": 1.0, "error": str(ve)[:120]}
                 # Stream artificiellement (chunk par 40 chars pour UX cohérent)
                 chunk_size = 40
                 for i in range(0, len(content), chunk_size):
                     yield content[i:i + chunk_size]
+                # Event meta validation — dict, le endpoint discrimine str vs dict
+                yield {"validation": validation}
                 return
 
         except Exception as e:
@@ -1316,6 +1330,12 @@ async def copilot_ai_query_stream_with_tools(
                     chunk_size = 40
                     for i in range(0, len(final_msg), chunk_size):
                         yield final_msg[i:i + chunk_size]
+                    # Idem branche normale : validator anti-hallucination sur la synthèse forcée
+                    try:
+                        validation = validate_numbers(final_msg, tool_results_collected)
+                    except Exception as ve:
+                        validation = {"verified": [], "unverified": [], "n_checks": 0, "trust_score": 1.0, "error": str(ve)[:120]}
+                    yield {"validation": validation, "forced_synthesis": True}
                     return
         except Exception as e:
             yield f"\n*Erreur synthèse : {type(e).__name__}*"

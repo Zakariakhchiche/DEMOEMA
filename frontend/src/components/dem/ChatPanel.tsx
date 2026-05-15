@@ -434,6 +434,10 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
     // Branchement réel : on stream le texte via /api/copilot/stream tout en
     // récupérant en parallèle les cibles depuis /api/datalake (uniquement si
     // intent sourcing détecté). Sinon cards reste vide → réponse texte pure.
+    // Le backend émet un event meta `{validation: {...}}` après les chunks
+    // (cf backend/clients/llm_validator.py). On le capture dans la closure
+    // pour l'attacher à l'AiMessageData et l'afficher en bandeau ⚠️.
+    let capturedValidation: AiMessageData["validation"];
     const [textStreamPromise, cibleSearchPromise, personSearchPromise] = [
       (async () => {
         let acc = "";
@@ -448,6 +452,9 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
             if (ev.chunk) {
               acc = ev.chunk.startsWith(acc) ? ev.chunk : acc + ev.chunk;
               setStreamText(acc);
+            }
+            if (ev.validation) {
+              capturedValidation = ev.validation;
             }
             if (ev.done) break;
           }
@@ -639,6 +646,12 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
 
     clearTimeout(timeoutId);
     clearInterval(elapsedTimer);
+
+    // Attache la validation au message AI (peu importe son `kind`) pour que
+    // le rendu affiche un bandeau ⚠️ sur les chiffres non-traceables.
+    if (capturedValidation && capturedValidation.unverified.length > 0) {
+      response.validation = capturedValidation;
+    }
 
     // Stream stale : ne rien commit côté DOM (un autre submit a pris le
     // relais et fera son propre setConversations). Sans ce garde, l'ancien
@@ -864,6 +877,37 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
 
       {m.kind === "plain" && (
         <MarkdownRenderer content={m.content} />
+      )}
+
+      {/* Bandeau anti-hallucination — backend/clients/llm_validator.py.
+          Listé seulement si des chiffres non-traceables dans les tool results.
+          But : transparence sur la fiabilité, sans bloquer la réponse. */}
+      {m.validation && m.validation.unverified.length > 0 && (
+        <div
+          className="fade-up"
+          style={{
+            marginTop: 12,
+            padding: "8px 12px",
+            borderRadius: 8,
+            background: "rgba(251,191,36,0.06)",
+            border: "1px solid rgba(251,191,36,0.30)",
+            fontSize: 11.5,
+            color: "var(--text-secondary)",
+            lineHeight: 1.5,
+          }}
+          title={`Trust score: ${(m.validation.trust_score * 100).toFixed(0)}% — ${m.validation.verified.length}/${m.validation.n_checks} chiffres traceables dans le datalake`}
+        >
+          <span style={{ color: "var(--accent-amber, #fbbf24)", fontWeight: 600, marginRight: 4 }}>
+            ⚠ Chiffres non traçables ({m.validation.unverified.length}) :
+          </span>
+          <span style={{ color: "var(--text-tertiary)" }}>
+            {m.validation.unverified.slice(0, 8).join(" · ")}
+            {m.validation.unverified.length > 8 && ` · +${m.validation.unverified.length - 8}`}
+          </span>
+          <span style={{ marginLeft: 8, color: "var(--text-muted)", fontSize: 10 }}>
+            (absents des résultats de tools — vérifier manuellement)
+          </span>
+        </div>
       )}
     </AiMessage>
   );
