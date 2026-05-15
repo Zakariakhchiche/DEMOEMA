@@ -1441,22 +1441,44 @@ async def copilot_stream_endpoint(q: str = Query(...)):
                         data = fiche_resp.json()
                         fiche_data = data.get("fiche") or {}
                         dirigeants_data = data.get("dirigeants") or []
+                        signaux_data = data.get("signaux") or []
+                        compliance_data = data.get("compliance") or {}
+                        sci_owned_count = data.get("sci_owned_count") or 0
+                        sci_owned_total_actif = data.get("sci_owned_total_actif") or 0
+                        dvf_n = data.get("dvf_n_at_address") or 0
+                        dvf_value = data.get("dvf_total_value_at_address") or 0
                         nom = fiche_data.get("denomination")
                         if nom:
                             datalake_ok = True
                             ville = fiche_data.get("adresse_commune") or fiche_data.get("ville") or ""
                             dept = fiche_data.get("adresse_dept") or fiche_data.get("dept") or ""
+                            cp = fiche_data.get("adresse_code_postal") or ""
                             naf_lib = (
                                 fiche_data.get("naf_libelle")
                                 or fiche_data.get("libelle_activite_principale")
                                 or fiche_data.get("code_ape")
                                 or ""
                             )
+                            forme_jur = (
+                                fiche_data.get("forme_juridique")
+                                or fiche_data.get("insee_categorie_juridique")
+                                or ""
+                            )
+                            annee_creation = fiche_data.get("annee_creation") or (
+                                str(fiche_data.get("date_immatriculation") or "")[:4]
+                                if fiche_data.get("date_immatriculation") else None
+                            )
+                            age_entreprise = fiche_data.get("age_entreprise")
                             ca = fiche_data.get("ca_dernier") or fiche_data.get("ca_latest") or 0
                             ebitda = fiche_data.get("ebitda_dernier") or fiche_data.get("resultat_net_latest")
+                            resultat_net = fiche_data.get("resultat_net") or fiche_data.get("resultat_net_latest")
+                            capitaux_propres = fiche_data.get("capitaux_propres") or fiche_data.get("capitaux_propres_latest")
+                            capital_social = fiche_data.get("capital_social")
+                            marge_pct = fiche_data.get("marge_pct")
                             effectif_v = (
                                 fiche_data.get("effectif_exact")
                                 or fiche_data.get("effectif_moyen_latest")
+                                or fiche_data.get("effectif_salarie")
                                 or fiche_data.get("tranche_effectifs")
                                 or "N/A"
                             )
@@ -1466,6 +1488,10 @@ async def copilot_stream_endpoint(q: str = Query(...)):
                                 fiche_data.get("n_dirigeants")
                                 or len(dirigeants_data)
                                 or 0
+                            )
+                            n_bodacc = fiche_data.get("n_bodacc") or len(signaux_data)
+                            n_sanctions_count = fiche_data.get("n_sanctions") or (
+                                (compliance_data.get("opensanctions") or {}).get("count") or 0
                             )
 
                             def _fmt_eur(v):
@@ -1483,6 +1509,10 @@ async def copilot_stream_endpoint(q: str = Query(...)):
 
                             ca_str = _fmt_eur(ca)
                             ebitda_str = _fmt_eur(ebitda) if ebitda is not None else "N/A"
+                            rn_str = _fmt_eur(resultat_net) if resultat_net is not None else "N/A"
+                            cp_str = _fmt_eur(capitaux_propres) if capitaux_propres is not None else "N/A"
+                            cs_str = _fmt_eur(capital_social) if capital_social is not None else "N/A"
+                            marge_str = f"{marge_pct:.1f}%" if isinstance(marge_pct, (int, float)) else "N/A"
 
                             # Top 3 dirigeants depuis le payload fiche
                             rep_items = []
@@ -1503,14 +1533,102 @@ async def copilot_stream_endpoint(q: str = Query(...)):
                                 tier_str = f" — tier {tier}" if tier else ""
                                 score_line = f"- **Score M&A** : {deal_score}/100{tier_str}\n"
 
+                            # Bloc compliance — banner rouge si procédure
+                            # collective active, ligne par signal sinon.
+                            # Affiché en HAUT (avant le reste) pour visibilité.
+                            compliance_banner = ""
+                            compliance_lines: list[str] = []
+                            proc = compliance_data.get("procedure_collective") or {}
+                            opensanc = compliance_data.get("opensanctions") or {}
+                            cont = compliance_data.get("contentieux") or {}
+                            if proc.get("active") is True:
+                                compliance_banner = (
+                                    f"> 🚨 **PROCÉDURE COLLECTIVE ACTIVE** — "
+                                    f"{proc.get('last_nature') or '—'} "
+                                    f"({(proc.get('last_date') or '—')[:10]})\n\n"
+                                )
+                            elif proc.get("active") is False:
+                                compliance_lines.append(
+                                    f"- 🟢 Procédure collective clôturée "
+                                    f"({(proc.get('last_date') or '—')[:10]})"
+                                )
+                            if (opensanc.get("count") or 0) > 0:
+                                compliance_lines.append(
+                                    f"- 🔴 **OpenSanctions** : {opensanc['count']} match(es)"
+                                )
+                            if (cont.get("count") or 0) > 0:
+                                compliance_lines.append(
+                                    f"- 🟠 Contentieux : {cont['count']} décision(s) (juridictions)"
+                                )
+                            compliance_block = (
+                                "\n**Compliance :**\n" + "\n".join(compliance_lines) + "\n"
+                                if compliance_lines else ""
+                            )
+
+                            # Top 3 BODACC récents (procédures, modifs, dépôts)
+                            bodacc_lines: list[str] = []
+                            for s in signaux_data[:3]:
+                                if not isinstance(s, dict):
+                                    continue
+                                d_pub = (s.get("event_date") or "")[:10]
+                                severity = s.get("severity") or s.get("familleavis_lib") or ""
+                                stype = s.get("signal_type") or s.get("typeavis_lib") or ""
+                                bodacc_lines.append(
+                                    f"  - {d_pub} · {severity}"
+                                    + (f" — {stype}" if stype else "")
+                                )
+                            bodacc_block = (
+                                f"\n**BODACC récents ({n_bodacc} au total) :**\n"
+                                + "\n".join(bodacc_lines) + "\n"
+                                if bodacc_lines else ""
+                            )
+
+                            # Patrimoine SCI possédées par la société
+                            sci_block = ""
+                            if sci_owned_count and sci_owned_count > 0:
+                                sci_block = (
+                                    f"\n**Patrimoine SCI** : "
+                                    f"{sci_owned_count} SCI détenues — "
+                                    f"actif cumulé {_fmt_eur(sci_owned_total_actif)}\n"
+                                )
+
+                            # DVF — transactions immo au siège
+                            dvf_block = ""
+                            if dvf_n and dvf_n > 0:
+                                dvf_block = (
+                                    f"\n**DVF (adresse siège)** : "
+                                    f"{dvf_n} mutation(s) — {_fmt_eur(dvf_value)}\n"
+                                )
+
+                            forme_line = (
+                                f"- **Forme** : {forme_jur}"
+                                + (f" · créée {annee_creation}" if annee_creation else "")
+                                + (f" ({age_entreprise} ans)" if age_entreprise else "")
+                                + "\n"
+                            ) if forme_jur or annee_creation else ""
+
                             text = (
                                 f"**{nom}** — SIREN {siren_val}\n\n"
-                                f"- **Siège** : {ville}{', ' + dept if dept else ''}\n"
+                                f"{compliance_banner}"
+                                f"- **Siège** : {ville}{', ' + str(cp) if cp else ''}"
+                                f"{', ' + dept if dept else ''}\n"
                                 f"- **Activité** : {naf_lib or 'N/A'}\n"
-                                f"- **CA** : {ca_str}  |  **EBITDA proxy** : {ebitda_str}\n"
-                                f"- **Effectif** : {effectif_v}  |  **Dirigeants actifs** : {n_dirigeants}\n"
-                                f"{score_line}\n"
-                                f"**Top dirigeants :**\n{rep_lines}\n"
+                                f"{forme_line}"
+                                f"- **CA** : {ca_str}  |  **EBITDA proxy** : {ebitda_str}"
+                                f"  |  **Marge** : {marge_str}\n"
+                                f"- **Résultat net** : {rn_str}  |  "
+                                f"**Capitaux propres** : {cp_str}  |  "
+                                f"**Capital social** : {cs_str}\n"
+                                f"- **Effectif** : {effectif_v}  |  "
+                                f"**Dirigeants actifs** : {n_dirigeants}  |  "
+                                f"**BODACC** : {n_bodacc}  |  "
+                                f"**Sanctions** : {n_sanctions_count}\n"
+                                f"{score_line}"
+                                f"{compliance_block}"
+                                f"{bodacc_block}"
+                                f"{sci_block}"
+                                f"{dvf_block}"
+                                f"\n**Top dirigeants :**\n{rep_lines}\n"
                             )
                             chunk_size = 40
                             for i in range(0, len(text), chunk_size):
