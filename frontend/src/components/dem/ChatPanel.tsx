@@ -340,10 +340,15 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
     const elapsedTimer = setInterval(() => setElapsedMs(Date.now() - startedAt), 250);
     abortRef.current = new AbortController();
     const signal = abortRef.current.signal;
-    // Hard timeout 90s (au-delà → on abort)
+    // Hard timeout 200s (au-delà → on abort).
+    // Bumpé 2026-05-15 (90s → 200s) car DeepSeek-V4-Flash sur Ollama Cloud
+    // est un modèle thinking : reasoning chain + tool-calling loop (jusqu'à
+    // 20 itérations) peut prendre 60-180s sur les questions M&A complexes
+    // (compliance multi-tools, comparaisons cibles, network red flags 3-hop).
+    // Avant 90s → user voyait "Recherche annulée" sur questions compliance.
     const timeoutId = setTimeout(() => {
       try { abortRef.current?.abort(); } catch { /* noop */ }
-    }, 90_000);
+    }, 200_000);
 
     const lower = text.toLowerCase();
     const isCompare = /compare|vs|versus/i.test(text);
