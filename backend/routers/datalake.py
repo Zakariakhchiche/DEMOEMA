@@ -3974,6 +3974,26 @@ async def entreprise_search(
 
     found_sirens = {r["siren"] for r in rows_inpi if r.get("siren")}
 
+    # Étape 1bis : silver.entreprises_signals — couvre les holdings cotées
+    # (BOUYGUES SA, ENGIE SA, etc.) qui ont denomination NULL dans
+    # silver.inpi_comptes mais sont enrichies via INSEE / EDR. Source critique
+    # pour matcher les maisons mères absentes de inpi_comptes par dénomination.
+    rows_es_search: list = []
+    if not is_siren and await _table_exists(pool, "silver", "entreprises_signals"):
+        es_buffer = max(limit * 4, 20)
+        excluded = list(found_sirens) if found_sirens else [""]
+        rows_es_search = await _safe(pool.fetch(
+            """SELECT siren, denomination, NULL::numeric AS ca_dernier,
+                      NULL::date AS date_cloture
+               FROM silver.entreprises_signals
+               WHERE denomination ILIKE $1
+                 AND siren <> ALL($2::text[])
+               ORDER BY LENGTH(denomination) ASC
+               LIMIT $3""",
+            pattern, excluded, es_buffer,
+        ), default=[], timeout_s=4.0)
+    found_sirens |= {r["siren"] for r in rows_es_search if r.get("siren")}
+
     # Étape 2 : silver.insee_unites_legales — couvre les structures sans
     # comptes INPI (SCIs patrimoniales typiques). Exclut les sirens déjà
     # remontés en étape 1.
@@ -4050,6 +4070,7 @@ async def entreprise_search(
     # CA "—", EBITDA "—", NAF "—", Dept "—" (rapport user 2026-05-03).
     all_sirens = (
         {r["siren"] for r in rows_inpi if r.get("siren")}
+        | {r["siren"] for r in rows_es_search if r.get("siren")}
         | {r["siren"] for r in rows_insee if r.get("siren")}
         | {r["siren"] for r in rows_inpi_dirig if r.get("siren")}
     )
@@ -4244,6 +4265,7 @@ async def entreprise_search(
         }
 
     results = [_enrich(_serialize(r), "inpi_comptes") for r in rows_inpi]
+    results.extend(_enrich(_serialize(r), "entreprises_signals") for r in rows_es_search)
     results.extend(_enrich(_serialize(r), "insee_unites_legales") for r in rows_insee)
     results.extend(_enrich(_serialize(r), "inpi_dirigeants") for r in rows_inpi_dirig)
 
