@@ -3846,17 +3846,24 @@ async def entreprise_search(
     else:
         # Buffer plus large que `limit` pour permettre un re-ranking Python par
         # pertinence dénomination (boost maison mère vs filiales étrangères).
-        # ORDER BY siren met les petits sirens en premier — les filiales
-        # étrangères type "TOTALENERGIES EP ANGOLA" (siren 303M) sortent avant
-        # la maison mère "TOTALENERGIES SE" (siren 542M). Le rerank final
-        # corrige en privilégiant exact match + forme tête de groupe.
-        search_buffer = max(limit * 4, 20)
+        # Le CTE per_siren déduplique par siren + dernier dépôt ; le SELECT
+        # final pré-trie par LENGTH(denomination) ASC pour favoriser les
+        # maisons mères ("RENAULT" 7 chars vs "RENAULT MENUISERIE" 18 chars,
+        # "TOTALENERGIES SE" 16 chars vs "TOTALENERGIES EP ANGOLA" 23 chars).
+        # Le rerank Python en aval applique ensuite tier 0/1/2 par forme
+        # juridique + actif + CA.
+        search_buffer = max(limit * 6, 50)
         rows_inpi = await _safe(pool.fetch(
-            """SELECT DISTINCT ON (siren)
-                  siren, denomination, ca_net AS ca_dernier, date_cloture
-               FROM silver.inpi_comptes
-               WHERE denomination ILIKE $1
-               ORDER BY siren, date_cloture DESC NULLS LAST
+            """WITH per_siren AS (
+                  SELECT DISTINCT ON (siren)
+                     siren, denomination, ca_net AS ca_dernier, date_cloture
+                  FROM silver.inpi_comptes
+                  WHERE denomination ILIKE $1
+                  ORDER BY siren, date_cloture DESC NULLS LAST
+               )
+               SELECT siren, denomination, ca_dernier, date_cloture
+               FROM per_siren
+               ORDER BY LENGTH(denomination) ASC, ca_dernier DESC NULLS LAST
                LIMIT $2""",
             pattern, search_buffer,
         ), default=[], timeout_s=8.0)
