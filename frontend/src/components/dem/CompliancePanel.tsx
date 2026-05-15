@@ -9,6 +9,8 @@ import React from "react";
 //  - disclaimer: string
 
 export interface CompanyCompliance {
+  risk_score?: number;
+  risk_level?: "low" | "medium" | "high" | "critical";
   procedure_collective?: {
     active: boolean | null;
     last_date: string | null;
@@ -16,17 +18,27 @@ export interface CompanyCompliance {
   };
   opensanctions?: { count: number; entries: Record<string, unknown>[] };
   contentieux?: { count: number; recents: Record<string, unknown>[] };
+  conciliation?: { count: number; entries: Record<string, unknown>[] };
+  plan_redressement?: { count: number; entries: Record<string, unknown>[] };
+  late_filing?: boolean;
+  dirigeant_senior?: boolean;
   disclaimer?: string;
 }
 
 // Shape from /api/datalake/dirigeant/.../compliance
 export interface DirigeantCompliance {
+  risk_score?: number;
+  risk_level?: "low" | "medium" | "high" | "critical";
   interdiction_gerer?: { count: number; entries: Record<string, unknown>[] };
   faillite_personnelle?: { count: number; entries: Record<string, unknown>[] };
   opensanctions?: { count: number; entries: Record<string, unknown>[] };
   hatvp_lobbying?: {
     count: number;
     active: boolean;
+    entries: Record<string, unknown>[];
+  };
+  co_mandataires_toxiques?: {
+    count: number;
     entries: Record<string, unknown>[];
   };
   disclaimer?: string;
@@ -41,6 +53,69 @@ const palette: Record<Severity, { bg: string; fg: string; border: string; dot: s
   green:  { bg: "rgba(52,211,153,0.10)",  fg: "var(--accent-emerald)", border: "rgba(52,211,153,0.30)", dot: "#34d399" },
   neutral:{ bg: "rgba(255,255,255,0.03)", fg: "var(--text-tertiary)",  border: "var(--border-subtle)",   dot: "#888" },
 };
+
+function RiskGauge({
+  score,
+  level,
+}: { score: number; level?: "low" | "medium" | "high" | "critical" }) {
+  const sev: Severity =
+    level === "critical" ? "red" :
+    level === "high" ? "orange" :
+    level === "medium" ? "yellow" :
+    "green";
+  const p = palette[sev];
+  const label =
+    level === "critical" ? "Critique" :
+    level === "high" ? "Élevé" :
+    level === "medium" ? "Modéré" :
+    "Faible";
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 14,
+        padding: "10px 14px",
+        borderRadius: 10,
+        background: p.bg,
+        border: `1px solid ${p.border}`,
+        marginBottom: 10,
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        <div style={{ fontSize: 10, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700 }}>
+          Score risque
+        </div>
+        <div style={{ fontSize: 24, fontWeight: 700, color: p.fg, lineHeight: 1 }}>
+          {score}<span style={{ fontSize: 12, color: "var(--text-tertiary)", fontWeight: 400 }}>/100</span>
+        </div>
+      </div>
+      <div style={{ flex: 1, height: 8, background: "rgba(255,255,255,0.05)", borderRadius: 4, overflow: "hidden" }}>
+        <div
+          style={{
+            width: `${score}%`,
+            height: "100%",
+            background: p.dot,
+            transition: "width 0.4s ease",
+          }}
+        />
+      </div>
+      <div
+        style={{
+          padding: "4px 10px",
+          borderRadius: 6,
+          background: p.dot,
+          color: "#fff",
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: ".04em",
+        }}
+      >
+        {label}
+      </div>
+    </div>
+  );
+}
 
 function Badge({
   severity,
@@ -143,25 +218,30 @@ export function CompanyCompliancePanel({ data }: { data: CompanyCompliance | nul
   const proc = data.procedure_collective;
   const sanc = data.opensanctions;
   const cont = data.contentieux;
+  const conc = data.conciliation;
+  const plan = data.plan_redressement;
   const procActive = proc?.active === true;
   const procClosed = proc?.active === false;
   const hasAnySignal =
     procActive ||
     procClosed ||
     Boolean(sanc && sanc.count > 0) ||
-    Boolean(cont && cont.count > 0);
-
-  if (!hasAnySignal) {
-    return (
-      <Section title="Compliance & risque">
-        <Badge severity="green" label="Aucun signal public détecté" detail="BODACC, OpenSanctions, juridictions" />
-        {data.disclaimer && <Disclaimer text={data.disclaimer} />}
-      </Section>
-    );
-  }
+    Boolean(cont && cont.count > 0) ||
+    Boolean(conc && conc.count > 0) ||
+    Boolean(plan && plan.count > 0) ||
+    Boolean(data.late_filing) ||
+    Boolean(data.dirigeant_senior);
 
   return (
     <Section title="Compliance & risque">
+      {typeof data.risk_score === "number" && (
+        <RiskGauge score={data.risk_score} level={data.risk_level} />
+      )}
+
+      {!hasAnySignal && (
+        <Badge severity="green" label="Aucun signal public détecté" detail="BODACC, OpenSanctions, juridictions" />
+      )}
+
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
         {procActive && (
           <Badge
@@ -177,11 +257,31 @@ export function CompanyCompliancePanel({ data }: { data: CompanyCompliance | nul
             detail={dateOnly(proc?.last_date)}
           />
         )}
+        {plan && plan.count > 0 && (
+          <Badge
+            severity="orange"
+            label={`Plan en exécution : ${plan.count}`}
+            detail="redressement / sauvegarde"
+          />
+        )}
+        {conc && conc.count > 0 && (
+          <Badge
+            severity="orange"
+            label={`Conciliation : ${conc.count}`}
+            detail="procédure amiable préventive"
+          />
+        )}
         {sanc && sanc.count > 0 && (
           <Badge severity="red" label={`OpenSanctions : ${sanc.count} match`} />
         )}
         {cont && cont.count > 0 && (
           <Badge severity="orange" label={`Contentieux : ${cont.count} décision${cont.count > 1 ? "s" : ""}`} />
+        )}
+        {data.late_filing && (
+          <Badge severity="orange" label="Retard dépôt comptes" detail="signal stress financier" />
+        )}
+        {data.dirigeant_senior && (
+          <Badge severity="yellow" label="Dirigeant senior 65+" detail="probabilité transmission élevée" />
         )}
       </div>
 
@@ -243,23 +343,24 @@ export function DirigeantCompliancePanel({
   const fail = data.faillite_personnelle;
   const sanc = data.opensanctions;
   const hat = data.hatvp_lobbying;
+  const tox = data.co_mandataires_toxiques;
   const hasAnySignal =
     Boolean(inter && inter.count > 0) ||
     Boolean(fail && fail.count > 0) ||
     Boolean(sanc && sanc.count > 0) ||
-    Boolean(hat && hat.count > 0);
-
-  if (!hasAnySignal) {
-    return (
-      <Section title="Compliance & risque (dirigeant)">
-        <Badge severity="green" label="Aucun signal public détecté" detail="BODACC, OpenSanctions, HATVP" />
-        {data.disclaimer && <Disclaimer text={data.disclaimer} />}
-      </Section>
-    );
-  }
+    Boolean(hat && hat.count > 0) ||
+    Boolean(tox && tox.count > 0);
 
   return (
     <Section title="Compliance & risque (dirigeant)">
+      {typeof data.risk_score === "number" && (
+        <RiskGauge score={data.risk_score} level={data.risk_level} />
+      )}
+
+      {!hasAnySignal && (
+        <Badge severity="green" label="Aucun signal public détecté" detail="BODACC, OpenSanctions, HATVP, réseau" />
+      )}
+
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
         {inter && inter.count > 0 && (
           <Badge
@@ -277,6 +378,13 @@ export function DirigeantCompliancePanel({
         )}
         {sanc && sanc.count > 0 && (
           <Badge severity="red" label={`OpenSanctions : ${sanc.count} match`} />
+        )}
+        {tox && tox.count > 0 && (
+          <Badge
+            severity="orange"
+            label={`Co-mandataires red flag : ${tox.count}`}
+            detail="réseau 1-hop en procédure"
+          />
         )}
         {hat && hat.count > 0 && (
           <Badge
@@ -332,6 +440,33 @@ export function DirigeantCompliancePanel({
                 SIREN {String(e.siren ?? "—")}
               </div>
               <div style={{ fontSize: 12, marginTop: 2 }}>{String(e.detail ?? e.nature ?? "—")}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tox && tox.entries.length > 0 && (
+        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ fontSize: 11, color: "var(--text-tertiary)", fontWeight: 600 }}>
+            Co-mandataires en procédure (réseau 1-hop)
+          </div>
+          {tox.entries.slice(0, 5).map((e, k) => (
+            <div
+              key={k}
+              style={{
+                padding: 8,
+                background: "rgba(251,146,60,0.05)",
+                border: "1px solid rgba(251,146,60,0.20)",
+                borderRadius: 6,
+              }}
+            >
+              <div style={{ fontWeight: 600 }}>
+                {String(e.prenom ?? "")} {String(e.nom ?? "")}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+                via SIREN {String(e.toxic_siren ?? "—")} ·{" "}
+                {String(e.toxic_denom ?? "—")} · {String(e.reason ?? "—").slice(0, 80)}
+              </div>
             </div>
           ))}
         </div>

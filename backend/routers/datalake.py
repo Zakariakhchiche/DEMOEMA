@@ -1440,8 +1440,71 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
         siren,
     ), default=0, timeout_s=4.0) or 0
 
+    # Iter 1 — Procédures BODACC secondaires (conciliation amiable, plan de
+    # redressement/sauvegarde). Signal préventif avant la procédure collective
+    # complète. silver.bodacc_annonces a un index sur siren.
+    conciliation_entries = await _safe(pool.fetch(
+        """SELECT date_parution, jugement_details->>'nature' AS nature,
+                  jugement_details->>'complementJugement' AS detail
+           FROM silver.bodacc_annonces
+           WHERE siren = $1
+             AND familleavis_lib = 'Procédures de conciliation'
+           ORDER BY date_parution DESC NULLS LAST
+           LIMIT 5""",
+        siren,
+    ), default=[], timeout_s=3.0)
+
+    plan_entries = await _safe(pool.fetch(
+        """SELECT date_parution, jugement_details->>'nature' AS nature,
+                  jugement_details->>'complementJugement' AS detail
+           FROM silver.bodacc_annonces
+           WHERE siren = $1
+             AND familleavis_lib = 'Procédures collectives'
+             AND (jugement_details->>'nature' ILIKE 'Jugement arr%tant%plan%'
+               OR jugement_details->>'nature' ILIKE 'Jugement modifiant le plan%'
+               OR jugement_details->>'nature' ILIKE 'Jugement de plan%')
+           ORDER BY date_parution DESC NULLS LAST
+           LIMIT 5""",
+        siren,
+    ), default=[], timeout_s=3.0)
+
     fiche_dict = fiche if isinstance(fiche, dict) else dict(fiche)
+    has_late_filing = bool(fiche_dict.get("has_late_filing"))
+    has_dirigeant_senior = bool(fiche_dict.get("has_dirigeant_senior"))
+    proc_active = fiche_dict.get("has_procedure_collective_active") is True
+    conciliation_active = len(conciliation_entries) > 0
+    plan_active = len(plan_entries) > 0
+
+    # Score risque compliance composite 0-100 (100 = clean, 0 = critique).
+    # Pondération calibrée pour M&A : procédure collective = quasi deal-killer.
+    risk_penalty = 0
+    if proc_active:
+        risk_penalty += 50
+    if len(opensanctions_entries) > 0:
+        risk_penalty += min(40, 25 + 5 * (len(opensanctions_entries) - 1))
+    if n_contentieux_total > 20:
+        risk_penalty += 20
+    elif n_contentieux_total > 5:
+        risk_penalty += 10
+    if has_late_filing:
+        risk_penalty += 10
+    if conciliation_active:
+        risk_penalty += 15
+    if plan_active and not proc_active:
+        risk_penalty += 10
+    risk_score = max(0, min(100, 100 - risk_penalty))
+    if risk_score >= 80:
+        risk_level = "low"
+    elif risk_score >= 50:
+        risk_level = "medium"
+    elif risk_score >= 20:
+        risk_level = "high"
+    else:
+        risk_level = "critical"
+
     compliance = {
+        "risk_score": risk_score,
+        "risk_level": risk_level,
         "procedure_collective": {
             "active": fiche_dict.get("has_procedure_collective_active"),
             "last_date": (
@@ -1459,6 +1522,16 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
             "count": n_contentieux_total,
             "recents": [_serialize(c) for c in contentieux_recents],
         },
+        "conciliation": {
+            "count": len(conciliation_entries),
+            "entries": [_serialize(c) for c in conciliation_entries],
+        },
+        "plan_redressement": {
+            "count": len(plan_entries),
+            "entries": [_serialize(p) for p in plan_entries],
+        },
+        "late_filing": has_late_filing,
+        "dirigeant_senior": has_dirigeant_senior,
         "disclaimer": (
             "Signaux issus de sources publiques (BODACC, OpenSanctions, "
             "juridictions). Ne valent pas attestation officielle URSSAF / DGFiP."
@@ -2141,7 +2214,58 @@ async def _dirigeant_full(
         nom_for_sql, prenom_for_sql,
     ), default=[], timeout_s=3.0)
 
+    # Iter 1 — Co-mandataires toxiques : dirigeants qui partagent une société
+    # avec la cible ET qui sont eux-mêmes dans une autre société en procédure
+    # collective active OU qui ont reçu interdiction de gérer / faillite perso.
+    # Signal "réseau red flags 1-hop" — indicateur de fréquentation.
+    co_toxiques: list = []
+    if sirens_mandats_self:
+        co_toxiques = await _safe(pool.fetch(
+            """WITH co_mand AS (
+                  SELECT DISTINCT d.nom, d.prenom, d.date_naissance,
+                         d.sirens_mandats
+                  FROM silver.inpi_dirigeants d,
+                       unnest($1::char(9)[]) AS s(siren)
+                  WHERE s.siren = ANY(d.sirens_mandats)
+                    AND NOT (d.nom IN ($2, $3) AND d.prenom IN ($4, $5))
+                )
+                SELECT cm.nom, cm.prenom, cm.date_naissance,
+                       em.siren AS toxic_siren,
+                       em.denomination AS toxic_denom,
+                       em.last_procedure_nature AS reason
+                FROM co_mand cm
+                JOIN gold.entreprises_master em ON em.siren = ANY(cm.sirens_mandats)
+                WHERE em.has_procedure_collective_active = TRUE
+                LIMIT 20""",
+            sirens_mandats_self, nom_for_sql, nom_for_sql_na,
+            prenom_for_sql, prenom_for_sql_na,
+        ), default=[], timeout_s=8.0)
+
+    # Score risque dirigeant 0-100 (100 = clean).
+    risk_penalty = 0
+    if len(interdictions_gerer) > 0:
+        risk_penalty += 40
+    if len(faillites_personnelles) > 0:
+        risk_penalty += 50
+    if len(sanctions) > 0:
+        risk_penalty += min(40, 30 + 5 * (len(sanctions) - 1))
+    if len(co_toxiques) > 0:
+        risk_penalty += min(30, 10 * len(co_toxiques))
+    if any(bool(r.get("lobbying_actif")) for r in hatvp_lobbying):
+        risk_penalty += 5  # signal d'influence, pas du risque dur
+    risk_score = max(0, min(100, 100 - risk_penalty))
+    if risk_score >= 80:
+        risk_level = "low"
+    elif risk_score >= 50:
+        risk_level = "medium"
+    elif risk_score >= 20:
+        risk_level = "high"
+    else:
+        risk_level = "critical"
+
     compliance = {
+        "risk_score": risk_score,
+        "risk_level": risk_level,
         "interdiction_gerer": {
             "count": len(interdictions_gerer),
             "entries": [_serialize(i) for i in interdictions_gerer],
@@ -2158,6 +2282,10 @@ async def _dirigeant_full(
             "count": len(hatvp_lobbying),
             "active": any(bool(r.get("lobbying_actif")) for r in hatvp_lobbying),
             "entries": [_serialize(h) for h in hatvp_lobbying],
+        },
+        "co_mandataires_toxiques": {
+            "count": len(co_toxiques),
+            "entries": [_serialize(c) for c in co_toxiques],
         },
         "disclaimer": (
             "Interdiction/faillite : signal indirect — la sanction concerne "
