@@ -96,6 +96,9 @@ export function DataExplorerView({ onOpenTarget }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Tri user-driven sur la table active. Cycle au clic header : null → DESC → ASC → null.
+  // Format backend : "col" (ASC), "-col" (DESC), null = défaut backend (default_order spec).
+  const [orderBy, setOrderBy] = useState<string | null>(null);
 
   // Charger la liste des tables au mount
   useEffect(() => {
@@ -118,7 +121,7 @@ export function DataExplorerView({ onOpenTarget }: Props) {
   }, []);
 
   const loadTable = useCallback(
-    async (name: string, opts: { offset?: number; q?: string } = {}) => {
+    async (name: string, opts: { offset?: number; q?: string; orderBy?: string | null } = {}) => {
       const [schema, table] = name.split(".");
       if (!schema || !table) return;
       setLoading(true);
@@ -128,6 +131,7 @@ export function DataExplorerView({ onOpenTarget }: Props) {
           limit: 100,
           offset: opts.offset ?? 0,
           q: opts.q,
+          orderBy: opts.orderBy ?? undefined,
         });
         setData({
           table: r.table,
@@ -146,9 +150,23 @@ export function DataExplorerView({ onOpenTarget }: Props) {
     []
   );
 
+  // Reset tri quand on change de table (les colonnes whitelist diffèrent).
   useEffect(() => {
-    if (active) loadTable(active, { q: search });
-  }, [active, search, loadTable]);
+    setOrderBy(null);
+  }, [active]);
+
+  useEffect(() => {
+    if (active) loadTable(active, { q: search, orderBy });
+  }, [active, search, orderBy, loadTable]);
+
+  // Toggle tri sur clic header : null → DESC (utile : top N) → ASC → null.
+  const toggleSort = useCallback((col: string) => {
+    setOrderBy((current) => {
+      if (current === `-${col}`) return col;       // DESC → ASC
+      if (current === col) return null;            // ASC → off
+      return `-${col}`;                            // off → DESC
+    });
+  }, []);
 
   const grouped = useMemo(() => {
     const out: Record<string, TableInfo[]> = {};
@@ -238,7 +256,7 @@ export function DataExplorerView({ onOpenTarget }: Props) {
               </span>
             )}
             <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-              <button className="dem-btn" onClick={() => loadTable(active, { q: search })} disabled={loading}>
+              <button className="dem-btn" onClick={() => loadTable(active, { q: search, orderBy })} disabled={loading}>
                 <Icon name="refresh" size={12} /> {loading ? "…" : "Rafraîchir"}
               </button>
               <button className="dem-btn">
@@ -298,20 +316,36 @@ export function DataExplorerView({ onOpenTarget }: Props) {
                   background: "rgba(10,10,13,0.95)", backdropFilter: "blur(10px)",
                 }}>
                   <th style={{ width: 36, padding: "10px 0 10px 22px", textAlign: "left" }}></th>
-                  {data.columns.map((c) => (
-                    <th
-                      key={c}
-                      style={{
-                        padding: "10px 12px", textAlign: "left", fontSize: 10.5,
-                        color: "var(--text-tertiary)", fontWeight: 600,
-                        textTransform: "uppercase", letterSpacing: "0.06em",
-                        borderBottom: "1px solid var(--border-subtle)",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {c}
-                    </th>
-                  ))}
+                  {data.columns.map((c) => {
+                    const isSorted = orderBy === c || orderBy === `-${c}`;
+                    const isDesc = orderBy === `-${c}`;
+                    return (
+                      <th
+                        key={c}
+                        onClick={() => toggleSort(c)}
+                        title={`Trier par ${c}`}
+                        style={{
+                          padding: "10px 12px", textAlign: "left", fontSize: 10.5,
+                          color: isSorted ? "var(--accent-blue)" : "var(--text-tertiary)",
+                          fontWeight: 600,
+                          textTransform: "uppercase", letterSpacing: "0.06em",
+                          borderBottom: isSorted
+                            ? "1px solid var(--accent-blue)"
+                            : "1px solid var(--border-subtle)",
+                          whiteSpace: "nowrap",
+                          cursor: "pointer",
+                          userSelect: "none",
+                        }}
+                      >
+                        {c}
+                        {isSorted && (
+                          <span style={{ marginLeft: 4, fontSize: 9 }}>
+                            {isDesc ? "▼" : "▲"}
+                          </span>
+                        )}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
@@ -388,7 +422,7 @@ export function DataExplorerView({ onOpenTarget }: Props) {
               <button
                 className="dem-btn"
                 disabled={data.offset === 0 || loading}
-                onClick={() => loadTable(active, { offset: Math.max(0, data.offset - 100), q: search })}
+                onClick={() => loadTable(active, { offset: Math.max(0, data.offset - 100), q: search, orderBy })}
                 style={{ marginLeft: "auto" }}
               >
                 <Icon name="chevronLeft" size={11} /> Précédent
@@ -396,7 +430,7 @@ export function DataExplorerView({ onOpenTarget }: Props) {
               <button
                 className="dem-btn"
                 disabled={!data.hasMore || loading}
-                onClick={() => loadTable(active, { offset: data.offset + 100, q: search })}
+                onClick={() => loadTable(active, { offset: data.offset + 100, q: search, orderBy })}
               >
                 Suivant <Icon name="chevronRight" size={11} />
               </button>
