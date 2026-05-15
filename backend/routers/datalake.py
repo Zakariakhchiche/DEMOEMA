@@ -2751,6 +2751,110 @@ async def dirigeant_full_no_dn(req: Request, nom: str, prenom: str):
     return await _dirigeant_full(req, nom, prenom, None)
 
 
+@router.get("/groupe/{siren}")
+async def groupe_complet(req: Request, siren: str):
+    """Vue groupe complète (parents + filiales) via silver.entreprises_relationships.
+    Diffère de /groupe-filiation (qui filtre par codes capital uniquement).
+    Inclut tous les rôles INPI (administrateur 73, gérant 65, président 71, etc.)
+    et fournit l'enrichissement compliance depuis gold.entreprises_master.
+    Cache TTL 5 min.
+    """
+    if not siren.isdigit() or len(siren) != 9:
+        raise HTTPException(status_code=400, detail="SIREN invalide")
+    cache_key = f"groupe:{siren}"
+    cached = _gen_cache_get(cache_key, 300.0)
+    if cached is not None:
+        return cached
+    pool = _pool(req)
+
+    parents_directs = await _safe(pool.fetch(
+        """SELECT DISTINCT
+              er.parent_siren,
+              er.parent_denomination,
+              er.parent_country,
+              er.role_code,
+              er.source,
+              em.has_procedure_collective_active AS parent_proc_active,
+              em.ca_latest AS parent_ca,
+              em.code_ape AS parent_ape,
+              em.adresse_dept AS parent_dept
+           FROM silver.entreprises_relationships er
+           LEFT JOIN gold.entreprises_master em ON em.siren = er.parent_siren
+           WHERE er.child_siren = $1
+           ORDER BY em.ca_latest DESC NULLS LAST
+           LIMIT 20""",
+        siren,
+    ), default=[], timeout_s=4.0)
+
+    ultimate_parents = await _safe(pool.fetch(
+        """WITH RECURSIVE chain AS (
+              SELECT parent_siren, parent_denomination, parent_country, 1 AS depth
+              FROM silver.entreprises_relationships
+              WHERE child_siren = $1
+              UNION ALL
+              SELECT er.parent_siren, er.parent_denomination, er.parent_country, c.depth + 1
+              FROM silver.entreprises_relationships er
+              JOIN chain c ON er.child_siren = c.parent_siren
+              WHERE c.depth < 5
+            )
+            SELECT DISTINCT parent_siren, parent_denomination, parent_country, depth
+            FROM chain
+            WHERE depth = (SELECT MAX(depth) FROM chain)
+            LIMIT 5""",
+        siren,
+    ), default=[], timeout_s=6.0)
+
+    filiales = await _safe(pool.fetch(
+        """SELECT DISTINCT
+              er.child_siren,
+              em.denomination AS child_denomination,
+              em.code_ape AS child_ape,
+              em.adresse_dept AS child_dept,
+              em.ca_latest AS child_ca,
+              em.effectif_moyen_latest AS child_effectif,
+              em.has_procedure_collective_active AS child_proc_active,
+              er.role_code,
+              er.source
+           FROM silver.entreprises_relationships er
+           LEFT JOIN gold.entreprises_master em ON em.siren = er.child_siren
+           WHERE er.parent_siren = $1
+           ORDER BY em.ca_latest DESC NULLS LAST
+           LIMIT 50""",
+        siren,
+    ), default=[], timeout_s=4.0)
+
+    n_filiales = len(filiales)
+    n_filiales_proc = sum(1 for f in filiales if f.get("child_proc_active"))
+    ca_total_filiales = sum(
+        float(f["child_ca"]) for f in filiales if f.get("child_ca")
+    )
+    parents_etrangers = [
+        p for p in parents_directs
+        if (p.get("parent_country") or "FRA") not in ("FRA", "FR", "FRANCE", "")
+    ]
+
+    result = {
+        "siren": siren,
+        "is_holding": n_filiales >= 2,
+        "is_filiale": len(parents_directs) > 0,
+        "n_filiales_directes": n_filiales,
+        "n_filiales_en_procedure": n_filiales_proc,
+        "ca_cumule_filiales_eur": ca_total_filiales if ca_total_filiales > 0 else None,
+        "n_parents_directs": len(parents_directs),
+        "n_parents_etrangers": len(parents_etrangers),
+        "parents_directs": [_serialize(p) for p in parents_directs],
+        "ultimate_parents": [_serialize(u) for u in ultimate_parents],
+        "filiales": [_serialize(f) for f in filiales],
+        "disclaimer": (
+            "Source : silver.entreprises_relationships (INPI dirigeants + GLEIF). "
+            "Couverture parent étranger limitée — INPI publie nom du parent mais "
+            "pas toujours son identifiant."
+        ),
+    }
+    _gen_cache_set(cache_key, result)
+    return result
+
+
 @router.get("/groupe-filiation/{siren}")
 async def groupe_filiation(req: Request, siren: str):
     """Identifie filiales + maison mere d'une societe via 3 sources :
