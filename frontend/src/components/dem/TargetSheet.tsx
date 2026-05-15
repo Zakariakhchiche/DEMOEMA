@@ -1222,28 +1222,20 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
 
             {tab === "compliance" && !loading && (
               <div>
-                {/* Panel structuré : procédure collective + OpenSanctions +
-                  contentieux. Précède le bloc red_flags qui peut être vide
-                  alors qu'un signal procédure est présent. */}
+                {/* Panel structuré : risk_score + procédure collective +
+                  sanctions + contentieux + trends + cession + réseau red flags.
+                  Source-of-truth principale de l'onglet Compliance. */}
                 {data?.compliance && (
                   <div style={{ marginBottom: 16 }}>
                     <CompanyCompliancePanel data={data.compliance} />
                   </div>
                 )}
 
-                {data?.red_flags.length === 0 ? (
-                  <div className="dem-glass" style={{
-                    padding: 24, borderRadius: 12, textAlign: "center",
-                    borderColor: "rgba(52,211,153,0.20)",
-                  }}>
-                    <Icon name="check" size={32} color="var(--accent-emerald)" />
-                    <div style={{ fontSize: 16, fontWeight: 600, marginTop: 8 }}>Aucun red flag identifié</div>
-                    <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginTop: 4 }}>
-                      Sources auditées : <span className="dem-mono">silver.sanctions</span>
-                      {" "}(AMF · OpenSanctions UE/US/UN/UK · ICIJ Pandora/Paradise/Panama · DGCCRF · CNIL RGPD)
-                    </div>
-                  </div>
-                ) : (
+                {/* Bloc legacy red_flags = sanctions externes (AMF/OpenSanc/
+                  ICIJ/CNIL/DGCCRF). Affiché en complément SEULEMENT si non
+                  vide, pour ne pas contredire un signal procédure collective
+                  active déjà affiché ci-dessus. */}
+                {data?.red_flags.length === 0 ? null : (
                   <div>
                     {/* Récap sources */}
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
