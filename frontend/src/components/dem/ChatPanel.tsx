@@ -350,14 +350,17 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
     // Luhn check pour SIREN 9 digits. SIRENs commençant par 1, 2, 3
     // (institutions de l'État, La Poste) sont des exceptions historiques —
     // on les accepte sans Luhn. Évite faux positifs sur 999999999.
+    // Attrape AUSSI le slash command "/siren XXX" qui contient le SIREN.
     const trimmed = text.trim();
-    const isNumericLength = /^\d{8,9}$/.test(trimmed);
+    const sirenSlashMatch = trimmed.match(/^\/siren\s+(\d{9})\s*$/i);
+    const candidateSiren = sirenSlashMatch ? sirenSlashMatch[1]! : trimmed;
+    const isNumericLength = /^\d{8,9}$/.test(candidateSiren);
     const luhnValid = (() => {
-      if (trimmed.length !== 9) return true; // 8-digit (SIRET partiel) skip
-      if (/^[123]/.test(trimmed)) return true; // exception institutions
+      if (candidateSiren.length !== 9) return true; // 8-digit (SIRET partiel) skip
+      if (/^[123]/.test(candidateSiren)) return true; // exception institutions
       let sum = 0;
       for (let i = 0; i < 9; i++) {
-        let d = parseInt(trimmed[i]!, 10);
+        let d = parseInt(candidateSiren[i]!, 10);
         if (i % 2 === 1) {
           d *= 2;
           if (d > 9) d -= 9;
@@ -373,7 +376,7 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
         role: "ai",
         kind: "siren",
         header: "SIREN invalide",
-        content: `Le numéro **${trimmed}** ne respecte pas l'algorithme Luhn (somme de contrôle SIREN). Vérifie qu'il est correct — un SIREN valide a 9 chiffres et passe la formule de Luhn.`,
+        content: `Le numéro **${candidateSiren}** ne respecte pas l'algorithme Luhn (somme de contrôle SIREN). Vérifie qu'il est correct — un SIREN valide a 9 chiffres et passe la formule de Luhn.`,
         cards: [],
       };
       setConversations((prev) => prev.map((c) =>
