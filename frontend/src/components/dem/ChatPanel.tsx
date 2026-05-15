@@ -542,15 +542,25 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
           { id: 1, label: "gold.cibles_ma_top / silver fallback", detail: "Live datalake" },
         ],
       };
-    } else if ((isSiren || isCompanyLookup) && cibles.length > 0) {
-      const headerLabel = isSiren ? "Recherche SIREN" : "Fiche entreprise";
+    } else if ((isSiren || isCompanyLookup) && (focusEntrepriseCards.length > 0 || cibles.length > 0)) {
+      // Préfère focusEntrepriseCards (/entreprise/search rerank par pertinence
+      // dénomination — maison mère en tête) à cibles[0] (/cibles sorted by
+      // score_ma — filiale opérationnelle top score). Bug avant fix : query
+      // "Bouygues" remontait BOUYGUES BATIMENT NORD-EST (score 80) au lieu
+      // de la maison mère BOUYGUES SA (572015246).
+      const primary = focusEntrepriseCards.length > 0 ? focusEntrepriseCards[0] : cibles[0];
+      const headerLabel = isSiren
+        ? "Recherche SIREN"
+        : focusEntrepriseCards.length > 1
+          ? `Fiche entreprise (${focusEntrepriseCards.length} matches)`
+          : "Fiche entreprise";
       const fallback = isSiren
-        ? `${cibles[0].denomination} détectée — siren ${cibles[0].siren}.`
-        : `${cibles[0].denomination} — siren ${cibles[0].siren}. Clique sur la carte pour la fiche complète.`;
+        ? `${primary.denomination} détectée — siren ${primary.siren}.`
+        : `${primary.denomination} — siren ${primary.siren}. Clique sur la carte pour la fiche complète.`;
       response = {
         role: "ai", kind: "siren", header: headerLabel,
         content: streamedText || fallback,
-        cards: [cibles[0]],
+        cards: focusEntrepriseCards.length > 0 ? focusEntrepriseCards.slice(0, 3) : [cibles[0]],
         followups: ["Fiche complète", "Dirigeants", "DD Compliance", "Évolution finance", "Réseau"],
       };
     } else if (focusEntrepriseRaw && focusEntrepriseCards.length > 0) {

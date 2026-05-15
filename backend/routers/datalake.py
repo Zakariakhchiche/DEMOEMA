@@ -2770,21 +2770,26 @@ async def groupe_complet(req: Request, siren: str):
     parents_directs = await _safe(pool.fetch(
         """SELECT DISTINCT
               er.parent_siren,
-              er.parent_denomination,
+              COALESCE(
+                NULLIF(er.parent_denomination, ''),
+                em.denomination, iul.denomination_unite, bfe.denomination
+              ) AS parent_denomination,
               er.parent_country,
               er.role_code,
               er.source,
               em.has_procedure_collective_active AS parent_proc_active,
               em.ca_latest AS parent_ca,
-              em.code_ape AS parent_ape,
+              COALESCE(em.code_ape, iul.code_ape, bfe.code_ape) AS parent_ape,
               em.adresse_dept AS parent_dept
            FROM silver.entreprises_relationships er
            LEFT JOIN gold.entreprises_master em ON em.siren = er.parent_siren
+           LEFT JOIN silver.insee_unites_legales iul ON iul.siren = er.parent_siren
+           LEFT JOIN bronze.inpi_formalites_entreprises bfe ON bfe.siren = er.parent_siren
            WHERE er.child_siren = $1
            ORDER BY em.ca_latest DESC NULLS LAST
            LIMIT 20""",
         siren,
-    ), default=[], timeout_s=4.0)
+    ), default=[], timeout_s=6.0)
 
     ultimate_parents = await _safe(pool.fetch(
         """WITH RECURSIVE chain AS (
@@ -2804,11 +2809,15 @@ async def groupe_complet(req: Request, siren: str):
         siren,
     ), default=[], timeout_s=6.0)
 
+    # Cascade fallback dénomination : gold (~411k entités M&A focus) couvre pas
+    # tout. silver.insee_unites_legales = SIRENE INSEE full (~30M) attrape les
+    # SCI, micro-entreprises etc. bronze.inpi_formalites_entreprises = backup.
     filiales = await _safe(pool.fetch(
         """SELECT DISTINCT
               er.child_siren,
-              em.denomination AS child_denomination,
-              em.code_ape AS child_ape,
+              COALESCE(em.denomination, iul.denomination_unite, bfe.denomination)
+                AS child_denomination,
+              COALESCE(em.code_ape, iul.code_ape, bfe.code_ape) AS child_ape,
               em.adresse_dept AS child_dept,
               em.ca_latest AS child_ca,
               em.effectif_moyen_latest AS child_effectif,
@@ -2817,11 +2826,13 @@ async def groupe_complet(req: Request, siren: str):
               er.source
            FROM silver.entreprises_relationships er
            LEFT JOIN gold.entreprises_master em ON em.siren = er.child_siren
+           LEFT JOIN silver.insee_unites_legales iul ON iul.siren = er.child_siren
+           LEFT JOIN bronze.inpi_formalites_entreprises bfe ON bfe.siren = er.child_siren
            WHERE er.parent_siren = $1
            ORDER BY em.ca_latest DESC NULLS LAST
            LIMIT 50""",
         siren,
-    ), default=[], timeout_s=4.0)
+    ), default=[], timeout_s=6.0)
 
     n_filiales = len(filiales)
     n_filiales_proc = sum(1 for f in filiales if f.get("child_proc_active"))
