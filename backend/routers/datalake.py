@@ -2812,15 +2812,17 @@ async def groupe_complet(req: Request, siren: str):
     # Cascade fallback dénomination : gold (~411k entités M&A focus) couvre pas
     # tout. silver.insee_unites_legales = SIRENE INSEE full (~30M) attrape les
     # SCI, micro-entreprises etc. bronze.inpi_formalites_entreprises = backup.
+    # CA + effectif viennent du dernier exercice silver.inpi_comptes si pas
+    # dans gold. Dept siege depuis silver.insee_etablissements en fallback.
     filiales = await _safe(pool.fetch(
         """SELECT DISTINCT
               er.child_siren,
               COALESCE(em.denomination, iul.denomination_unite, bfe.denomination)
                 AS child_denomination,
               COALESCE(em.code_ape, iul.code_ape, bfe.code_ape) AS child_ape,
-              em.adresse_dept AS child_dept,
-              em.ca_latest AS child_ca,
-              em.effectif_moyen_latest AS child_effectif,
+              COALESCE(em.adresse_dept, ies.code_dept) AS child_dept,
+              COALESCE(em.ca_latest, ic.ca_net) AS child_ca,
+              COALESCE(em.effectif_moyen_latest, ic.effectif_moyen) AS child_effectif,
               em.has_procedure_collective_active AS child_proc_active,
               er.role_code,
               er.source
@@ -2828,11 +2830,18 @@ async def groupe_complet(req: Request, siren: str):
            LEFT JOIN gold.entreprises_master em ON em.siren = er.child_siren
            LEFT JOIN silver.insee_unites_legales iul ON iul.siren = er.child_siren
            LEFT JOIN bronze.inpi_formalites_entreprises bfe ON bfe.siren = er.child_siren
+           LEFT JOIN LATERAL (
+             SELECT ca_net, effectif_moyen FROM silver.inpi_comptes
+             WHERE siren = er.child_siren
+             ORDER BY date_cloture DESC NULLS LAST LIMIT 1
+           ) ic ON true
+           LEFT JOIN silver.insee_etablissements ies ON ies.siren = er.child_siren
+             AND ies.etablissement_siege = true
            WHERE er.parent_siren = $1
-           ORDER BY em.ca_latest DESC NULLS LAST
+           ORDER BY COALESCE(em.ca_latest, ic.ca_net) DESC NULLS LAST
            LIMIT 50""",
         siren,
-    ), default=[], timeout_s=6.0)
+    ), default=[], timeout_s=8.0)
 
     n_filiales = len(filiales)
     n_filiales_proc = sum(1 for f in filiales if f.get("child_proc_active"))
