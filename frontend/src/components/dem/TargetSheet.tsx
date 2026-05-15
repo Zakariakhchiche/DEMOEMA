@@ -5,6 +5,7 @@ import { Icon } from "./Icon";
 import { ScoreBadge } from "./ScoreBadge";
 import { ScoreAxes, TierBadge } from "./ScoreAxes";
 import { DirigeantDrillContent } from "./DirigeantDrillContent";
+import { CompanyCompliancePanel, type CompanyCompliance } from "./CompliancePanel";
 import { datalakeApi } from "@/lib/api";
 import { formatSiren } from "@/lib/dem/format";
 import type { Target } from "@/lib/dem/types";
@@ -31,6 +32,7 @@ interface FicheData {
   red_flags: Record<string, unknown>[];
   network: Record<string, unknown>[];
   presse: Record<string, unknown>[];
+  compliance?: CompanyCompliance | null;
   sci_owned?: Record<string, unknown>[];
   sci_owned_count?: number;
   sci_owned_total_patrimoine?: number;
@@ -511,6 +513,51 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
 
             {tab === "overview" && !loading && (
               <div>
+                {/* Banner top : signal critique procédure collective active.
+                  Visible avant le scoring pour ne pas être manqué. */}
+                {data?.compliance?.procedure_collective?.active === true && (
+                  <div
+                    style={{
+                      marginBottom: 12,
+                      padding: "10px 14px",
+                      borderRadius: 10,
+                      background: "rgba(251,113,133,0.10)",
+                      border: "1px solid rgba(251,113,133,0.30)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: "var(--accent-rose)",
+                    }}
+                  >
+                    <Icon name="warning" size={16} color="var(--accent-rose)" />
+                    <span>Procédure collective active</span>
+                    <span style={{ fontWeight: 500, color: "var(--text-secondary)" }}>
+                      ·{" "}
+                      {String(data.compliance.procedure_collective.last_nature ?? "—")}
+                      {data.compliance.procedure_collective.last_date
+                        ? ` (${String(data.compliance.procedure_collective.last_date).slice(0, 10)})`
+                        : ""}
+                    </span>
+                    <button
+                      onClick={() => setTab("compliance")}
+                      style={{
+                        marginLeft: "auto",
+                        background: "transparent",
+                        border: "1px solid rgba(251,113,133,0.40)",
+                        color: "var(--accent-rose)",
+                        fontSize: 11,
+                        padding: "4px 10px",
+                        borderRadius: 6,
+                        cursor: "pointer",
+                        fontWeight: 600,
+                      }}
+                    >
+                      Voir compliance →
+                    </button>
+                  </div>
+                )}
                 {/* Scoring v3 PRO — 4 axes business + tier + EV */}
                 {scoring && (
                   <div className="dem-glass" style={{
@@ -1175,6 +1222,15 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
 
             {tab === "compliance" && !loading && (
               <div>
+                {/* Panel structuré : procédure collective + OpenSanctions +
+                  contentieux. Précède le bloc red_flags qui peut être vide
+                  alors qu'un signal procédure est présent. */}
+                {data?.compliance && (
+                  <div style={{ marginBottom: 16 }}>
+                    <CompanyCompliancePanel data={data.compliance} />
+                  </div>
+                )}
+
                 {data?.red_flags.length === 0 ? (
                   <div className="dem-glass" style={{
                     padding: 24, borderRadius: 12, textAlign: "center",

@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { DirigeantCompliancePanel, type DirigeantCompliance } from "./CompliancePanel";
 
 export interface DirigeantFullData {
   identity: Record<string, unknown> | null;
@@ -10,6 +11,7 @@ export interface DirigeantFullData {
   osint: Record<string, unknown> | null;
   osint_raw: Record<string, unknown> | null;
   sanctions: Record<string, unknown>[];
+  compliance?: DirigeantCompliance | null;
   dvf_zones: Record<string, unknown> | null;
   // Bloc Neo4j (PR #94) — fallback quand silver vide pour SCI/OSINT/Wikidata.
   graph?: Record<string, unknown> | null;
@@ -24,6 +26,7 @@ export function DirigeantDrillContent({ data }: { data: Record<string, unknown> 
   const osint = (data.osint as Record<string, unknown>) || {};
   const osintRaw = (data.osint_raw as Record<string, unknown>) || {};
   const sanctions = (data.sanctions as unknown[]) || [];
+  const compliance = (data.compliance as DirigeantCompliance | null) || null;
   const dvf = (data.dvf_zones as Record<string, unknown>) || null;
   // Graph Neo4j sert de fallback quand silver SCI/OSINT n'a pas de row pour
   // ce dirigeant (cas fréquent : silver.dirigeant_sci_patrimoine n'est pas
@@ -225,7 +228,13 @@ export function DirigeantDrillContent({ data }: { data: Record<string, unknown> 
         <Row label="Siren principal" value={String(osint.siren_main || "—")} />
       </Section>
 
-      {sanctions.length > 0 && (
+      {/* Bloc compliance (interdiction gérer / faillite perso / OpenSanctions /
+        HATVP). Affiché toujours — montre "aucun signal" si rien détecté.
+        Remplace l'ancienne section "Sanctions" qui ne couvrait qu'opensanctions. */}
+      <DirigeantCompliancePanel data={compliance} />
+      {/* Fallback : si le backend ne retourne pas encore le bloc compliance
+        (ancienne version) mais expose sanctions au top-level, on les affiche. */}
+      {!compliance && sanctions.length > 0 && (
         <Section title="Sanctions / red flags personne">
           {sanctions.map((s, k) => {
             const so = s as Record<string, unknown>;
