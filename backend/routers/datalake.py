@@ -3638,16 +3638,30 @@ async def network_for_siren(req: Request, siren: str):
     if not await _table_exists(pool, "silver", "inpi_dirigeants"):
         return {"nodes": [], "links": []}
 
-    # Récupère l'entité centrale
+    # Récupère l'entité centrale — fallback gold si silver.inpi_comptes vide.
+    # Bug : CYREA en LJ n'a pas de comptes déposés → silver vide → label
+    # retombait sur le SIREN brut au lieu de "CYREA". gold.entreprises_master
+    # apporte aussi les flags compliance pour coloration rouge.
     center = await _safe(pool.fetchrow(
         """SELECT siren, denomination FROM silver.inpi_comptes
            WHERE siren = $1 ORDER BY date_cloture DESC LIMIT 1""",
         siren,
     ), timeout_s=3.0)
-    if not center:
-        center_deno = siren
+    center_gold = await _safe(pool.fetchrow(
+        """SELECT denomination,
+                  COALESCE(has_procedure_collective_active, FALSE) AS proc_active,
+                  COALESCE(has_late_filing, FALSE) AS late_filing
+           FROM gold.entreprises_master WHERE siren = $1::char(9) LIMIT 1""",
+        siren,
+    ), default=None, timeout_s=3.0)
+    if center and center["denomination"]:
+        center_deno = center["denomination"]
+    elif center_gold and center_gold["denomination"]:
+        center_deno = center_gold["denomination"]
     else:
-        center_deno = center["denomination"] or siren
+        center_deno = f"SIREN {siren}"
+    center_proc = bool(center_gold and center_gold.get("proc_active"))
+    center_late = bool(center_gold and center_gold.get("late_filing"))
 
     dirigeants = await _safe(pool.fetch(
         """SELECT nom, prenom, n_mandats_actifs, sirens_mandats, denominations
@@ -3658,7 +3672,14 @@ async def network_for_siren(req: Request, siren: str):
         siren,
     ), default=[], timeout_s=8.0)
 
-    nodes = [{"id": f"c_{siren}", "label": center_deno[:30], "type": "target", "x": 0, "y": 0}]
+    nodes = [{
+        "id": f"c_{siren}",
+        "label": center_deno[:30],
+        "type": "target",
+        "x": 0, "y": 0,
+        "has_procedure_collective_active": center_proc,
+        "has_late_filing": center_late,
+    }]
     links = []
 
     import math
