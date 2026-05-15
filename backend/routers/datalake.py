@@ -2767,6 +2767,12 @@ async def groupe_complet(req: Request, siren: str):
         return cached
     pool = _pool(req)
 
+    # Exclure les rôles non-capitalistiques pour éviter de présenter les
+    # Commissaires aux Comptes (72), Membres du conseil de surveillance (75),
+    # autres mandataires audit/contrôle comme "parents". Le vrai signal M&A
+    # parent vient des Administrateurs (73), Présidents SA (71), Gérants (65),
+    # Associés (30), Représentants PM (11), Sociétés liées (29).
+    EXCLUDED_PARENT_ROLES = ("72", "75", "53", "64", "74")
     parents_directs = await _safe(pool.fetch(
         """SELECT DISTINCT
               er.parent_siren,
@@ -2786,6 +2792,8 @@ async def groupe_complet(req: Request, siren: str):
            LEFT JOIN silver.insee_unites_legales iul ON iul.siren = er.parent_siren
            LEFT JOIN bronze.inpi_formalites_entreprises bfe ON bfe.siren = er.parent_siren
            WHERE er.child_siren = $1
+             AND (er.role_code IS NULL OR er.role_code NOT IN ('72','75','53','64','74'))
+             AND COALESCE(iul.code_ape, bfe.code_ape, '') != '6920Z'
            ORDER BY em.ca_latest DESC NULLS LAST
            LIMIT 20""",
         siren,
@@ -2796,11 +2804,13 @@ async def groupe_complet(req: Request, siren: str):
               SELECT parent_siren, parent_denomination, parent_country, 1 AS depth
               FROM silver.entreprises_relationships
               WHERE child_siren = $1
+                AND (role_code IS NULL OR role_code NOT IN ('72','75','53','64','74'))
               UNION ALL
               SELECT er.parent_siren, er.parent_denomination, er.parent_country, c.depth + 1
               FROM silver.entreprises_relationships er
               JOIN chain c ON er.child_siren = c.parent_siren
               WHERE c.depth < 5
+                AND (er.role_code IS NULL OR er.role_code NOT IN ('72','75','53','64','74'))
             )
             SELECT DISTINCT parent_siren, parent_denomination, parent_country, depth
             FROM chain
@@ -2838,6 +2848,8 @@ async def groupe_complet(req: Request, siren: str):
            LEFT JOIN silver.insee_etablissements ies ON ies.siren = er.child_siren
              AND ies.etablissement_siege = true
            WHERE er.parent_siren = $1
+             AND (er.role_code IS NULL OR er.role_code NOT IN ('72','75','53','64','74'))
+             AND COALESCE(iul.code_ape, bfe.code_ape, '') != '6920Z'
            ORDER BY COALESCE(em.ca_latest, ic.ca_net) DESC NULLS LAST
            LIMIT 50""",
         siren,
