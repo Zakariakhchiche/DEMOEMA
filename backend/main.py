@@ -1580,11 +1580,21 @@ async def copilot_stream_endpoint(q: str = Query(...)):
         # get_dirigeant, get_scoring_detail, search_sanctions, search_signaux_bodacc
         # → fini les "TotalEnergies pas dans la base" / hallucinations
         ai_streamed = False
+        validation_meta: dict | None = None
         # base URL interne — backend appelle ses propres endpoints datalake
         datalake_base = "http://localhost:8000"
-        async for chunk in copilot_ai_query_stream_with_tools(q, datalake_base):
+        async for item in copilot_ai_query_stream_with_tools(q, datalake_base):
             ai_streamed = True
-            yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+            # Le client yield des str (chunks de texte) OU des dict (events meta).
+            # Cf. clients/llm_validator.py — validation post-réponse anti-halluc.
+            if isinstance(item, dict):
+                if "validation" in item:
+                    validation_meta = item
+                    yield f"data: {json.dumps(item)}\n\n"
+                else:
+                    yield f"data: {json.dumps(item)}\n\n"
+            else:
+                yield f"data: {json.dumps({'chunk': item})}\n\n"
 
         if not ai_streamed:
             # Fallback: call existing rule-based copilot

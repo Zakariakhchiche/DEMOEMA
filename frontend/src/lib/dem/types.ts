@@ -206,6 +206,15 @@ export interface AiMessageData {
   reasoning?: string[];
   toolCalls?: ToolCall[];
   verdict?: string;
+  // Validator anti-hallucination — backend/clients/llm_validator.py.
+  // Liste les chiffres de la réponse qui ne sont PAS traceables dans les
+  // résultats des tools appelés. Si non vide → bandeau ⚠️ dans le rendu.
+  validation?: {
+    verified: string[];
+    unverified: string[];
+    n_checks: number;
+    trust_score: number;
+  };
 }
 
 export interface UserMessageData {
