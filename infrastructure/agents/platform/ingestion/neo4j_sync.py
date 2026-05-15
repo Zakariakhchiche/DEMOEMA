@@ -145,16 +145,27 @@ SET c.has_procedure_collective_active = row.has_procedure_collective_active,
     c.pro_ma_score = row.pro_ma_score
 """
 
-# Propagation Company → Person : pour chaque Person, compter ses companies
-# en procédure active. has_mandat_en_procedure = true si ≥1, n_… = total.
-# Calcul en Cypher pur via Person → IS_DIRIGEANT → Company.
+# Propagation Company → Person : approche restreinte pour rester sous le
+# memory budget Neo4j (16.8 GiB transaction limit). On part des Companies
+# en procédure (4k max) puis on remonte vers les Persons connectés.
+# Itère donc sur ~4k Companies × N persons (jamais 7.9M Persons d'un coup).
+# Persons non connectés gardent has_mandat_en_procedure = NULL (=false côté
+# query layer).
 PROPAGATE_PERSON_COMPLIANCE = """
-MATCH (p:Person)-[:IS_DIRIGEANT]->(c:Company)
-WITH p, count(c) AS n_mandats,
-     sum(CASE WHEN c.has_procedure_collective_active = TRUE THEN 1 ELSE 0 END) AS n_proc
-SET p.has_mandat_en_procedure = (n_proc > 0),
-    p.n_mandats_en_procedure = n_proc,
-    p.n_mandats = n_mandats
+MATCH (c:Company {has_procedure_collective_active: true})<-[:IS_DIRIGEANT]-(p:Person)
+WITH p, count(DISTINCT c) AS n_proc
+SET p.has_mandat_en_procedure = true,
+    p.n_mandats_en_procedure = n_proc
+"""
+
+# Reset des Persons qui avaient un flag mais dont aucune company associée
+# n'est plus en procédure (boîtes sorties de procédure). Borné par
+# has_mandat_en_procedure = true → set restreint.
+RESET_PERSON_COMPLIANCE = """
+MATCH (p:Person {has_mandat_en_procedure: true})
+WHERE NOT (p)-[:IS_DIRIGEANT]->(:Company {has_procedure_collective_active: true})
+SET p.has_mandat_en_procedure = false,
+    p.n_mandats_en_procedure = 0
 """
 
 
@@ -263,9 +274,14 @@ async def run_neo4j_rebuild() -> dict:
                 for i in range(0, len(params), BATCH):
                     s.run(MERGE_COMPANY_COMPLIANCE, rows=params[i:i + BATCH])
                     n_compliance_companies += min(BATCH, len(params) - i)
-                # Propagation Company → Person en une seule passe Cypher.
+                # Propagation Company → Person : restreinte aux Persons connectés
+                # à au moins 1 Company en procédure (≪ 7.9M Persons totaux).
                 p_result = s.run(PROPAGATE_PERSON_COMPLIANCE).consume()
                 n_compliance_persons = p_result.counters.properties_set
+                # Reset des Persons qui étaient flag=true mais dont aucune
+                # company associée n'est plus en procédure.
+                r_result = s.run(RESET_PERSON_COMPLIANCE).consume()
+                n_compliance_persons += r_result.counters.properties_set
         log.info(
             "[neo4j_sync] compliance enrichment: %d companies, %d person props set",
             n_compliance_companies, n_compliance_persons,
