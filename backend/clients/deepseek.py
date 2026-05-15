@@ -272,6 +272,34 @@ COPILOT_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "check_dirigeant_compliance",
+            "description": (
+                "Vérifie le RISQUE compliance d'un dirigeant par nom + prénom. "
+                "Symétrique à check_compliance(siren) côté entreprise. "
+                "Retourne risk_score 0-100 (low ≥80, medium ≥50, high ≥20, critical <20) "
+                "composite sur 6 signaux personne : interdiction de gérer (BODACC), "
+                "faillite personnelle (BODACC), sanctions OpenSanctions/AMF/OFAC, "
+                "co-mandataires toxiques (associés sanctionnés ou en procédure), "
+                "mandats actuels dans des sociétés en procédure collective, lobbying "
+                "actif HATVP. Tool LÉGER vs get_dirigeant — ne ramène que le bloc "
+                "compliance + identité minimale (age, n_mandats). "
+                "Utiliser pour : 'X a-t-il des red flags', 'audit compliance dirigeant Y', "
+                "'qui dans son entourage a des sanctions', 'profil risque de Z'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "nom": {"type": "string", "description": "Nom de famille en majuscules (ex: 'BOUYGUES')"},
+                    "prenom": {"type": "string", "description": "Prénom en majuscules (ex: 'MARTIN')"},
+                    "date_naissance": {"type": "string", "description": "Date naissance YYYY-MM (optionnel, recommandé pour homonymes)"},
+                },
+                "required": ["nom", "prenom"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_scoring_detail",
             "description": (
                 "Scoring M&A v3 PRO d'une cible — 4 axes business + tier + EV. "
@@ -759,6 +787,59 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
                     return r.json()
                 return {"error": f"HTTP {r.status_code}"}
 
+        elif name == "check_dirigeant_compliance":
+            # Tool LIGHT compliance dirigeant — symétrique à check_compliance(siren).
+            # Ne ramène que le bloc compliance + identité minimale (économise les
+            # tokens vs get_dirigeant qui retourne identity + sci_patrimoine +
+            # osint + dvf + graph + mandats_detail + co_mandataires_detail).
+            # Structure compliance ground-truth cf. datalake.py:_dirigeant_full
+            # block compliance (interdiction, faillite, sanctions, co_mandataires
+            # toxiques, mandats_en_procedure, lobbying HATVP).
+            nom = (args.get("nom") or "").upper()
+            prenom = (args.get("prenom") or "").upper()
+            dn = args.get("date_naissance") or ""
+            if not nom or not prenom:
+                return {"error": "nom + prenom requis"}
+            url = f"{datalake_base}/api/datalake/dirigeant/{nom}/{prenom}"
+            if dn:
+                url += f"/{dn}"
+            async with httpx.AsyncClient(timeout=30) as client:
+                r = await client.get(url)
+                if r.status_code != 200:
+                    return {"error": f"HTTP {r.status_code}"}
+                d = r.json()
+                c = d.get("compliance") or {}
+                ident = d.get("identity") or {}
+                return {
+                    "nom": nom,
+                    "prenom": prenom,
+                    "date_naissance": ident.get("date_naissance"),
+                    "age": ident.get("age"),
+                    "n_mandats_actifs": ident.get("n_mandats_actifs"),
+                    "n_mandats_total": ident.get("n_mandats_total"),
+                    # Score composite 0-100. risk_level: low ≥80 / medium ≥50 /
+                    # high ≥20 / critical <20.
+                    "risk_score": c.get("risk_score"),
+                    "risk_level": c.get("risk_level"),
+                    "interdiction_gerer_count": (c.get("interdiction_gerer") or {}).get("count", 0),
+                    "interdiction_gerer_entries": (c.get("interdiction_gerer") or {}).get("entries", [])[:3],
+                    "faillite_personnelle_count": (c.get("faillite_personnelle") or {}).get("count", 0),
+                    "faillite_personnelle_entries": (c.get("faillite_personnelle") or {}).get("entries", [])[:3],
+                    "opensanctions_count": (c.get("opensanctions") or {}).get("count", 0),
+                    "opensanctions_entries": (c.get("opensanctions") or {}).get("entries", [])[:5],
+                    "hatvp_lobbying_count": (c.get("hatvp_lobbying") or {}).get("count", 0),
+                    "hatvp_lobbying_active": (c.get("hatvp_lobbying") or {}).get("active", False),
+                    "co_mandataires_toxiques_count": (c.get("co_mandataires_toxiques") or {}).get("count", 0),
+                    "co_mandataires_toxiques_entries": (c.get("co_mandataires_toxiques") or {}).get("entries", [])[:5],
+                    "mandats_en_procedure_count": (c.get("mandats_en_procedure") or {}).get("count", 0),
+                    "mandats_en_procedure_entries": (c.get("mandats_en_procedure") or {}).get("entries", [])[:5],
+                    "disclaimer": c.get("disclaimer") or (
+                        "Interdiction/faillite : signal indirect — la sanction concerne "
+                        "une société dirigée, pas nécessairement cette personne. "
+                        "Vérifier le détail du jugement."
+                    ),
+                }
+
         elif name == "get_scoring_detail":
             siren = args.get("siren", "")
             if not siren.isdigit() or len(siren) != 9:
@@ -1203,7 +1284,7 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
 _SYSTEM_PROMPT_TOOLS = (
     "Tu es le Copilot IA d'EdRCF 6.0, plateforme M&A pour Edmond de Rothschild Corporate Finance.\n"
     "Réponds en français, concis et professionnel, en markdown.\n\n"
-    "Tu as accès au datalake DEMOEMA (107M rows silver) + Neo4j graphe (18.6M nodes, 7.7M relations CO_MANDATE) via 18 tools :\n"
+    "Tu as accès au datalake DEMOEMA (107M rows silver) + Neo4j graphe (18.6M nodes, 7.7M relations CO_MANDATE) via 19 tools :\n"
     "**Identité & sourcing** :\n"
     "- search_entreprise_by_name : recherche LARGE par dénomination (sans floor CA, couvre SCIs/holdings/structures non-cotées)\n"
     "- search_cibles : cibles M&A par texte/dept/score (filtre CA ≥ 1M€)\n"
@@ -1220,6 +1301,11 @@ _SYSTEM_PROMPT_TOOLS = (
     "collective BODACC + OpenSanctions + contentieux + trends 3y + network red "
     "flags. UTILISER en priorité pour 'risque', 'red flag', 'à jour cotisations', "
     "'est-il compliant', 'signaux DD'. Plus léger que get_fiche_entreprise.\n"
+    "- check_dirigeant_compliance : risk_score 0-100 par nom+prénom — interdiction "
+    "de gérer + faillite personnelle + sanctions OpenSanctions + co-mandataires "
+    "toxiques + mandats en procédure + lobbying HATVP. Symétrique à "
+    "check_compliance(siren) côté entreprise. Utiliser pour 'red flags X', "
+    "'audit dirigeant Y', 'profil risque Z'. Plus léger que get_dirigeant.\n"
     "- search_sanctions : sanctions consolidées (AMF/OpenSanctions/ICIJ/DGCCRF/CNIL)\n"
     "- check_offshore : match ICIJ Panama/Paradise Papers\n"
     "- check_lobbying : inscription HATVP / lobbying\n"
