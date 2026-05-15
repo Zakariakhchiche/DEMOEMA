@@ -2799,7 +2799,7 @@ async def groupe_complet(req: Request, siren: str):
         siren,
     ), default=[], timeout_s=6.0)
 
-    ultimate_parents = await _safe(pool.fetch(
+    ultimate_parents_raw = await _safe(pool.fetch(
         """WITH RECURSIVE chain AS (
               SELECT parent_siren, parent_denomination, parent_country, 1 AS depth
               FROM silver.entreprises_relationships
@@ -2815,9 +2815,17 @@ async def groupe_complet(req: Request, siren: str):
             SELECT DISTINCT parent_siren, parent_denomination, parent_country, depth
             FROM chain
             WHERE depth = (SELECT MAX(depth) FROM chain)
-            LIMIT 5""",
+            LIMIT 10""",
         siren,
     ), default=[], timeout_s=6.0)
+    # Post-filter Python : exclure cabinets audit dont la dénomination contient
+    # AUDIT / EXPERTISE COMPTABLE / FIDUCIAIRE — pollution récursive INPI
+    # (CAC d'un parent qui est lui-même CAC d'un grand-parent, etc.).
+    AUDIT_PATTERN = ("AUDIT", "EXPERT", "FIDUC", "MAZARS", "ERNST", "DELOITTE", "KPMG", "PRICEWATERHOUSE", "PWC", "GRANT THORNTON", "BDO ")
+    ultimate_parents = [
+        u for u in ultimate_parents_raw
+        if not any(tok in (u.get("parent_denomination") or "").upper() for tok in AUDIT_PATTERN)
+    ][:5]
 
     # Cascade fallback dénomination : gold (~411k entités M&A focus) couvre pas
     # tout. silver.insee_unites_legales = SIRENE INSEE full (~30M) attrape les
