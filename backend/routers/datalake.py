@@ -3844,6 +3844,13 @@ async def entreprise_search(
             q_clean, limit,
         ), default=[], timeout_s=8.0)
     else:
+        # Buffer plus large que `limit` pour permettre un re-ranking Python par
+        # pertinence dénomination (boost maison mère vs filiales étrangères).
+        # ORDER BY siren met les petits sirens en premier — les filiales
+        # étrangères type "TOTALENERGIES EP ANGOLA" (siren 303M) sortent avant
+        # la maison mère "TOTALENERGIES SE" (siren 542M). Le rerank final
+        # corrige en privilégiant exact match + forme tête de groupe.
+        search_buffer = max(limit * 4, 20)
         rows_inpi = await _safe(pool.fetch(
             """SELECT DISTINCT ON (siren)
                   siren, denomination, ca_net AS ca_dernier, date_cloture
@@ -3851,7 +3858,7 @@ async def entreprise_search(
                WHERE denomination ILIKE $1
                ORDER BY siren, date_cloture DESC NULLS LAST
                LIMIT $2""",
-            pattern, limit,
+            pattern, search_buffer,
         ), default=[], timeout_s=8.0)
 
     found_sirens = {r["siren"] for r in rows_inpi if r.get("siren")}
@@ -4128,6 +4135,36 @@ async def entreprise_search(
     results = [_enrich(_serialize(r), "inpi_comptes") for r in rows_inpi]
     results.extend(_enrich(_serialize(r), "insee_unites_legales") for r in rows_insee)
     results.extend(_enrich(_serialize(r), "inpi_dirigeants") for r in rows_inpi_dirig)
+
+    # Re-ranking par pertinence dénomination (boost exact match / maison mère
+    # vs filiales étrangères). On exécute APRÈS l'enrichissement pour disposer
+    # de etat_administratif + ca_dernier + forme_juridique au moment du tri.
+    # Skip si is_siren (résultat unique, pas de désambiguïsation nécessaire).
+    if not is_siren:
+        head_forms = {"SE", "SA", "SAS", "SARL", "SCA", "SE.", "GROUPE", "GROUP", "FRANCE", "HOLDING"}
+        q_upper = q_clean.upper().strip()
+
+        def _relevance(item: dict) -> tuple:
+            denom = (item.get("denomination") or "").upper().strip()
+            etat = item.get("etat_administratif") or ""
+            try:
+                ca = float(item.get("ca_dernier") or 0)
+            except (TypeError, ValueError):
+                ca = 0.0
+            if denom == q_upper:
+                tier = 0
+            elif denom.startswith(q_upper):
+                suffix = denom[len(q_upper):].strip()
+                tier = 1 if (suffix == "" or suffix in head_forms) else 2
+            elif q_upper in denom:
+                tier = 3
+            else:
+                tier = 4
+            actif_rank = 0 if etat == "A" else 1
+            return (tier, actif_rank, -ca)
+
+        results.sort(key=_relevance)
+    results = results[:limit]
     return {"q": q_clean, "n": len(results), "results": results}
 
 
