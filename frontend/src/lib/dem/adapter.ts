@@ -187,20 +187,53 @@ export function extractFocusEntrepriseFromQuery(text: string): { q: string } | n
     return { q: sirenMatch[1] };
   }
 
-  // 1. Intent-based : "qui est <X>", "fiche de <X>", "infos sur <X>".
+  // 1. Intent-based : "qui est <X>", "fiche de <X>", "infos sur <X>",
+  //    "analyse <X>", "audit <X>", "compliance <X>", "risque <X>", "DD <X>".
+  // Couvre les patterns M&A type "analyse compliance LVMH", "audit risque
+  // TotalEnergies", "due diligence Carrefour". Le mot-cible peut être suivi
+  // de mots qualifiants (ex: "analyse compliance LVMH risk score sanctions")
+  // — on capture le 1er token capitalisé non-keyword qui suit l'intent.
   const reIntent = /(?:qui\s+(?:est|sont)|fiche\s+(?:de|du|d'|détaillée\s+de)|infos?\s+sur|recherche|donne[ -]moi(?:\s+(?:la\s+fiche|le\s+profil|les?\s+infos))?\s+(?:de|sur|pour|du|d')|montre[ -]moi(?:\s+la\s+fiche)?\s+(?:de|d')|parle[ -]moi\s+de)\s+(?:l['ea]\s+)?([A-Za-zÀ-ÿ0-9][A-Za-zÀ-ÿ0-9\-' ]{1,80})\??\s*$/i;
   const mIntent = reIntent.exec(trimmed);
   if (mIntent) {
     const candidate = mIntent[1].trim().replace(/\s+/g, " ");
-    // Filtrer si trop court ou si c'est un single common word (pas distinctif).
     if (candidate.length >= 3 && /[A-Za-zÀ-ÿ]/.test(candidate)) {
       return { q: candidate };
     }
   }
 
-  // 2. Query courte (≤ 6 mots) + au moins un token corporate ou un mot all-caps.
+  // 1bis. Verbes M&A (analyse, audit, compliance, risque, DD…) — pattern
+  // libre : on extrait le 1er nom propre (token avec maj initiale ou
+  // ALL-CAPS ≥ 3 chars) qui suit le verbe, ignorant les mots qualifiants
+  // (risk, score, compliance, etc.).
+  const M_AND_A_KEYWORDS = new Set([
+    "risk", "risque", "score", "compliance", "sanctions", "procedure", "procédure",
+    "collective", "red", "flags", "due", "diligence", "audit", "analyse", "verifie",
+    "vérifie", "check", "evalue", "évalue", "trends", "trend", "dettes", "urssaf",
+    "fiscales", "sociales", "bodacc", "offshore", "lobbying", "sci", "patrimoine",
+    "filiale", "filiales", "dirigeants", "dirigeant", "ca", "ebitda", "marge",
+    "et", "ou", "des", "le", "la", "les", "un", "une", "de", "du", "pour", "sur",
+  ]);
+  if (/^(analyse|audit|verifi|vérifi|évalue|evalue|check|compliance|risque|risk|due\s+diligence|dd|donne(\s+moi)?\s+(le|la|les|l)?(risk|score|risque))/i.test(trimmed)) {
+    // Scan tous les tokens à la recherche d'un nom propre distinctif
+    const tokens = trimmed.split(/\s+/);
+    for (const tok of tokens) {
+      const clean = tok.replace(/[^\wÀ-ÿ\-']/g, "");
+      if (clean.length < 3) continue;
+      const lower = clean.toLowerCase();
+      if (M_AND_A_KEYWORDS.has(lower)) continue;
+      // Match si Capitalized ou ALL-CAPS ≥ 3 lettres
+      if (/^[A-ZÀ-ÖØ-Ý][A-Za-zÀ-ÿ]{2,}$/.test(clean) || /^[A-ZÀ-ÖØ-Ý]{3,}$/.test(clean)) {
+        return { q: clean };
+      }
+    }
+  }
+
+  // 2. Query courte (≤ 10 mots, bumpé 6→10) + au moins un token corporate
+  //    ou un mot all-caps. Élargi pour capturer "analyse compliance LVMH
+  //    risk score sanctions" (7 mots, contient TotalEnergies).
   const words = trimmed.split(/\s+/);
-  if (words.length <= 6) {
+  if (words.length <= 10) {
     const hasUpperWord = words.some(w => /^[A-ZÀ-ÖØ-Ý]{3,}/.test(w) && w.length >= 3);
     if (hasCorporateToken(trimmed) || hasUpperWord) {
       // Strip filler words at start ("la", "le", "les", "société", "groupe")
