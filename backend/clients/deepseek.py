@@ -12,8 +12,15 @@ from typing import AsyncIterator
 
 import httpx
 
-# Vercel AI Gateway prioritaire (single key, cost tracking, cache, multi-model
-# routing) ; DeepSeek direct en fallback.
+# Priorité d'endpoint LLM :
+#   1. Ollama local (zero coût, zero clé) — OLLAMA_BASE_URL défini en docker-compose
+#   2. Vercel AI Gateway (single key, cost tracking, cache, multi-model routing)
+#   3. DeepSeek direct
+# Le user a explicitement demandé "uniquement Ollama" 2026-05-15. La clé
+# DeepSeek a expiré. On garde le fallback dans le code mais en pratique seule
+# l'option Ollama est active en prod sans clé.
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "").rstrip("/")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
 AI_GATEWAY_API_KEY = os.getenv("AI_GATEWAY_API_KEY", "")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 
@@ -42,7 +49,16 @@ _SYSTEM_PROMPT_STREAM = (
 
 
 def _resolve_endpoint() -> tuple[str, str, str] | None:
-    """Retourne (api_key, base_url, model) ou None si aucune clé configurée."""
+    """Retourne (api_key, base_url, model) ou None si aucune option configurée.
+
+    Priorité 1: Ollama local (zero coût, ne demande pas de clé — passe "ollama"
+    comme api_key, ignoré par le serveur Ollama qui accepte tout Bearer).
+    Le user a demandé Ollama-only 2026-05-15.
+    """
+    if OLLAMA_BASE_URL:
+        return ("ollama",
+                f"{OLLAMA_BASE_URL}/v1/chat/completions",
+                OLLAMA_MODEL)
     if AI_GATEWAY_API_KEY:
         return (AI_GATEWAY_API_KEY,
                 "https://ai-gateway.vercel.sh/v1/chat/completions",
@@ -1157,7 +1173,7 @@ async def copilot_ai_query_stream_with_tools(
     """
     resolved = _resolve_endpoint()
     if resolved is None:
-        yield "Erreur : aucune clé DeepSeek/AI Gateway configurée."
+        yield "Erreur : aucun backend LLM configuré (OLLAMA_BASE_URL / AI_GATEWAY_API_KEY / DEEPSEEK_API_KEY)."
         return
     api_key, base_url, model = resolved
 
@@ -1167,10 +1183,13 @@ async def copilot_ai_query_stream_with_tools(
     ]
 
     MAX_ITERATIONS = 20  # bumpé 12→20 (audit QA 2026-05-01: 8% des Q complexes hit le plafond avec 12)
+    # Timeout Ollama plus large : qwen2.5:7b en local CPU prend 5-30s par tour
+    # (cold start ~30s, warm ~3-10s). Pour DeepSeek API distant : 60s suffit.
+    llm_timeout = 180.0 if OLLAMA_BASE_URL else 60.0
     tool_results_collected: list[dict] = []  # checkpoint : retient les tools réussis pour fallback en synthèse
     for iteration in range(MAX_ITERATIONS):
         try:
-            async with httpx.AsyncClient(timeout=60) as client:
+            async with httpx.AsyncClient(timeout=llm_timeout) as client:
                 resp = await client.post(
                     base_url,
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -1271,7 +1290,7 @@ async def copilot_ai_query_stream_with_tools(
                     "aucun nouvel outil. Sois concret avec les chiffres disponibles."
                 ),
             })
-            async with httpx.AsyncClient(timeout=60) as client:
+            async with httpx.AsyncClient(timeout=llm_timeout) as client:
                 resp = await client.post(
                     base_url,
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
