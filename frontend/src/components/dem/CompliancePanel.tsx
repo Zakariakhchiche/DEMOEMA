@@ -22,6 +22,19 @@ export interface CompanyCompliance {
   plan_redressement?: { count: number; entries: Record<string, unknown>[] };
   late_filing?: boolean;
   dirigeant_senior?: boolean;
+  trends?: {
+    n_exercices: number;
+    ca_trend_3y: "growing" | "flat" | "declining" | "unknown";
+    resultat_trend_3y: "growing" | "flat" | "declining" | "unknown";
+    effectif_trend_3y: "growing" | "flat" | "declining" | "unknown";
+    marge_negative_recurrente: boolean;
+  };
+  cession_signal?: {
+    active_24m: boolean;
+    count: number;
+    entries: Record<string, unknown>[];
+  };
+  network_red_flags?: { count: number; entries: Record<string, unknown>[] };
   disclaimer?: string;
 }
 
@@ -283,7 +296,78 @@ export function CompanyCompliancePanel({ data }: { data: CompanyCompliance | nul
         {data.dirigeant_senior && (
           <Badge severity="yellow" label="Dirigeant senior 65+" detail="probabilité transmission élevée" />
         )}
+        {data.trends && data.trends.ca_trend_3y === "declining" && (
+          <Badge severity="orange" label="CA déclinant 3 ans" detail="tendance baissière" />
+        )}
+        {data.trends && data.trends.effectif_trend_3y === "declining" && (
+          <Badge severity="orange" label="Effectif en chute" detail="3 derniers exercices" />
+        )}
+        {data.trends && data.trends.marge_negative_recurrente && (
+          <Badge severity="red" label="Pertes récurrentes" detail="résultat net négatif 3 ans" />
+        )}
+        {data.trends && data.trends.ca_trend_3y === "growing"
+          && data.trends.resultat_trend_3y !== "declining" && (
+          <Badge severity="green" label="Trajectoire croissante" detail="CA en hausse 3 ans" />
+        )}
+        {data.cession_signal && data.cession_signal.active_24m && (
+          <Badge
+            severity="yellow"
+            label={`Cession 24m : ${data.cession_signal.count}`}
+            detail="opportunité M&A — vente détectée BODACC"
+          />
+        )}
+        {data.network_red_flags && data.network_red_flags.count > 0 && (
+          <Badge
+            severity="orange"
+            label={`Réseau red flags : ${data.network_red_flags.count}`}
+            detail="dirigeants associés en procédure ailleurs"
+          />
+        )}
       </div>
+
+      {data.network_red_flags && data.network_red_flags.entries.length > 0 && (
+        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ fontSize: 11, color: "var(--text-tertiary)", fontWeight: 600 }}>
+            Dirigeants en procédure ailleurs (1-hop)
+          </div>
+          {data.network_red_flags.entries.slice(0, 5).map((e, k) => (
+            <div
+              key={k}
+              style={{
+                padding: 8,
+                background: "rgba(251,146,60,0.05)",
+                border: "1px solid rgba(251,146,60,0.20)",
+                borderRadius: 6,
+              }}
+            >
+              <div style={{ fontWeight: 600 }}>
+                {String(e.prenom ?? "")} {String(e.nom ?? "")}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+                via SIREN {String(e.toxic_siren ?? "—")} ·{" "}
+                {String(e.toxic_denom ?? "—")} · {String(e.reason ?? "—").slice(0, 80)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {data.cession_signal && data.cession_signal.entries.length > 0 && (
+        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ fontSize: 11, color: "var(--text-tertiary)", fontWeight: 600 }}>
+            Cessions BODACC (24m)
+          </div>
+          {data.cession_signal.entries.slice(0, 5).map((e, k) => (
+            <div key={k} style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+              <span className="dem-mono" style={{ color: "var(--text-tertiary)" }}>
+                {dateOnly(e.date_parution)}
+              </span>{" "}
+              <span style={{ color: "var(--text-tertiary)" }}>· {String(e.type ?? "—")}</span>{" "}
+              <span>{String(e.detail ?? e.ville ?? "—").slice(0, 110)}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {sanc && sanc.entries.length > 0 && (
         <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>

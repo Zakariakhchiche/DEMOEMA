@@ -1454,6 +1454,45 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
         siren,
     ), default=[], timeout_s=3.0)
 
+    # Iter 2 — Signal cession imminente : BODACC "Ventes et cessions" 24m.
+    # Tag opportunité M&A : la boîte est en cours de vendre son fonds.
+    cession_entries = await _safe(pool.fetch(
+        """SELECT date_parution,
+                  typeavis_lib AS type,
+                  jugement_details->>'complementJugement' AS detail,
+                  ville
+           FROM silver.bodacc_annonces
+           WHERE siren = $1
+             AND familleavis_lib = 'Ventes et cessions'
+             AND date_parution >= (current_date - interval '24 months')
+           ORDER BY date_parution DESC NULLS LAST
+           LIMIT 5""",
+        siren,
+    ), default=[], timeout_s=3.0)
+
+    # Iter 2 — Réseau red flags : dirigeants de cette société qui sont aussi
+    # en mandat sur une AUTRE société en procédure collective active.
+    # Signal "fréquentation suspecte" — le dirigeant traîne d'autres dossiers
+    # défaillants. Coût modéré : passage par sirens_mandats puis lookup gold.
+    network_red_flags = await _safe(pool.fetch(
+        """WITH our_dirig AS (
+              SELECT DISTINCT d.nom, d.prenom, d.date_naissance, d.sirens_mandats
+              FROM silver.inpi_dirigeants d
+              WHERE $1::char(9) = ANY(d.sirens_mandats)
+            )
+            SELECT od.nom, od.prenom,
+                   em.siren AS toxic_siren,
+                   em.denomination AS toxic_denom,
+                   em.last_procedure_nature AS reason
+            FROM our_dirig od
+            JOIN gold.entreprises_master em ON em.siren = ANY(od.sirens_mandats)
+            WHERE em.has_procedure_collective_active = TRUE
+              AND em.siren <> $1
+            ORDER BY em.last_procedure_date DESC NULLS LAST
+            LIMIT 10""",
+        siren,
+    ), default=[], timeout_s=6.0)
+
     plan_entries = await _safe(pool.fetch(
         """SELECT date_parution, jugement_details->>'nature' AS nature,
                   jugement_details->>'complementJugement' AS detail
@@ -1474,6 +1513,54 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
     proc_active = fiche_dict.get("has_procedure_collective_active") is True
     conciliation_active = len(conciliation_entries) > 0
     plan_active = len(plan_entries) > 0
+    cession_24m = len(cession_entries) > 0
+
+    # Iter 2 — Trends 3y sur CA, effectif, marge depuis silver.inpi_comptes.
+    # On lit les 3 derniers exercices avec leurs métriques pour classer en
+    # growing/flat/declining. Indicateur "tendance" devant inquiéter ou
+    # rassurer indépendamment des signaux ponctuels.
+    trends_rows = await _safe(pool.fetch(
+        """SELECT DISTINCT ON (date_cloture)
+                  date_cloture,
+                  ca_net::float8 AS ca,
+                  resultat_net::float8 AS rn,
+                  effectif_moyen::int AS eff
+           FROM silver.inpi_comptes
+           WHERE siren = $1
+           ORDER BY date_cloture DESC
+           LIMIT 3""",
+        siren,
+    ), default=[], timeout_s=3.0)
+
+    def _trend(values: list[float | None]) -> str:
+        clean = [v for v in values if v is not None]
+        if len(clean) < 2:
+            return "unknown"
+        # values sont les 3 plus récents : [N, N-1, N-2]. On veut tendance
+        # chrono => inverser. Si N > N-1 > N-2 → growing. Etc.
+        chrono = list(reversed(clean))
+        delta = chrono[-1] - chrono[0]
+        base = max(abs(chrono[0]), 1e-9)
+        pct = delta / base
+        if pct > 0.05:
+            return "growing"
+        if pct < -0.05:
+            return "declining"
+        return "flat"
+
+    ca_trend = _trend([r.get("ca") for r in trends_rows])
+    rn_trend = _trend([r.get("rn") for r in trends_rows])
+    eff_trend = _trend([r.get("eff") for r in trends_rows])
+    n_exercices = len(trends_rows)
+
+    # Marge négative récurrente (3 exercices) = signal très négatif
+    marge_negative_recurrente = (
+        n_exercices >= 3
+        and all(
+            r.get("rn") is not None and r.get("rn") < 0
+            for r in trends_rows
+        )
+    )
 
     # Score risque compliance composite 0-100 (100 = clean, 0 = critique).
     # Pondération calibrée pour M&A : procédure collective = quasi deal-killer.
@@ -1492,6 +1579,15 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
         risk_penalty += 15
     if plan_active and not proc_active:
         risk_penalty += 10
+    # Iter 2 — pénalités tendances + network red flags
+    if ca_trend == "declining":
+        risk_penalty += 10
+    if eff_trend == "declining":
+        risk_penalty += 5
+    if marge_negative_recurrente:
+        risk_penalty += 15
+    if len(network_red_flags) > 0:
+        risk_penalty += min(15, 3 * len(network_red_flags))
     risk_score = max(0, min(100, 100 - risk_penalty))
     if risk_score >= 80:
         risk_level = "low"
@@ -1532,6 +1628,23 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
         },
         "late_filing": has_late_filing,
         "dirigeant_senior": has_dirigeant_senior,
+        # Iter 2
+        "trends": {
+            "n_exercices": n_exercices,
+            "ca_trend_3y": ca_trend,
+            "resultat_trend_3y": rn_trend,
+            "effectif_trend_3y": eff_trend,
+            "marge_negative_recurrente": marge_negative_recurrente,
+        },
+        "cession_signal": {
+            "active_24m": cession_24m,
+            "count": len(cession_entries),
+            "entries": [_serialize(c) for c in cession_entries],
+        },
+        "network_red_flags": {
+            "count": len(network_red_flags),
+            "entries": [_serialize(n) for n in network_red_flags],
+        },
         "disclaimer": (
             "Signaux issus de sources publiques (BODACC, OpenSanctions, "
             "juridictions). Ne valent pas attestation officielle URSSAF / DGFiP."
