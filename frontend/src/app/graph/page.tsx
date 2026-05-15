@@ -44,6 +44,9 @@ interface GraphNode {
   node_size?: number;
   x?: number;
   y?: number;
+  has_procedure_collective_active?: boolean;
+  has_mandat_en_procedure?: boolean;
+  has_late_filing?: boolean;
 }
 
 type FilterType = "all" | "internal" | "target" | "advisor" | "subsidiary";

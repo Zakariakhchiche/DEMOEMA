@@ -10,10 +10,22 @@ interface GraphNode {
   role: string;
   color: string;
   company?: string;
-  score?: number;
+  score?: number | null;
   signals_count?: number;
   signals?: string[];
   is_holding?: boolean;
+  age?: number;
+  age_signal?: boolean;
+  multi_mandats?: boolean;
+  sector?: string;
+  city?: string;
+  siren?: string;
+  ca?: string;
+  ebitda?: string;
+  priority?: string;
+  has_procedure_collective_active?: boolean;
+  has_mandat_en_procedure?: boolean;
+  has_late_filing?: boolean;
 }
 
 interface NodeDetailSheetProps {

@@ -10,10 +10,27 @@ interface GraphNode {
   role: string;
   color: string;
   company?: string;
-  score?: number;
+  // Aligned with useGraph + graph/page.tsx (number | null) for cross-component
+  // assignability. Two unrelated types caused TS2769 in page.tsx.
+  score?: number | null;
   signals_count?: number;
   signals?: string[];
   is_holding?: boolean;
+  age?: number;
+  age_signal?: boolean;
+  multi_mandats?: boolean;
+  sector?: string;
+  city?: string;
+  siren?: string;
+  ca?: string;
+  ebitda?: string;
+  priority?: string;
+  // Compliance flags propagés depuis gold.entreprises_master (PR #194+)
+  // Active la coloration rouge sur les nodes en RJ/LJ/sauvegarde et
+  // les Persons dont une société dirigée est en procédure (via Neo4j).
+  has_procedure_collective_active?: boolean;
+  has_mandat_en_procedure?: boolean;
+  has_late_filing?: boolean;
 }
 
 interface GraphLink {
@@ -89,34 +106,67 @@ export default function GraphCanvas({
         const isHighlighted = highlightNodeId === n.id;
         const isSubsidiary = n.type === "subsidiary";
         const baseSize = isSubsidiary ? 20 : 32;
+        // Compliance highlight : procédure collective → fill rouge fort +
+        // outline rouge même non-highlight. Person avec mandat en procédure
+        // → outline orange. Priorité visuelle au-dessus du dim/highlight.
+        const procActive = n.has_procedure_collective_active === true;
+        const personRisk = n.has_mandat_en_procedure === true;
+        const effectiveFill = procActive ? "#ef4444" : n.color;
+        const complianceBadges = [];
+        if (n.signals_count && n.signals_count > 0) {
+          complianceBadges.push({
+            text: String(n.signals_count),
+            position: "right-top" as const,
+            fill: "#ef4444",
+            fontSize: 8,
+            fontWeight: "bold" as const,
+            textFill: "#fff",
+            padding: [1, 4, 1, 4] as [number, number, number, number],
+          });
+        }
+        if (procActive) {
+          complianceBadges.push({
+            text: "RJ",
+            position: "left-top" as const,
+            fill: "#ef4444",
+            fontSize: 8,
+            fontWeight: "bold" as const,
+            textFill: "#fff",
+            padding: [1, 4, 1, 4] as [number, number, number, number],
+          });
+        } else if (personRisk) {
+          complianceBadges.push({
+            text: "⚠",
+            position: "left-top" as const,
+            fill: "#f97316",
+            fontSize: 9,
+            fontWeight: "bold" as const,
+            textFill: "#fff",
+            padding: [1, 4, 1, 4] as [number, number, number, number],
+          });
+        }
 
         return {
           id: n.id,
           data: { ...n },
           style: {
             size: baseSize,
-            fill: isDimmed ? n.color + "20" : n.color,
-            stroke: isHighlighted ? n.color : n.color + "40",
-            lineWidth: isHighlighted ? 3 : n.is_holding ? 2 : 0,
+            fill: isDimmed ? effectiveFill + "20" : effectiveFill,
+            stroke: procActive
+              ? "#ef4444"
+              : personRisk
+                ? "#f97316"
+                : isHighlighted
+                  ? n.color
+                  : n.color + "40",
+            lineWidth: procActive || personRisk ? 3 : isHighlighted ? 3 : n.is_holding ? 2 : 0,
             opacity: isDimmed ? 0.2 : 1,
             labelText: n.name,
             labelFill: isDimmed ? "#ffffff30" : isSubsidiary ? "#ffffff80" : "#ffffffcc",
             labelFontSize: isSubsidiary ? 10 : 12,
             labelFontWeight: (isSubsidiary ? "normal" : "bold") as "normal" | "bold",
             labelOffsetY: baseSize / 2 + 10,
-            badges: n.signals_count && n.signals_count > 0
-              ? [
-                  {
-                    text: String(n.signals_count),
-                    position: "right-top" as const,
-                    fill: "#ef4444",
-                    fontSize: 8,
-                    fontWeight: "bold" as const,
-                    textFill: "#fff",
-                    padding: [1, 4, 1, 4] as [number, number, number, number],
-                  },
-                ]
-              : [],
+            badges: complianceBadges,
             cursor: "pointer" as const,
           },
         };

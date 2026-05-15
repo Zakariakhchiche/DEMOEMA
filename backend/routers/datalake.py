@@ -3389,7 +3389,9 @@ async def graph_for_siren(req: Request, siren: str, depth: int = Query(1, ge=1, 
         """SELECT siren, denomination,
                   COALESCE(em.code_ape, '') AS code_ape,
                   COALESCE(em.adresse_dept, '') AS dept,
-                  em.ca_latest, sm.deal_score_raw, sm.tier
+                  em.ca_latest, sm.deal_score_raw, sm.tier,
+                  COALESCE(em.has_procedure_collective_active, FALSE) AS proc_active,
+                  COALESCE(em.has_late_filing, FALSE) AS late_filing
            FROM gold.entreprises_master em
            LEFT JOIN gold.scoring_ma sm ON sm.siren = em.siren
            WHERE em.siren = $1::char(9)
@@ -3431,22 +3433,49 @@ async def graph_for_siren(req: Request, siren: str, depth: int = Query(1, ge=1, 
         if n.get("siren") and str(n.get("siren")).strip() != siren
     ][:30]
 
-    # Construction graphe
+    # Construction graphe — enrichis avec compliance flags pour coloration.
+    # Si has_procedure_collective_active=true, le node affiche le red ring
+    # côté GraphCanvas (NODE_COLORS["procedure"]).
+    proc_active_center = bool(center_row.get("proc_active"))
+    late_filing_center = bool(center_row.get("late_filing"))
     center_id = f"target-{siren}"
     nodes = [
         {
             "id": center_id,
-            "name": center_row.get("denomination") or siren,
+            "name": (center_row.get("denomination") or "").strip() or f"SIREN {siren}",
             "type": "target",
             "role": "Cible",
-            "color": "#a78bfa",
+            "color": "#ef4444" if proc_active_center else "#a78bfa",
             "siren": siren,
             "score": center_row.get("deal_score_raw"),
             "priority": center_row.get("tier"),
             "sector": center_row.get("code_ape") or None,
             "city": center_row.get("dept") or None,
+            "has_procedure_collective_active": proc_active_center,
+            "has_late_filing": late_filing_center,
         }
     ]
+
+    # Enrichis les co-mandats avec procedure_collective_active si présent dans gold
+    sib_sirens = [r["siren"] for r in network_rows if r.get("siren")]
+    sib_compliance: dict[str, dict] = {}
+    if sib_sirens:
+        rows_compliance = await _safe(pool.fetch(
+            """SELECT siren,
+                      COALESCE(has_procedure_collective_active, FALSE) AS proc_active,
+                      COALESCE(has_late_filing, FALSE) AS late_filing
+               FROM gold.entreprises_master
+               WHERE siren = ANY($1::char(9)[])""",
+            sib_sirens,
+        ), default=[], timeout_s=3.0)
+        sib_compliance = {
+            str(r["siren"]).strip(): {
+                "proc_active": bool(r["proc_active"]),
+                "late_filing": bool(r["late_filing"]),
+            }
+            for r in rows_compliance
+        }
+
     links = []
     seen = {center_id}
     for r in network_rows:
@@ -3454,13 +3483,17 @@ async def graph_for_siren(req: Request, siren: str, depth: int = Query(1, ge=1, 
         if sib_id in seen:
             continue
         seen.add(sib_id)
+        sib_proc = sib_compliance.get(str(r['siren']).strip(), {}).get("proc_active", False)
+        sib_late = sib_compliance.get(str(r['siren']).strip(), {}).get("late_filing", False)
         nodes.append({
             "id": sib_id,
-            "name": r.get("denomination") or str(r.get("siren") or "?"),
+            "name": (r.get("denomination") or "").strip() or f"SIREN {r.get('siren') or '?'}",
             "type": "company",
             "role": "Co-mandat",
-            "color": "#60a5fa",
+            "color": "#ef4444" if sib_proc else "#60a5fa",
             "siren": str(r.get("siren") or ""),
+            "has_procedure_collective_active": sib_proc,
+            "has_late_filing": sib_late,
         })
         links.append({
             "source": center_id,
@@ -3499,11 +3532,14 @@ async def graph_global(req: Request, limit: int = Query(50, ge=10, le=200)):
         return {"data": {"nodes": [], "links": []}, "notice": "gold.cibles_ma_top pas matérialisée"}
 
     rows = await _safe(pool.fetch(
-        """SELECT siren, denomination, code_ape, adresse_dept,
-                  ca_latest, deal_score_raw, tier
-           FROM gold.cibles_ma_top
-           WHERE tier IN ('A_HOT', 'B_WARM')
-           ORDER BY deal_score_raw DESC NULLS LAST
+        """SELECT c.siren, c.denomination, c.code_ape, c.adresse_dept,
+                  c.ca_latest, c.deal_score_raw, c.tier,
+                  COALESCE(em.has_procedure_collective_active, FALSE) AS proc_active,
+                  COALESCE(em.has_late_filing, FALSE) AS late_filing
+           FROM gold.cibles_ma_top c
+           LEFT JOIN gold.entreprises_master em ON em.siren = c.siren
+           WHERE c.tier IN ('A_HOT', 'B_WARM')
+           ORDER BY c.deal_score_raw DESC NULLS LAST
            LIMIT $1""",
         limit,
     ), default=[])
@@ -3511,15 +3547,21 @@ async def graph_global(req: Request, limit: int = Query(50, ge=10, le=200)):
     nodes = [
         {
             "id": f"target-{r['siren']}",
-            "name": r.get("denomination") or str(r['siren']),
+            "name": (r.get("denomination") or "").strip() or f"SIREN {r['siren']}",
             "type": "target",
             "role": "Cible top M&A",
-            "color": "#a78bfa" if r.get("tier") == "A_HOT" else "#60a5fa",
+            "color": (
+                "#ef4444" if r.get("proc_active")
+                else "#a78bfa" if r.get("tier") == "A_HOT"
+                else "#60a5fa"
+            ),
             "siren": str(r['siren']),
             "score": r.get("deal_score_raw"),
             "priority": r.get("tier"),
             "sector": r.get("code_ape"),
             "city": r.get("adresse_dept"),
+            "has_procedure_collective_active": bool(r.get("proc_active")),
+            "has_late_filing": bool(r.get("late_filing")),
         }
         for r in rows
     ]
