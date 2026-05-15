@@ -6,6 +6,7 @@ import { ScoreBadge } from "./ScoreBadge";
 import { ScoreAxes, TierBadge } from "./ScoreAxes";
 import { DirigeantDrillContent } from "./DirigeantDrillContent";
 import { CompanyCompliancePanel, type CompanyCompliance } from "./CompliancePanel";
+import { GroupTab } from "./GroupTab";
 import { datalakeApi } from "@/lib/api";
 import { formatSiren } from "@/lib/dem/format";
 import type { Target } from "@/lib/dem/types";
@@ -21,6 +22,7 @@ const TABS = [
   { k: "dirigeants", label: "Dirigeants", icon: "user" },
   { k: "signaux", label: "Signaux BODACC", icon: "sparkles" },
   { k: "compliance", label: "Compliance", icon: "shield" },
+  { k: "groupe", label: "Groupe", icon: "building" },
   { k: "reseau", label: "Réseau", icon: "network" },
   { k: "presse", label: "Presse", icon: "book" },
 ] as const;
@@ -1386,6 +1388,10 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
                   </div>
                 )}
               </div>
+            )}
+
+            {tab === "groupe" && !loading && target.siren && (
+              <GroupTab siren={target.siren} />
             )}
 
             {tab === "reseau" && !loading && (

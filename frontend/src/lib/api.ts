@@ -155,6 +155,24 @@ export const datalakeApi = {
       };
     }>(`/api/datalake/fiche/${siren}`),
 
+  /** Groupe (parents + filiales) — silver.entreprises_relationships agrège
+   * INPI personnes morales + GLEIF. Plus large que /groupe-filiation. */
+  groupe: (siren: string) =>
+    jget<{
+      siren: string;
+      is_holding: boolean;
+      is_filiale: boolean;
+      n_filiales_directes: number;
+      n_filiales_en_procedure: number;
+      ca_cumule_filiales_eur: number | null;
+      n_parents_directs: number;
+      n_parents_etrangers: number;
+      parents_directs: Record<string, unknown>[];
+      ultimate_parents: Record<string, unknown>[];
+      filiales: Record<string, unknown>[];
+      disclaimer?: string;
+    }>(`/api/datalake/groupe/${siren}`),
+
   /** Fiche complète dirigeant : INPI identité + SCI patrimoine + OSINT + sanctions + DVF.
    * Backend route /dirigeant/{nom}/{prenom}[/{date_naissance}]. */
   dirigeantFull: (nom: string, prenom: string, dateNaissance?: string) => {
