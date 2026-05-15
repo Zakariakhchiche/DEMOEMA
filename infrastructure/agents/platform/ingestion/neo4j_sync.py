@@ -114,6 +114,49 @@ MERGE (p)-[r:IS_DIRIGEANT]->(c)
 SET r.role = row.role, r.actif = row.actif, r.individu_role = row.individu_role
 """
 
+# Compliance enrichment — sync gold.entreprises_master compliance flags
+# into Company nodes, then propagate to Person via aggregate.
+# Permet de filtrer le graphe par compliance (ex: "show all Companies in RJ
+# in the 75 dept"). Cron quotidien après le rebuild.
+COMPLIANCE_COMPANY_QUERY = """
+SELECT siren,
+       has_procedure_collective_active,
+       to_char(last_procedure_date, 'YYYY-MM-DD') AS last_procedure_date,
+       last_procedure_nature,
+       COALESCE(has_late_filing, FALSE) AS has_late_filing,
+       COALESCE(has_dirigeant_senior, FALSE) AS has_dirigeant_senior,
+       COALESCE(has_pro_ma, FALSE) AS has_pro_ma,
+       COALESCE(pro_ma_score, 0) AS pro_ma_score
+FROM gold.entreprises_master
+WHERE has_procedure_collective_active IS NOT NULL
+   OR has_late_filing IS NOT NULL
+   OR has_dirigeant_senior IS NOT NULL
+"""
+
+MERGE_COMPANY_COMPLIANCE = """
+UNWIND $rows AS row
+MATCH (c:Company {siren: row.siren})
+SET c.has_procedure_collective_active = row.has_procedure_collective_active,
+    c.last_procedure_date = row.last_procedure_date,
+    c.last_procedure_nature = row.last_procedure_nature,
+    c.has_late_filing = row.has_late_filing,
+    c.has_dirigeant_senior = row.has_dirigeant_senior,
+    c.has_pro_ma = row.has_pro_ma,
+    c.pro_ma_score = row.pro_ma_score
+"""
+
+# Propagation Company → Person : pour chaque Person, compter ses companies
+# en procédure active. has_mandat_en_procedure = true si ≥1, n_… = total.
+# Calcul en Cypher pur via Person → IS_DIRIGEANT → Company.
+PROPAGATE_PERSON_COMPLIANCE = """
+MATCH (p:Person)-[:IS_DIRIGEANT]->(c:Company)
+WITH p, count(c) AS n_mandats,
+     sum(CASE WHEN c.has_procedure_collective_active = TRUE THEN 1 ELSE 0 END) AS n_proc
+SET p.has_mandat_en_procedure = (n_proc > 0),
+    p.n_mandats_en_procedure = n_proc,
+    p.n_mandats = n_mandats
+"""
+
 
 async def run_neo4j_rebuild() -> dict:
     """Scheduled job: rebuild Neo4j graph from current Postgres state."""
@@ -194,18 +237,67 @@ async def run_neo4j_rebuild() -> dict:
         if n_orphans > 0:
             log.info("[neo4j_sync] cleanup: deleted %d orphan Person nodes", n_orphans)
 
+    # Enrichment compliance — sync gold.entreprises_master flags vers Neo4j.
+    # Permet de filtrer le graphe par compliance (recherche graphique). Le coût
+    # est marginal : SELECT puis MERGE en batch sur les sirens déjà en graphe.
+    n_compliance_companies = 0
+    n_compliance_persons = 0
+    try:
+        with psycopg.connect(settings.database_url) as conn, conn.cursor() as cur:
+            cur.execute(COMPLIANCE_COMPANY_QUERY)
+            comp_rows = cur.fetchall()
+            params = [
+                {
+                    "siren": r[0],
+                    "has_procedure_collective_active": bool(r[1]) if r[1] is not None else None,
+                    "last_procedure_date": r[2],
+                    "last_procedure_nature": r[3],
+                    "has_late_filing": bool(r[4]),
+                    "has_dirigeant_senior": bool(r[5]),
+                    "has_pro_ma": bool(r[6]),
+                    "pro_ma_score": int(r[7] or 0),
+                }
+                for r in comp_rows
+            ]
+            with driver.session() as s:
+                for i in range(0, len(params), BATCH):
+                    s.run(MERGE_COMPANY_COMPLIANCE, rows=params[i:i + BATCH])
+                    n_compliance_companies += min(BATCH, len(params) - i)
+                # Propagation Company → Person en une seule passe Cypher.
+                p_result = s.run(PROPAGATE_PERSON_COMPLIANCE).consume()
+                n_compliance_persons = p_result.counters.properties_set
+        log.info(
+            "[neo4j_sync] compliance enrichment: %d companies, %d person props set",
+            n_compliance_companies, n_compliance_persons,
+        )
+    except Exception as e:
+        log.warning("[neo4j_sync] compliance enrichment failed: %s", e)
+
+    with driver.session() as s:
         cnt_c = s.run("MATCH (c:Company) RETURN count(c) AS n").single()["n"]
         cnt_p = s.run("MATCH (p:Person) RETURN count(p) AS n").single()["n"]
         cnt_e = s.run("MATCH ()-[r:IS_DIRIGEANT]->() RETURN count(r) AS n").single()["n"]
+        cnt_proc = s.run(
+            "MATCH (c:Company) WHERE c.has_procedure_collective_active = TRUE "
+            "RETURN count(c) AS n"
+        ).single()["n"]
+        cnt_p_risk = s.run(
+            "MATCH (p:Person) WHERE p.has_mandat_en_procedure = TRUE "
+            "RETURN count(p) AS n"
+        ).single()["n"]
     driver.close()
 
     result = {
         "companies_loaded": n_companies,
         "persons_loaded": n_persons,
         "orphans_deleted": n_orphans,
+        "compliance_companies": n_compliance_companies,
+        "compliance_persons_props": n_compliance_persons,
         "graph_companies": cnt_c,
         "graph_persons": cnt_p,
         "graph_edges": cnt_e,
+        "graph_companies_in_procedure": cnt_proc,
+        "graph_persons_with_mandat_in_procedure": cnt_p_risk,
         "duration_s": round(time.time() - t0, 1),
     }
     log.info("[neo4j_sync] %s", result)
