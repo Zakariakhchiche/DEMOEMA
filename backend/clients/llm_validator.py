@@ -91,8 +91,17 @@ def _collect_numbers_from_tool_results(tool_results: list[dict]) -> set[float]:
                 walk(v)
 
     for tr in tool_results:
-        # result_preview est tronqué à 500 chars mais reste le plus pertinent
-        walk(tr.get("result_preview") or tr)
+        # Walk en priorité le `result` (dict complet, source de vérité).
+        # Fallback sur `result_preview` (string tronquée 500 chars) si pas
+        # de result — cas anciennes versions ou tool failures.
+        # Inclut TOUJOURS les args (siren, nom, prenom…) car ils contiennent
+        # souvent l'identifiant business mentionné dans la réponse LLM.
+        if tr.get("result") is not None:
+            walk(tr["result"])
+        elif tr.get("result_preview"):
+            walk(tr["result_preview"])
+        if tr.get("args"):
+            walk(tr["args"])
     return haystack
 
 
