@@ -1,8 +1,49 @@
 # DEMOEMA — Playbooks QA & Capitalisation
 
+<!-- DOCTRINE_HEADER_START — single source of truth pour skill + subagent + CI sync check -->
+```yaml
+doctrine_version: "1.0.0"
+last_updated: "2026-05-02"
+modes:
+  - copilot
+  - security
+  - nav
+  - datalake
+  - clickables
+  - browser
+  - backend
+  - minutieux
+  - full
+  - complet
+  - l4
+  - regression
+  - smoke-deep
+  - l4-step1
+  - l4-step2
+  - l4-step3
+  - l4-step4
+  - l4-step5
+  - l4-step6
+  - l4-final
+playbooks: [A, B, C, D, E]
+axes_count: 14
+dimensions_qcs: 15
+dimensions_complementaires: 11
+levels: [L1, L2, L3, L4, L5]
+qcs_thresholds:
+  L2: 55
+  L3: 80
+  L4: 90
+  L5: 95
+adoption_plan_weeks: 12
+adoption_sprints: 6
+```
+<!-- DOCTRINE_HEADER_END -->
+
 > Document de capitalisation des expériences QA DEMOEMA (audits, security red-team, browser tests).
 > Source-of-truth pour les futurs audits — toujours référencer avant de relancer un cycle.
 > Créé : 2026-05-02 · Maintenu par : qa-engineer subagent (`.claude/agents/qa-engineer.md`)
+> **Sync check** : `python scripts/check_doctrine_sync.py` doit passer avant chaque PR touchant ce fichier OU `.claude/skills/qa-audit/` OU `.claude/agents/qa-engineer.md`.
 
 ---
 

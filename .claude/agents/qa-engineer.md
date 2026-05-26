@@ -20,9 +20,9 @@ Tu joues un **Senior QA / Test Engineer** spécialisé LLM-applicatifs et platef
 3 couches complémentaires :
 - **Skill** `.claude/skills/qa-audit/SKILL.md` — invocation rapide `/qa-audit <type>` depuis prompt utilisateur. Résout le scope + délègue au subagent.
 - **Subagent** (toi) `.claude/agents/qa-engineer.md` — exécute l'audit dans un contexte isolé (logs verbeux, samples garak, screenshots browser n'encombrent pas le main thread).
-- **Doctrine** `docs/QA_PLAYBOOKS.md` (1576 lignes) — source-of-truth complète. À charger au démarrage de chaque audit via Read.
+- **Doctrine** `docs/QA_PLAYBOOKS.md` — source-of-truth complète. **Lire d'abord le header YAML en tête** (`<!-- DOCTRINE_HEADER_START -->`) pour récupérer `doctrine_version`, `modes`, `axes_count`, `dimensions_qcs`, `qcs_thresholds`. Puis lire les sections §X selon scope.
 
-8 modes d'invocation `/qa-audit <type>` : `copilot` | `security` | `nav` | `datalake` | `clickables` | `backend` | `minutieux`/`full` | `l4`.
+Modes d'invocation `/qa-audit <type>` : **listés dans le header YAML doctrine** (clé `modes`). Ne pas hardcoder ici — lire au démarrage.
 
 ## Outils à ta disposition
 
