@@ -388,9 +388,36 @@ async def generate_silver_sql(
     if not spec:
         return {"error": f"Spec not found for {silver_name}"}
 
-    # Introspect bronze schemas
     if not settings.database_url:
         return {"error": "no database_url"}
+
+    # ────────────────────────────────────────────────────────────────────
+    # SQL ÉCRIT À LA MAIN (hand_authored) — miroir de gold_transforms/*.sql.
+    # Si le spec déclare `hand_authored: true`, on applique le fichier
+    # silver_transforms/{name}.sql VERSIONNÉ tel quel, sans appeler le LLM.
+    # Le SQL reste dans git (source de vérité), et le maintainer ne tentera une
+    # régénération LLM que si cet apply échoue (dérive de schéma amont) — auquel
+    # cas le bloc `transformations` du spec sert de point de départ au LLM.
+    # ────────────────────────────────────────────────────────────────────
+    if spec.get("hand_authored"):
+        sql_file = SILVER_TRANSFORMS_DIR / f"{silver_name.replace('silver.', '')}.sql"
+        if not sql_file.exists():
+            return {"error": f"hand_authored spec but SQL file missing: {sql_file}"}
+        raw_sql = sql_file.read_text(encoding="utf-8")
+        version_uid = _version_uid(silver_name, raw_sql)
+        _log_version(silver_name, spec, raw_sql, True, "hand_authored (silver_transforms)",
+                     version_uid, "none", None)
+        if not apply_immediately:
+            return {"silver_name": silver_name, "sql": raw_sql, "version_uid": version_uid,
+                    "valid": True, "validation_msg": "hand_authored", "applied": False,
+                    "retries": 0, "source": "hand_authored"}
+        applied = _apply_sql(silver_name, raw_sql, version_uid)
+        return {"silver_name": silver_name, "sql": raw_sql, "version_uid": version_uid,
+                "valid": True, "validation_msg": "hand_authored",
+                "applied": applied["applied"], "error": applied.get("error"),
+                "retries": 0, "source": "hand_authored"}
+
+    # Introspect bronze schemas
     with psycopg.connect(settings.database_url) as conn:
         schemas = introspect_schema(conn, spec.get("source_tables", []))
     missing = [t for t, cols in schemas.items() if not cols]

@@ -1,0 +1,79 @@
+silver_name: silver.icij_offshore_match
+
+# SQL écrit à la main et versionné dans silver_transforms/icij_offshore_match.sql.
+# Le moteur applique ce fichier tel quel (pas de génération LLM au build). Le
+# maintainer ne déclenche une régénération LLM que si l'apply/refresh échoue
+# (dérive de schéma amont) — le bloc `transformations` ci-dessous sert alors de
+# point de départ correct au LLM.
+hand_authored: true
+
+goal: >
+  🔑 DUE DILIGENCE ANTI-BLANCHIMENT — match dirigeants FR ↔ entités offshore
+  ICIJ (Panama, Pandora, Paradise, Bahamas, Offshore Leaks). Red flag majeur en
+  M&A : présence d'un dirigeant dans les leaks fiscaux internationaux.
+
+source_tables:
+  - bronze.icij_offshore_raw
+  - silver.inpi_dirigeants
+
+grain: "1 row par (person_uid × entité ICIJ)"
+
+key_columns:
+  - match_uid
+  - person_uid
+  - icij_entity_id
+  - icij_database
+  - match_confidence
+
+columns_exposed:
+  - match_uid          # md5(icij_entity_id|person_uid)
+  - person_uid         # md5(nom|prenom|date_naissance) — MÊME formule que gold.dirigeants_master
+  - nom
+  - prenom
+  - date_naissance
+  - sirens_mandats     # bpchar[] — permet de remonter person → siren (compliance)
+  - icij_entity_id
+  - icij_entity_name
+  - icij_database      # panama / paradise / pandora / bahamas / offshore (source_leak normalisé)
+  - jurisdiction       # pays de l'entité offshore (country)
+  - role
+  - match_confidence   # 'HIGH' (nom long, rare) | 'MEDIUM' (homonyme possible)
+  - materialized_at
+
+business_logic: |
+  silver.inpi_dirigeants N'A PAS de colonne person_uid → on la CALCULE :
+    md5(coalesce(nom,'')||'|'||coalesce(prenom,'')||'|'||coalesce(date_naissance,''))
+  (identique à gold.dirigeants_master pour rester joignable).
+
+  MATCHING (équi-jointure, JAMAIS d'ILIKE '%...%') :
+  - clé de nom normalisée = regexp_replace(lower(unaccent(name)), '\s+', ' ', 'g')
+  - côté dirigeant : 2 variantes d'ordre ("prenom nom" et "nom prenom") via
+    CROSS JOIN LATERAL VALUES → JOIN par ÉGALITÉ sur la clé (hash join borné).
+  - filtres anti-bruit : nom ICIJ >= 6 car. avec espace (nom complet),
+    nom dirigeant >= 4 car.
+
+  match_confidence :
+  - 'HIGH'   : longueur nom dirigeant >= 6 (nom rare, faible risque homonyme)
+  - 'MEDIUM' : sinon (homonyme possible — à valider en DD via date naissance/adresse)
+  PAS de niveau 'LOW' fuzzy : c'était le bruit + la bombe perf de l'ancienne version.
+
+  ⚠️ Un match nom ne prouve pas l'identité. Pour la DD, corroborer via date de
+  naissance, nationalité, adresse (champs du payload ICIJ brut).
+
+transformations: |
+  Voir le fichier source-of-truth : silver_transforms/icij_offshore_match.sql
+  (CTE icij_persons → dirigeant_keys → matched, DISTINCT ON garde HIGH > MEDIUM).
+  Si régénération LLM nécessaire : conserver l'équi-jointure sur clé normalisée
+  (NE JAMAIS revenir à `officer_name ILIKE '%' || nom || '%'` — cartésien 1,5M×8M
+  qui a provoqué la désactivation initiale et des backends zombies).
+
+indexes:
+  - "match_uid UNIQUE"
+  - "person_uid"
+  - "match_confidence"
+  - "icij_database"
+  - "(nom, prenom)"
+  - "sirens_mandats USING gin"
+
+refresh_trigger: "interval_hours=168"
+sla_minutes: 10080
