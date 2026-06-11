@@ -1,4 +1,11 @@
 silver_name: silver.inpi_comptes
+
+# SQL écrit à la main et versionné dans silver_transforms/inpi_comptes.sql.
+# Appliqué tel quel (pas de LLM au build) ; le maintainer ne régénère que si
+# l'apply/refresh échoue. Corrige le bug d'extraction du passif (codes DL/DR/DU/EE
+# en m1 et non m3). Voir le commentaire en tête du .sql.
+hand_authored: true
+
 goal: >
   Vue flat des bilans INPI par dépôt : un row par dépôt avec les principales
   colonnes financières extraites des liasses (CA, résultat net, total bilan, capital, effectif).

@@ -1,4 +1,11 @@
 silver_name: silver.entreprises_signals
+
+# SQL écrit à la main et versionné dans silver_transforms/entreprises_signals.sql.
+# Le moteur applique ce fichier tel quel (pas de génération LLM au build) ; le
+# maintainer ne régénère via LLM que si l'apply/refresh échoue. Le bloc
+# business_logic ci-dessous reste la doc de référence pour cette éventualité.
+hand_authored: true
+
 goal: >
   🔑 FEATURE STORE POUR LE SCORING M&A. Un row par SIREN cible (SAS/SA/SCA avec
   capital >= 100k€), avec 20+ features numériques/booléens alimentant le scoring
