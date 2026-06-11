@@ -202,7 +202,7 @@ def _discover_agent_generated_sources() -> None:
             from ingestion.codegen import _build_trigger
             SOURCES[sid] = {
                 "fetcher": fetcher,
-                "trigger": _build_trigger(spec.get("refresh_trigger", "interval_hours=24")),
+                "trigger": _build_trigger(spec.get("refresh_trigger", "interval_hours=24"), stagger_key=sid),
                 "sla_minutes": spec.get("sla_minutes", 1440),
                 "description": spec.get("name", sid),
             }

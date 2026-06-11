@@ -8,7 +8,7 @@ description: 'Source #120 ARCHITECTURE_DATA_V2. Bronze ingestion raw — traité
 endpoint: https://syndication.lesechos.fr/rss/rss_une.xml
 auth: none
 pattern: rest_json_public
-refresh_trigger: interval_hours=1
+refresh_trigger: interval_hours=6
 sla_minutes: 120
 license: Public / Etalab 2.0 par défaut
 bronze_table: bronze.les_echos_raw

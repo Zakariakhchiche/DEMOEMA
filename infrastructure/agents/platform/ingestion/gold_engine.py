@@ -139,7 +139,10 @@ async def run_gold_refresh(gold_name: str, trigger_source: str = "scheduler") ->
         try:
             with psycopg.connect(settings.database_url) as conn:
                 with conn.cursor() as cur:
-                    cur.execute("SET statement_timeout = 0")
+                    # Bornes anti-zombie : échec rapide si verrou indisponible,
+                    # exécution bornée (cf. incident 2026-06-11 silver_engine).
+                    cur.execute("SET lock_timeout = '60s'")
+                    cur.execute("SET statement_timeout = '4h'")
                     if physical:
                         # Ré-exécute le SQL complet (CREATE TABLE IF NOT EXISTS
                         # + INDEXes IF NOT EXISTS sont idempotents, INSERT

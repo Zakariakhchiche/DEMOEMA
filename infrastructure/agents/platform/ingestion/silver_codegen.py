@@ -767,6 +767,31 @@ def _autofix_sql(sql: str) -> str:
     return sql
 
 
+def _terminate_stale_mv_attempts(conn, qualified: str, min_age: str = "2 hours") -> int:
+    """Tue les backends actifs depuis > min_age sur un CREATE/DROP/REFRESH de
+    cette même MV. Sans ça, une tentative précédente coincée sur un verrou
+    bloque indéfiniment la suivante et les tentatives s'empilent (incident
+    2026-06-11 : 70 backends zombies de 26-38 jours sur silver.dirigeants_360
+    et silver.dirigeant_sci_patrimoine)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT count(*) FILTER (WHERE pg_terminate_backend(pid))
+            FROM pg_stat_activity
+            WHERE state = 'active'
+              AND pid <> pg_backend_pid()
+              AND now() - query_start > %s::interval
+              AND query ILIKE '%%MATERIALIZED VIEW%%'
+              AND query ILIKE %s
+            """,
+            (min_age, f"%{qualified}%"),
+        )
+        n = cur.fetchone()[0] or 0
+    if n:
+        log.warning("[silver_codegen] %s : %d tentative(s) zombie terminée(s) avant apply", qualified, n)
+    return n
+
+
 def _apply_sql(silver_name: str, sql: str, version_uid: str) -> dict:
     """Execute the generated SQL atomically.
 
@@ -778,6 +803,10 @@ def _apply_sql(silver_name: str, sql: str, version_uid: str) -> dict:
     Pré-check informatif `pg_depend` : log les silvers downstream qui seront
     drop-cascadés par cette opération. Permet à l'opérateur de savoir quoi
     rebuild ensuite (via le bootstrap one-shot ou le maintainer).
+
+    Garde-fous verrous : lock_timeout court → si la MV est verrouillée par un
+    fetcher ou un refresh en cours, on échoue vite et le maintainer retentera
+    au tick suivant, au lieu d'empiler des backends en attente infinie.
     """
     if not settings.database_url:
         return {"applied": False, "error": "no database_url"}
@@ -785,6 +814,8 @@ def _apply_sql(silver_name: str, sql: str, version_uid: str) -> dict:
     qualified = silver_name if "." in silver_name else f"silver.{silver_name}"
     downstream: list[str] = []
     try:
+        with psycopg.connect(settings.database_url, autocommit=True) as admin_conn:
+            _terminate_stale_mv_attempts(admin_conn, qualified)
         with psycopg.connect(settings.database_url) as conn:
             downstream = _list_downstream_silvers(conn, qualified)
             if downstream:
@@ -794,7 +825,8 @@ def _apply_sql(silver_name: str, sql: str, version_uid: str) -> dict:
                     qualified, len(downstream), downstream,
                 )
             with conn.cursor() as cur:
-                cur.execute("SET statement_timeout = 0")
+                cur.execute("SET lock_timeout = '60s'")
+                cur.execute("SET statement_timeout = '4h'")
                 cur.execute(f"DROP MATERIALIZED VIEW IF EXISTS {qualified} CASCADE")
                 cur.execute(sql)
                 # Belt-and-suspenders : si le LLM a glissé un WITH NO DATA
