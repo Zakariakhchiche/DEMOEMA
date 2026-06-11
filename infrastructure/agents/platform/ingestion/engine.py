@@ -114,6 +114,12 @@ async def _audit_log(
                 if status == "success":
                     # Reset retry_count si on a remonté des lignes cette fois
                     new_status = "ok" if rows > 0 else "ok"  # base status (complet recalculé par completeness check)
+                    # Auto-unpark : une source parked dont le fetch schedulé
+                    # réussit ET qui a de la donnée (delta > 0 ou cumul > 0)
+                    # est manifestement saine — le parking venait d'un échec
+                    # regen LLM (ex: clé 401), pas de la source elle-même.
+                    # Incident 2026-06-11 : 80 sources parked dont opensanctions
+                    # (9.5M rows) alors que leurs fetchers tournaient sans erreur.
                     await cur.execute(
                         """
                         INSERT INTO audit.source_freshness
@@ -127,8 +133,27 @@ async def _audit_log(
                                                  THEN 0
                                                  ELSE audit.source_freshness.retry_count END,
                           status          = CASE
-                              WHEN audit.source_freshness.status IN ('parked','ok_empty') THEN audit.source_freshness.status
+                              WHEN audit.source_freshness.status = 'ok_empty' THEN 'ok_empty'
+                              WHEN audit.source_freshness.status = 'parked'
+                                   AND (EXCLUDED.rows_last_run > 0
+                                        OR audit.source_freshness.total_rows > 0)
+                                  THEN 'ok'
+                              WHEN audit.source_freshness.status = 'parked' THEN 'parked'
                               ELSE 'ok'
+                          END,
+                          parked_at       = CASE
+                              WHEN audit.source_freshness.status = 'parked'
+                                   AND (EXCLUDED.rows_last_run > 0
+                                        OR audit.source_freshness.total_rows > 0)
+                                  THEN NULL
+                              ELSE audit.source_freshness.parked_at
+                          END,
+                          parked_reason   = CASE
+                              WHEN audit.source_freshness.status = 'parked'
+                                   AND (EXCLUDED.rows_last_run > 0
+                                        OR audit.source_freshness.total_rows > 0)
+                                  THEN NULL
+                              ELSE audit.source_freshness.parked_reason
                           END
                         """,
                         (source_id, rows, rows, sla, new_status),
@@ -629,9 +654,25 @@ async def run_maintainer_check() -> dict:
             regen_results.append({"source": sid, "status": regen_status,
                                   "error": str(e), "prev_retry": retry_count})
 
+        # Échec d'infrastructure LLM (clé 401, réseau, provider down) : ce
+        # n'est PAS la faute de la source — ne pas incrémenter retry_count ni
+        # parker, sinon tout le catalogue finit parked dès que le LLM tombe
+        # (incident 2026-06-11 : 80 sources parked sur des 401 Ollama).
+        _err_blob = str(r)
+        llm_infra_fail = regen_status != "regen_success" and any(
+            pat in _err_blob for pat in (
+                "LLM call failed", "401 Unauthorized", "ConnectError",
+                "RemoteProtocolError", "no LLM provider",
+            )
+        )
         # Update source_freshness : incrémenter retry, parker si dépassement
-        new_retry = retry_count + 1
-        park = new_retry >= MAX_RETRY_COUNT and regen_status != "regen_success"
+        if llm_infra_fail:
+            log.warning("[Maintainer] %s : échec LLM infra (pas la source) — retry_count inchangé", sid)
+            new_retry = retry_count
+            park = False
+        else:
+            new_retry = retry_count + 1
+            park = new_retry >= MAX_RETRY_COUNT and regen_status != "regen_success"
         try:
             async with await _pg.AsyncConnection.connect(settings.database_url) as conn:
                 async with conn.cursor() as cur:
