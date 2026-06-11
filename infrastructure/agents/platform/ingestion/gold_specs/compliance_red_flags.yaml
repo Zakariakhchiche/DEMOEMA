@@ -13,6 +13,7 @@ source_tables:
   - silver.bodacc_annonces
   - silver.gels_avoirs
   - gold.entreprises_master
+  - silver.entreprises_signals   # drapeaux détresse financière (ratios)
 
 grain: "1 row par siren (consolidé multi-flag)"
 
@@ -41,6 +42,20 @@ business_logic: |
   - procedure_collective_active (CRITICAL)
   - gel_avoir_actif (CRITICAL)
   - dirigeant_sanctionne (HIGH si dirigeant a sanction)
+  # ─── Détresse financière (depuis silver.entreprises_signals, ratios) ───
+  - capitaux_propres_negatifs (HIGH)  <= es.has_negative_equity
+      # Capitaux propres < 0 : signal d'alerte solvabilité majeur en DD.
+  - surendettement (HIGH)             <= es.has_high_leverage
+      # debt_to_ebitda > 4 OU debt_to_equity > 2.
+  - ebitda_negatif (HIGH)             <= es.has_negative_ebitda
+      # Exploitation déficitaire (proxy EBITDA < 0).
+  - chute_activite (MEDIUM)           <= es.has_revenue_decline
+      # CA en recul > 15% YoY.
+  # Règle de sévérité : ces flags financiers sont HIGH max (jamais CRITICAL —
+  # un risque financier n'élimine pas une cible comme une sanction/procédure,
+  # il la qualifie). flag_severity_max reste donc piloté par les flags
+  # sanctions/procédures pour le CRITICAL. Un siren UNIQUEMENT en détresse
+  # financière sort en flag_severity_max='HIGH'.
 
   Schéma :
   - siren
@@ -52,7 +67,17 @@ business_logic: |
   - has_procedure_collective_active
   - has_gel_avoir_actif
   - n_dirigeants_sanctionnes
+  - has_capitaux_propres_negatifs   (détresse financière)
+  - has_surendettement              (détresse financière)
+  - has_ebitda_negatif              (détresse financière)
+  - has_chute_activite              (détresse financière)
   - last_flag_date (date du flag le plus récent)
+
+  Portée : les flags financiers proviennent de silver.entreprises_signals, déjà
+  filtré aux cibles M&A (SAS/SA, capital >= 100k€). Le FULL OUTER JOIN sur ce
+  feature store élargit donc la table aux cibles en détresse financière, sans
+  l'ouvrir à tout le référentiel. Un siren présent UNIQUEMENT pour un flag
+  financier sort en flag_severity_max='HIGH' (jamais CRITICAL).
 
   Cas d'usage :
   - SELECT * FROM gold.compliance_red_flags WHERE siren = X (DD ponctuelle)
