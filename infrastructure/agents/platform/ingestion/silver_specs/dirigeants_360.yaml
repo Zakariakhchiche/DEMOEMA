@@ -1,4 +1,11 @@
 silver_name: silver.dirigeants_360
+
+# SQL écrit à la main et versionné dans silver_transforms/dirigeants_360.sql.
+# Appliqué tel quel (pas de LLM au build) ; le maintainer ne régénère que si
+# l'apply/refresh échoue. Réécriture 2026-06-11 : l'ancienne version LLM ne
+# finissait jamais (sous-requêtes corrélées + joins fonction non indexables).
+hand_authored: true
+
 goal: >
   🔑 FEATURE STORE 360° DIRIGEANT pour le scoring M&A. Un row par
   dirigeant individu (clé person_uid) avec TOUS les signaux croisés :
