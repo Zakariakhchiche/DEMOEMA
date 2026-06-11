@@ -50,25 +50,40 @@ def load_all_specs() -> dict[str, dict]:
     return out
 
 
+def _staggered_interval(stagger_key: str | None, hours: int = 0, minutes: int = 0):
+    """IntervalTrigger avec décalage déterministe (hash du nom modulo
+    intervalle) pour les fréquences >= 24h. Évite que tous les refresh
+    quotidiens/hebdo partent au même instant (boot + intervalle) et se
+    disputent les verrous avec les fetchers bronze."""
+    from datetime import datetime, timedelta, timezone as tz
+    kwargs = {}
+    total_hours = hours + minutes // 60
+    if stagger_key and total_hours >= 24:
+        h = int.from_bytes(hashlib.sha1(stagger_key.encode()).digest()[:4], "big")
+        kwargs["start_date"] = datetime.now(tz=tz.utc) + timedelta(hours=h % total_hours)
+    return IntervalTrigger(hours=hours, minutes=minutes, **kwargs)
+
+
 def _build_trigger(spec: dict):
     """Accept either cron='..' or interval_hours=N or interval_minutes=N in spec.refresh_trigger."""
     cfg = spec.get("refresh_trigger") or "interval_hours=24"
+    key = spec.get("silver_name")
     if isinstance(cfg, dict):
         if "cron" in cfg:
             return CronTrigger.from_crontab(cfg["cron"])
         if "interval_hours" in cfg:
-            return IntervalTrigger(hours=int(cfg["interval_hours"]))
+            return _staggered_interval(key, hours=int(cfg["interval_hours"]))
         if "interval_minutes" in cfg:
-            return IntervalTrigger(minutes=int(cfg["interval_minutes"]))
+            return _staggered_interval(key, minutes=int(cfg["interval_minutes"]))
     if isinstance(cfg, str) and "=" in cfg:
         k, v = cfg.split("=", 1)
         if k.strip() == "interval_hours":
-            return IntervalTrigger(hours=int(v))
+            return _staggered_interval(key, hours=int(v))
         if k.strip() == "interval_minutes":
-            return IntervalTrigger(minutes=int(v))
+            return _staggered_interval(key, minutes=int(v))
         if k.strip() == "cron":
             return CronTrigger.from_crontab(v.strip())
-    return IntervalTrigger(hours=24)
+    return _staggered_interval(key, hours=24)
 
 
 def start_silver_scheduler(scheduler) -> int:

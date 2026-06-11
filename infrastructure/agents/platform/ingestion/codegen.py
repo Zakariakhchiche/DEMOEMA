@@ -683,17 +683,45 @@ async def discover_and_generate(source_id: str, max_iterations: int = 3) -> dict
             "note": "Aucune iter n'a remonté de rows. À examiner manuellement ou à rééssayer après backoff."}
 
 
-def _build_trigger(s: str):
+def _stagger_offset_hours(stagger_key: str, interval_hours: int) -> int:
+    """Décalage déterministe (hash du source_id modulo intervalle) pour étaler
+    les sources de même fréquence sur leur période. Sans ça, toutes les
+    sources mensuelles (720h) ou hebdo (168h) tirent au même instant
+    (boot du scheduler + intervalle) → pics de charge + contention de verrous
+    avec les refresh silver/gold."""
+    import hashlib as _hashlib
+    h = int.from_bytes(_hashlib.sha1(stagger_key.encode()).digest()[:4], "big")
+    return h % max(interval_hours, 1)
+
+
+def _build_trigger(s: str, stagger_key: str | None = None):
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
     s = s.strip()
+
+    def _interval(hours: int = 0, minutes: int = 0):
+        kwargs = {}
+        total_hours = hours + minutes // 60
+        # Étalement uniquement pour les fréquences >= quotidiennes : les
+        # sources chaudes (BODACC horaire, presse) doivent rester ponctuelles.
+        if stagger_key and total_hours >= 24:
+            offset = _stagger_offset_hours(stagger_key, total_hours)
+            kwargs["start_date"] = _dt.now(tz=_tz.utc) + _td(hours=offset)
+        return IntervalTrigger(hours=hours, minutes=minutes, **kwargs)
+
     if s.startswith("interval_hours="):
-        return IntervalTrigger(hours=int(s.split("=")[1]))
+        return _interval(hours=int(s.split("=")[1]))
     if s.startswith("interval_minutes="):
-        return IntervalTrigger(minutes=int(s.split("=")[1]))
+        return _interval(minutes=int(s.split("=")[1]))
     if s.startswith("cron:"):
         # ex: "cron:hour=3 minute=30 tz=Europe/Paris"
         parts = dict(p.split("=") for p in s[5:].split())
         tz = parts.pop("tz", "Europe/Paris")
         return CronTrigger(timezone=tz, **{k: int(v) for k, v in parts.items()})
+    if s.startswith("cron="):
+        # ex: "cron=0 6 * * 1" (crontab) — format utilisé par les specs DILA.
+        # Avant ce fix, ce format tombait dans le défaut 24h → les sources
+        # hebdo DILA étaient fetchées quotidiennement.
+        return CronTrigger.from_crontab(s.split("=", 1)[1].strip(), timezone="Europe/Paris")
     if s.strip() == "on_demand":
         return IntervalTrigger(days=365)  # effectivement jamais auto
-    return IntervalTrigger(hours=24)  # default
+    return _interval(hours=24)  # default
