@@ -1,4 +1,9 @@
 silver_name: silver.sci_master
+
+# SQL écrit à la main et versionné dans silver_transforms/sci_master.sql (capturé
+# depuis la prod). Appliqué tel quel (pas de LLM) ; le maintainer ne régénère que
+# si l'apply/refresh échoue. Sécurise le rebuild après cascade de inpi_comptes.
+hand_authored: true
 goal: >
   🏠 FEATURE STORE PATRIMOINE SCI / HOLDING IMMOBILIÈRE. Un row par SIREN SCI
   (forme 65xx ou holding patrimoniale identifiée), avec :
