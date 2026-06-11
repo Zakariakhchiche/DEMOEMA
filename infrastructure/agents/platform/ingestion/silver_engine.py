@@ -193,7 +193,12 @@ async def run_silver_refresh(silver_name: str, trigger_source: str = "scheduler"
         try:
             with psycopg.connect(settings.database_url) as conn:
                 with conn.cursor() as cur:
-                    cur.execute("SET statement_timeout = 0")
+                    # lock_timeout court : si la MV est verrouillée (apply codegen,
+                    # autre refresh), on échoue vite — le scheduler retentera.
+                    # statement_timeout borné : plus jamais d'attente infinie
+                    # (incident 2026-06-11 : backends zombies de 26-38 jours).
+                    cur.execute("SET lock_timeout = '60s'")
+                    cur.execute("SET statement_timeout = '4h'")
                     cur.execute(f"REFRESH MATERIALIZED VIEW {silver_name}")
                     cur.execute(f"SELECT count(*) FROM {silver_name}")
                     rows_after = (cur.fetchone() or [None])[0]
