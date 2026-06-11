@@ -72,6 +72,54 @@ business_logic: |
   - resultat_net_latest
   - n_exercices_deposés = count distinct bilans INPI
   - has_bilan_recent = (date_cloture du dernier bilan >= now() - interval '2 years')
+  # Colonnes financières "latest" supplémentaires (DISTINCT ON dernier bilan) —
+  # nécessaires aux ratios financiers ci-dessous. Toutes proviennent de
+  # silver.inpi_comptes, NULL si poste absent du dépôt.
+  - resultat_exploitation_latest = resultat_exploitation du dernier bilan (EBIT)
+  - total_actif_latest
+  - emprunts_dettes_latest
+  - creances_clients_latest
+  - stocks_latest
+  - immo_corporelles_latest
+  - total_passif_latest
+  - ca_export_latest
+  - ca_avant_dernier = ca_net de l'avant-dernier bilan (pour volatilité / croissance)
+  - total_actif_avant_dernier = total_actif de l'avant-dernier bilan (pour moyenne actifs)
+
+  [Ratios financiers — grille d'évaluation type "Financial ratio assessment" (Orascom)]
+  # Tous calculés sur le dernier bilan dispo. Garde-fous OBLIGATOIRES :
+  #  - dénominateur via NULLIF(x, 0) → ratio NULL si non calculable (jamais d'erreur DIV/0)
+  #  - proxy_ebitda = resultat_exploitation_latest (EBIT) en proxy quand les
+  #    dotations aux amortissements ne sont pas isolées dans le dépôt. C'est le
+  #    MÊME proxy que gold.scoring_ma.proxy_ebitda (cohérence).
+  - proxy_ebitda = resultat_exploitation_latest
+  - ebitda_margin           = proxy_ebitda / NULLIF(ca_latest, 0)
+  - ebit_margin             = resultat_exploitation_latest / NULLIF(ca_latest, 0)
+  - net_margin              = resultat_net_latest / NULLIF(ca_latest, 0)
+  - ebitda_on_assets        = proxy_ebitda / NULLIF((COALESCE(total_actif_latest,0)+COALESCE(total_actif_avant_dernier, total_actif_latest))/2.0, 0)
+  - debt_to_ebitda          = emprunts_dettes_latest / NULLIF(proxy_ebitda, 0)
+  - debt_to_equity          = emprunts_dettes_latest / NULLIF(capitaux_propres_latest, 0)
+  - debt_ratio              = (COALESCE(total_actif_latest,0) - COALESCE(capitaux_propres_latest,0)) / NULLIF(total_actif_latest, 0)
+  - equity_ratio            = capitaux_propres_latest / NULLIF(total_passif_latest, total_actif_latest)
+  - dso_days                = creances_clients_latest / NULLIF(ca_latest, 0) * 365.0
+  - ca_export_ratio_calc    = ca_export_latest / NULLIF(ca_latest, 0)
+  # Volatilité du CA = écart-type relatif sur l'historique pluriannuel des
+  # bilans (stddev_samp(ca_net) / avg(ca_net) sur tous les exercices du SIREN).
+  - revenue_volatility      = stddev_samp(ca_net) OVER (PARTITION BY siren) / NULLIF(avg(ca_net) OVER (PARTITION BY siren), 0)
+  - revenue_growth_yoy      = (ca_latest - ca_avant_dernier) / NULLIF(ca_avant_dernier, 0)
+
+  # Classement par seuils (grille Orascom transposée) → 1 tier global lisible.
+  #   tier ∈ {'above_average','average','below_average','unknown'}
+  #   Heuristique : moyenne des ratings disponibles parmi ebitda_margin (>15 above /
+  #   8-15 avg / <8 below), debt_to_equity (<0.6 above / 0.6-2 avg / >2 below),
+  #   current/leverage. NULL ratios ignorés. Si 0 ratio dispo → 'unknown'.
+  - financial_health_tier = CASE bucketisation décrite ci-dessus
+
+  [Drapeaux détresse financière — alimentent compliance + Dim 3]
+  - has_negative_equity     = (capitaux_propres_latest < 0)
+  - has_negative_ebitda     = (proxy_ebitda < 0)
+  - has_high_leverage       = (debt_to_ebitda > 4 OR debt_to_equity > 2)
+  - has_revenue_decline     = (revenue_growth_yoy < -0.15)
 
   [Taille]
   - capital_social = montant_capital
@@ -163,6 +211,11 @@ indexes:
   - "is_dependant_commande_publique WHERE is_dependant_commande_publique = true"
   - "code_ape"
   - departement
+  - "ebitda_margin DESC"
+  - "debt_to_ebitda DESC"
+  - "financial_health_tier"
+  - "has_negative_equity WHERE has_negative_equity = true"
+  - "has_high_leverage WHERE has_high_leverage = true"
 
 refresh_trigger: "interval_hours=24"
 sla_minutes: 1500

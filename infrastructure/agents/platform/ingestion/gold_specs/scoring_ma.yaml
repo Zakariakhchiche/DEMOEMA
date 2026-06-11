@@ -103,6 +103,31 @@ business_logic: |
   Phase 2 : enrichir les signaux qui dépendent de sources non-encore-ingérées
   (CFNews PE, presse Les Echos, INPI brevets dates expiration, LinkedIn turnover).
 
+  ─────────────────────────────────────────────────────────────────────────
+  ENRICHISSEMENT RATIOS FINANCIERS (grille "Financial ratio assessment")
+  ─────────────────────────────────────────────────────────────────────────
+  silver.entreprises_signals expose désormais un bloc de ratios financiers
+  (ebitda_margin, ebit_margin, net_margin, ebitda_on_assets, debt_to_ebitda,
+  debt_to_equity, debt_ratio, equity_ratio, dso_days, ca_export_ratio_calc,
+  revenue_volatility, revenue_growth_yoy, financial_health_tier) + 4 drapeaux
+  de détresse (has_negative_equity, has_negative_ebitda, has_high_leverage,
+  has_revenue_decline).
+
+  À FAIRE dans cette table :
+  1. PASSTHROUGH : SELECT ces 13 colonnes ratio + financial_health_tier depuis
+     silver.entreprises_signals (JOIN sur siren, déjà dans source_tables) et les
+     exposer telles quelles comme colonnes de gold.scoring_ma. Ce sont des
+     ajouts de colonnes (la table garde toutes ses colonnes existantes).
+  2. CÂBLER les signaux Dim 3 aujourd'hui stubés à false, à partir des drapeaux
+     du feature store (ne casse pas le scoring, ne fait que l'activer) :
+       - sig_debt_ratio_deterioration  <= es.has_high_leverage
+       - sig_revenue_decline_2years    <= es.has_revenue_decline (garde le calcul
+         existant en OR si présent)
+       - sig_working_capital_stress    <= es.has_negative_equity
+     Les autres signaux false restent false (Phase 2).
+  3. NE PAS modifier le calcul de score_total ni des dimensions au-delà de
+     l'activation ci-dessus.
+
 transformations: |
   -- ============================================================
   -- DIM 1 — MATURITÉ DIRIGEANT (20pts, 10 signaux)
