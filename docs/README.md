@@ -1,16 +1,24 @@
-# Documentation Origin / Origin — Plan complet (V4.2 migration IONOS exécutée)
+# Documentation Origin — Plateforme d'origination M&A
 
-> Cartographie exhaustive des 5M+ entreprises françaises avec enrichissement profond (fonctionnement, dirigeants, écosystèmes) — extension européenne en année 3.
+> Intelligence M&A sur **411 295 entreprises françaises scorées**, alimentée à 100 % par
+> des sources publiques officielles. Datalake + graphe dirigeants + copilot IA.
+
+> 🟢 **État au 2026-06-12 — EN PRODUCTION** sur VPS IONOS (`82.165.57.191` / `d-ai.fr`),
+> stack Docker Compose + Caddy. Composants live :
+> - **Scoring M&A v3** : deal score géométrique + 4 axes (Transmission/Attractivity/Scale/Structure), tier par percentile.
+> - **Données financières réelles** : CA (code CERFA FJ, validé vs source officielle), EBITDA réel (EBIT + dotations), 13 ratios.
+> - **Copilot IA** (chat) : DeepSeek `deepseek-chat`, sélection avancée + cartes entreprise/dirigeant remplies.
+> - **Killer feature** : alertes pré-cession (Neo4j — serial sellers + détresse financière).
+> - **Compliance** : sanctions, BODACC, offshore, drapeaux détresse.
+> - **OSINT** : maturité digitale + contactabilité dirigeant.
 >
-> 🟢 **V4.2 — 2026-04-20 : MIGRATION VPS IONOS DÉPLOYÉE.** 7 modules produit + dual-agent Ollama tournent désormais sur infra souveraine FR/DE (Paris). Epics SCRUM-66 (migration) + SCRUM-80 (agents) → **Done**, 22 stories fermées. Voir [`ETAT_REEL_2026-04-20.md`](./ETAT_REEL_2026-04-20.md) (nouvelle baseline) + [`DEPLOYMENT_RUNBOOK.md`](./DEPLOYMENT_RUNBOOK.md) + [`../infrastructure/`](../infrastructure/).
+> 📚 **Documentation données de référence** (à jour) :
+> [`METHODOLOGIE_DONNEES.md`](./METHODOLOGIE_DONNEES.md) ·
+> [`CARTOGRAPHIE_DONNEES.md`](./CARTOGRAPHIE_DONNEES.md) ·
+> [`LINEAGE_DONNEES.md`](./LINEAGE_DONNEES.md) ·
+> [`CATALOGUE_SOURCES.md`](./CATALOGUE_SOURCES.md).
 >
-> 🔴 **V4 — 2026-04-19** : la consultation du repo `github.com/Zakariakhchiche/Origin` révèle que **le produit est DÉJÀ EN PRODUCTION** (7 modules live, 300+ cibles M&A, Copilot IA streaming SSE, PWA mobile, pipeline SIRENE 16M en dev).
->
-> La narrative "pré-MVP / 0 branché" de `ETAT_REEL_2026-04-17.md` est **CORRIGÉE** par [`ETAT_REEL_2026-04-19.md`](./ETAT_REEL_2026-04-19.md) — remplacée par V4.2.
->
-> ⚠️ **Docs V3 toujours valides pour** : décisions stratégiques, cap table, pricing par scénarios, roadmap 4 ans, AI Act, conformité RGPD, killer features Y2.
->
-> ⚠️ **Docs V3 à corriger** (en cours) : état d'avancement, stack technique (réel = Supabase + Vercel vs doc = Scaleway strict), ARR Y1 (si commercialisation possible dès Q2), pitch traction.
+> ⚠️ Les docs business (pitch, pricing, roadmap, budget) restent **à rafraîchir** (chiffres/scénarios à valider).
 
 ---
 
