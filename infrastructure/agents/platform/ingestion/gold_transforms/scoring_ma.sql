@@ -123,6 +123,46 @@ SELECT
         )) >= 65 THEN $$B_WARM$$
         ELSE $$C_COLD$$
     END AS tier,
+    -- ─── 4 AXES v3 (0-100) affichés dans la fiche ─────────────────────────────
+    -- TRANSMISSION : probabilité de cession (âge dirigeant + patrimoine optimisé)
+    LEAST(100, GREATEST(0,
+        (CASE WHEN b.age_dirigeant_max >= 70 THEN 50
+              WHEN b.age_dirigeant_max >= 65 THEN 40
+              WHEN b.age_dirigeant_max >= 60 THEN 30
+              WHEN b.age_dirigeant_max >= 55 THEN 15 ELSE 0 END)
+        + (CASE WHEN b.n_sci_dirigeants >= 3 THEN 30
+                WHEN b.n_sci_dirigeants >= 2 THEN 20
+                WHEN b.n_sci_dirigeants = 1 THEN 10 ELSE 0 END)
+        + (CASE WHEN b.has_holding_patrimoniale THEN 20 ELSE 0 END)
+    ))::int AS transmission_score,
+    -- ATTRACTIVITY : valeur réelle (marge EBITDA + rentabilité + solidité)
+    LEAST(100, GREATEST(0,
+        (CASE WHEN es.ebitda_margin >= 0.15 THEN 50
+              WHEN es.ebitda_margin >= 0.08 THEN 35
+              WHEN es.ebitda_margin >= 0.03 THEN 20
+              WHEN es.ebitda_margin > 0     THEN 10 ELSE 0 END)
+        + (CASE WHEN COALESCE(b.resultat_net_latest, 0) > 0 THEN 25 ELSE 0 END)
+        + (CASE WHEN COALESCE(es.has_negative_equity, false) = false THEN 15 ELSE 0 END)
+        + (CASE WHEN b.has_bilan_recent THEN 10 ELSE 0 END)
+    ))::int AS attractivity_score,
+    -- SCALE : barrière transactionnelle (CA absolu)
+    (CASE WHEN b.ca_latest >= 100000000 THEN 100
+          WHEN b.ca_latest >= 50000000  THEN 85
+          WHEN b.ca_latest >= 20000000  THEN 70
+          WHEN b.ca_latest >= 10000000  THEN 55
+          WHEN b.ca_latest >= 5000000   THEN 40
+          WHEN b.ca_latest >= 2000000   THEN 25
+          WHEN b.ca_latest > 0          THEN 10 ELSE 0 END)::int AS scale_score,
+    -- STRUCTURE : suitability (multi-mandats + holding + capital)
+    LEAST(100, GREATEST(0,
+        30
+        + (CASE WHEN b.n_mandats_dirigeant_max >= 5 THEN 30
+                WHEN b.n_mandats_dirigeant_max >= 3 THEN 20
+                WHEN b.n_mandats_dirigeant_max >= 1 THEN 10 ELSE 0 END)
+        + (CASE WHEN b.has_holding_patrimoniale THEN 20 ELSE 0 END)
+        + (CASE WHEN COALESCE(b.capital_social, 0) >= 1000000 THEN 20
+                WHEN COALESCE(b.capital_social, 0) >= 250000 THEN 10 ELSE 0 END)
+    ))::int AS structure_score,
     -- ─── Ratios financiers (passthrough depuis le feature store, grille Orascom) ───
     es.proxy_ebitda,
     es.ebitda_margin,
