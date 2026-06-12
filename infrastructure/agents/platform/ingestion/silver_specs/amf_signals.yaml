@@ -1,4 +1,8 @@
 silver_name: silver.amf_signals
+
+# SQL versionné dans silver_transforms/amf_signals.sql (capturé du cache audit 2026-06-12).
+# Appliqué tel quel (pas de LLM) ; maintainer regénère seulement si échec.
+hand_authored: true
 goal: >
   🔑 SIGNAL COMPLIANCE FINANCIÈRE pour due diligence : décisions, sanctions,
   avertissements, listes noires AMF par siren/dirigeant. Consolidation des

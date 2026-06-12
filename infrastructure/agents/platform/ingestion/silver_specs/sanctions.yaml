@@ -1,4 +1,8 @@
 silver_name: silver.sanctions
+
+# SQL versionné dans silver_transforms/sanctions.sql (capturé du cache audit 2026-06-12).
+# Appliqué tel quel (pas de LLM) ; maintainer regénère seulement si échec.
+hand_authored: true
 goal: >
   🔑 TABLE UNIFIÉE compliance/red-flags toutes sources françaises et internationales.
   UNION ALL des silver existants : AMF (silver.amf_signals), OpenSanctions
