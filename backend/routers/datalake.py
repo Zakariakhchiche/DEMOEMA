@@ -282,6 +282,59 @@ def _gen_cache_set(key: str, payload: Any) -> None:
     _GENERIC_CACHE[key] = (_time.time(), payload)
 
 
+def _email_token(s: str) -> str:
+    """unaccent + lower + alphanum seulement (pour construire un email)."""
+    import unicodedata
+    s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode()
+    return "".join(c for c in s.lower() if c.isalnum())
+
+
+async def _enrich_dirigeant_contacts(pool, siren: str, dirigeants: list) -> None:
+    """Contactabilité dirigeant (origination) : génère des emails PROFESSIONNELS
+    PROBABLES à partir du domaine de la société (OSINT) + nom du dirigeant, et
+    rattache les profils LinkedIn OSINT. On-the-fly, NON stocké (RGPD : minimisation,
+    intérêt légitime B2B). Les emails sont des candidats à vérifier, pas des données
+    confirmées. Mutation en place de la liste de dicts."""
+    if not dirigeants:
+        return
+    try:
+        domain = await _safe(pool.fetchval(
+            "SELECT primary_domain FROM silver.osint_companies_enriched "
+            "WHERE siren = $1 AND primary_domain IS NOT NULL AND primary_domain <> '' LIMIT 1",
+            siren), timeout_s=2.0)
+        osint_rows = await _safe(pool.fetch(
+            "SELECT nom, linkedin_urls FROM silver.osint_persons_enriched WHERE siren_main = $1",
+            siren), timeout_s=2.0) or []
+    except Exception:
+        return
+    li_by_nom = {}
+    for r in osint_rows:
+        k = _email_token(r.get("nom") or "")
+        urls = r.get("linkedin_urls") or []
+        if k and urls:
+            li_by_nom[k] = urls[0]
+    for d in dirigeants:
+        if not isinstance(d, dict) or d.get("type_dirigeant") != "personne physique":
+            continue
+        prenom_raw = (d.get("prenom") or "").split(",")[0].split()[0] if d.get("prenom") else ""
+        prenom = _email_token(prenom_raw)
+        nom = _email_token(d.get("nom") or "")
+        contact = {}
+        if domain and prenom and nom:
+            contact["email_candidates"] = [
+                f"{prenom}.{nom}@{domain}",
+                f"{prenom[0]}{nom}@{domain}",
+                f"{prenom}@{domain}",
+            ]
+            contact["domain"] = domain
+        li = li_by_nom.get(nom)
+        if li:
+            contact["linkedin"] = li
+            d["has_linkedin"] = True
+        if contact:
+            d["contact"] = contact
+
+
 @router.get("/fiche/{siren}")
 async def fiche_entreprise(req: Request, siren: str):
     """Fiche complète — gold.entreprises_master si dispo, fallback sur
@@ -1663,9 +1716,13 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
         ),
     }
 
+    # Contactabilité dirigeant (origination) : emails pros probables + LinkedIn OSINT.
+    dirigeants_out = [_serialize(d) for d in dirigeants]
+    await _enrich_dirigeant_contacts(pool, siren, dirigeants_out)
+
     return {
         "fiche": _serialize(fiche) if hasattr(fiche, "items") and not isinstance(fiche, dict) else fiche,
-        "dirigeants": [_serialize(d) for d in dirigeants],
+        "dirigeants": dirigeants_out,
         "signaux": [_serialize(s) for s in signaux],
         "red_flags": [_serialize(r) for r in red_flags],
         "network": [_serialize(n) for n in network],
