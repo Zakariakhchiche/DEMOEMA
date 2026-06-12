@@ -21,10 +21,11 @@ bodacc_agg AS (
     SELECT
         b.siren,
         count(*) AS bodacc_n_events_24m,
-        bool_or(b.type_avis ILIKE '%cession%' OR b.type_avis ILIKE '%vente%') AS bodacc_has_cession_event,
-        bool_or(b.type_avis ILIKE '%capital%') AS bodacc_has_modif_capital_event,
-        bool_or(b.type_avis ILIKE '%dirigeant%' OR b.type_avis ILIKE '%représentant%') AS bodacc_has_modif_dirigeant_event,
-        bool_or(b.type_avis ILIKE '%dissolution%' OR b.type_avis ILIKE '%radiation%') AS bodacc_has_dissolution_event,
+        -- 2026-06-12 fix : bodacc n'a pas `type_avis`, la colonne est `familleavis_lib`.
+        bool_or(b.familleavis_lib ILIKE '%cession%' OR b.familleavis_lib ILIKE '%vente%') AS bodacc_has_cession_event,
+        bool_or(b.familleavis_lib ILIKE '%capital%') AS bodacc_has_modif_capital_event,
+        bool_or(b.familleavis_lib ILIKE '%dirigeant%' OR b.familleavis_lib ILIKE '%représentant%') AS bodacc_has_modif_dirigeant_event,
+        bool_or(b.familleavis_lib ILIKE '%dissolution%' OR b.familleavis_lib ILIKE '%radiation%') AS bodacc_has_dissolution_event,
         max(b.date_parution) AS bodacc_last_event_date
     FROM silver.bodacc_annonces b
     WHERE b.date_parution >= now() - interval '24 months'
@@ -33,25 +34,29 @@ bodacc_agg AS (
 ),
 
 -- ───────── Compliance signaux ─────────
+-- 2026-06-12 fix : silver.opensanctions expose `sirens_fr` (array), pas `siren`.
 sanctions_match AS (
-    SELECT DISTINCT siren
-    FROM silver.opensanctions
-    WHERE siren IS NOT NULL
-      AND siren IN (SELECT siren FROM silver.sci_master)
+    SELECT DISTINCT btrim(sf) AS siren
+    FROM silver.opensanctions os
+    CROSS JOIN LATERAL unnest(os.sirens_fr) AS sf
+    WHERE btrim(sf) IN (SELECT siren FROM silver.sci_master)
 ),
 
+-- 2026-06-12 fix : la réécriture de silver.icij_offshore_match n'expose plus
+-- `siren_fr` mais `sirens_mandats` (array des SIREN où la personne offshore a un
+-- mandat). On déplie pour matcher les SCI.
 offshore_match AS (
-    SELECT DISTINCT siren_fr AS siren
-    FROM silver.icij_offshore_match
-    WHERE siren_fr IS NOT NULL
-      AND siren_fr IN (SELECT siren FROM silver.sci_master)
+    SELECT DISTINCT btrim(m.siren) AS siren
+    FROM silver.icij_offshore_match icij
+    CROSS JOIN LATERAL unnest(icij.sirens_mandats) AS m(siren)
+    WHERE btrim(m.siren) IN (SELECT siren FROM silver.sci_master)
 ),
 
+-- 2026-06-12 fix : silver.judilibre_decisions n'a pas de colonne siren (aucun
+-- linkage entreprise par SIREN dans ce dataset) → CTE désactivée, 0 ligne, donc
+-- has_judilibre_decision reste false jusqu'à ce qu'un linkage existe.
 judilibre_match AS (
-    SELECT DISTINCT siren
-    FROM silver.judilibre_decisions
-    WHERE siren IS NOT NULL
-      AND siren IN (SELECT siren FROM silver.sci_master)
+    SELECT NULL::text AS siren WHERE false
 ),
 
 -- ───────── LEI parents (chaîne corporate) ─────────
@@ -80,13 +85,15 @@ scored AS (
             ))
         )::int AS patrimoine_net_score,
 
-        -- 2) Transmission score (basé age + has_successeur)
+        -- 2) Transmission score — 2026-06-12 fix : la version live de
+        -- silver.sci_master n'expose pas age_dirigeant_max/has_successeur
+        -- (colonnes de l'ancien brouillon jamais déployé). Proxy sur l'âge de
+        -- l'entité (SCI/holding ancienne = probabilité de transmission plus forte).
         CASE
-            WHEN s.age_dirigeant_max >= 70 THEN 90
-            WHEN s.age_dirigeant_max >= 60 AND s.has_successeur THEN 80
-            WHEN s.age_dirigeant_max >= 60 THEN 70
-            WHEN s.age_dirigeant_max >= 50 THEN 50
-            ELSE 30
+            WHEN s.age_entreprise >= 30 THEN 80
+            WHEN s.age_entreprise >= 20 THEN 65
+            WHEN s.age_entreprise >= 10 THEN 50
+            ELSE 35
         END AS transmission_score,
 
         -- 3) Compliance score (inverse signaux)
@@ -195,7 +202,7 @@ SELECT
       + (CASE WHEN sc.adresse_code_postal IS NOT NULL THEN 1 ELSE 0 END)
       + (CASE WHEN sc.total_actif IS NOT NULL THEN 1 ELSE 0 END)
       + (CASE WHEN sc.ownership_type != 'unknown' THEN 1 ELSE 0 END)
-      + (CASE WHEN sc.age_dirigeant_max IS NOT NULL THEN 1 ELSE 0 END)
+      + (CASE WHEN sc.patrimoine_net_estime IS NOT NULL THEN 1 ELSE 0 END)
     ) / 5.0)::int AS data_quality_score,
 
     now() AS gold_materialized_at
