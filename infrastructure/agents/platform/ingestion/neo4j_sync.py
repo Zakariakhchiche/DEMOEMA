@@ -169,6 +169,72 @@ SET p.has_mandat_en_procedure = false,
 """
 
 
+# ─── Priority 2 — graphe d'OPPORTUNITÉ (killer feature pré-cession) ───
+# 1. Santé financière / détresse sur Company (ratios silver.entreprises_signals).
+FINANCIALS_COMPANY_QUERY = """
+SELECT btrim(siren) AS siren,
+       financial_health_tier,
+       round(debt_to_ebitda::numeric, 3)::float8 AS debt_to_ebitda,
+       round(ebitda_margin::numeric, 4)::float8 AS ebitda_margin,
+       COALESCE(has_negative_equity, FALSE) AS has_negative_equity,
+       COALESCE(has_high_leverage, FALSE) AS has_high_leverage,
+       COALESCE(has_negative_ebitda, FALSE) AS has_negative_ebitda,
+       COALESCE(has_revenue_decline, FALSE) AS has_revenue_decline
+FROM silver.entreprises_signals
+WHERE siren IS NOT NULL
+"""
+
+MERGE_COMPANY_FINANCIALS = """
+UNWIND $rows AS row
+MATCH (c:Company {siren: row.siren})
+SET c.financial_health_tier = row.financial_health_tier,
+    c.debt_to_ebitda = toFloat(row.debt_to_ebitda),
+    c.ebitda_margin = toFloat(row.ebitda_margin),
+    c.has_negative_equity = row.has_negative_equity,
+    c.has_high_leverage = row.has_high_leverage,
+    c.has_negative_ebitda = row.has_negative_ebitda,
+    c.has_revenue_decline = row.has_revenue_decline,
+    c.is_distressed = (row.has_negative_equity OR row.has_high_leverage
+                       OR row.has_negative_ebitda OR row.has_revenue_decline)
+"""
+
+# 2. Arêtes A_CEDE (serial sellers) : sociétés ayant subi une cession/vente 36m.
+CESSION_QUERY = """
+SELECT btrim(siren) AS siren,
+       max(date_parution)::text AS last_cession_date,
+       count(*)::int AS n_cessions,
+       (array_agg(DISTINCT familleavis_lib))[1] AS cession_type
+FROM silver.bodacc_annonces
+WHERE siren IS NOT NULL
+  AND (familleavis_lib ILIKE '%cession%' OR familleavis_lib ILIKE '%vente%')
+  AND date_parution > (now() - interval '36 months')
+GROUP BY siren
+"""
+
+# Marque la société + crée A_CEDE depuis chacun de ses dirigeants (idempotent).
+MERGE_CESSION_EDGES = """
+UNWIND $rows AS row
+MATCH (c:Company {siren: row.siren})
+SET c.has_cession_recente = true,
+    c.last_cession_date = row.last_cession_date,
+    c.n_cessions_36m = row.n_cessions
+WITH c, row
+MATCH (p:Person)-[:IS_DIRIGEANT]->(c)
+MERGE (p)-[r:A_CEDE]->(c)
+SET r.last_date = row.last_cession_date,
+    r.n_cessions = row.n_cessions,
+    r.type = row.cession_type
+"""
+
+# Finalize : vendeur en série = >= 2 sociétés cédées distinctes.
+MARK_SERIAL_SELLERS = """
+MATCH (p:Person)-[:A_CEDE]->(c:Company)
+WITH p, count(DISTINCT c) AS n_cedees
+SET p.n_societes_cedees = n_cedees,
+    p.is_serial_seller = (n_cedees >= 2)
+"""
+
+
 async def run_neo4j_rebuild() -> dict:
     """Scheduled job: rebuild Neo4j graph from current Postgres state."""
     try:
@@ -288,6 +354,43 @@ async def run_neo4j_rebuild() -> dict:
         )
     except Exception as e:
         log.warning("[neo4j_sync] compliance enrichment failed: %s", e)
+
+    # ─── Priority 2 : santé financière / détresse sur Company ───
+    n_fin_companies = 0
+    try:
+        with psycopg.connect(settings.database_url) as conn, conn.cursor() as cur:
+            cur.execute(FINANCIALS_COMPANY_QUERY)
+            cols = [d.name for d in cur.description]
+            fin_rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        with driver.session() as s:
+            for i in range(0, len(fin_rows), BATCH):
+                s.run(MERGE_COMPANY_FINANCIALS, rows=fin_rows[i:i + BATCH])
+                n_fin_companies += min(BATCH, len(fin_rows) - i)
+        log.info("[neo4j_sync] financials enrichment: %d companies", n_fin_companies)
+    except Exception as e:
+        log.warning("[neo4j_sync] financials enrichment failed: %s", e)
+
+    # ─── Priority 2 : arêtes A_CEDE (serial sellers) ───
+    n_cession_companies = 0
+    n_serial_sellers = 0
+    try:
+        with psycopg.connect(settings.database_url) as conn, conn.cursor() as cur:
+            cur.execute(CESSION_QUERY)
+            cols = [d.name for d in cur.description]
+            ces_rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        with driver.session() as s:
+            for i in range(0, len(ces_rows), BATCH):
+                s.run(MERGE_CESSION_EDGES, rows=ces_rows[i:i + BATCH])
+                n_cession_companies += min(BATCH, len(ces_rows) - i)
+            s.run(MARK_SERIAL_SELLERS).consume()
+            sr = s.run(
+                "MATCH (p:Person {is_serial_seller: true}) RETURN count(p) AS n"
+            ).single()
+            n_serial_sellers = sr["n"] if sr else 0
+        log.info("[neo4j_sync] cession enrichment: %d companies cédées, %d serial sellers",
+                 n_cession_companies, n_serial_sellers)
+    except Exception as e:
+        log.warning("[neo4j_sync] cession enrichment failed: %s", e)
 
     with driver.session() as s:
         cnt_c = s.run("MATCH (c:Company) RETURN count(c) AS n").single()["n"]
