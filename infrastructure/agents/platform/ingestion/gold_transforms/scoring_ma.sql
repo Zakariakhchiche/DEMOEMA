@@ -205,11 +205,11 @@ scored AS (
         --   DPO = dettes fournisseurs / achats × 365 (délai paiement fournisseurs)
         --   marge sur consommations = (CA − achats consommés) / CA
         CASE WHEN lp.charges_interets > 0 AND es.resultat_exploitation_latest IS NOT NULL
-             THEN (es.resultat_exploitation_latest / lp.charges_interets)::float8 END AS interest_coverage,
-        CASE WHEN lp.achats_consommes > p.ca_latest * 0.02 AND lp.dettes_fournisseurs IS NOT NULL
-             THEN (lp.dettes_fournisseurs / lp.achats_consommes * 365)::float8 END AS dpo_jours,
-        CASE WHEN lp.achats_consommes > p.ca_latest * 0.02 AND p.ca_latest > 0
-             THEN ((p.ca_latest - lp.achats_consommes) / p.ca_latest)::float8 END AS gross_margin,
+             THEN (es.resultat_exploitation_latest / NULLIF(lp.charges_interets, 0))::float8 END AS interest_coverage,
+        CASE WHEN lp.achats_consommes > COALESCE(p.ca_latest, 0) * 0.02 AND lp.dettes_fournisseurs IS NOT NULL
+             THEN (lp.dettes_fournisseurs / NULLIF(lp.achats_consommes, 0) * 365)::float8 END AS dpo_jours,
+        CASE WHEN lp.achats_consommes > COALESCE(p.ca_latest, 0) * 0.02 AND p.ca_latest > 0
+             THEN ((p.ca_latest - lp.achats_consommes) / NULLIF(p.ca_latest, 0))::float8 END AS gross_margin,
 
         -- RISK multiplier (0 = éliminé : sanction OFAC/EU, radiée, procédure collective)
         CASE
