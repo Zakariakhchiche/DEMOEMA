@@ -1138,6 +1138,32 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
                           </div>
                         )}
 
+                        {/* Contactabilité dirigeant (origination) : emails pros probables + LinkedIn */}
+                        {(Boolean((d.contact as { email_candidates?: string[] } | undefined)?.email_candidates?.length) ||
+                          Boolean((d.contact as { linkedin?: string } | undefined)?.linkedin)) && (
+                          <div style={{
+                            marginTop: 8, padding: "8px 12px", borderRadius: 8,
+                            background: "rgba(96,165,250,0.05)",
+                            border: "1px solid rgba(96,165,250,0.18)",
+                            fontSize: 11.5,
+                          }}>
+                            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                              <span style={{ fontWeight: 600, color: "var(--accent-blue)" }}>✉️ Contact probable</span>
+                              {(((d.contact as { email_candidates?: string[] }).email_candidates) ?? []).slice(0, 3).map((em, j) => (
+                                <a key={j} href={`mailto:${em}`} onClick={(e) => e.stopPropagation()} className="dem-mono"
+                                  style={{ color: "var(--accent-blue)", textDecoration: "underline", fontSize: 11 }}>{em}</a>
+                              ))}
+                              {(d.contact as { linkedin?: string }).linkedin && (
+                                <a href={String((d.contact as { linkedin?: string }).linkedin)} target="_blank" rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()} style={{ color: "var(--accent-blue)", textDecoration: "underline" }}>LinkedIn ↗</a>
+                              )}
+                            </div>
+                            <div style={{ marginTop: 3, fontSize: 9.5, color: "var(--text-muted)", fontStyle: "italic" }}>
+                              Emails déduits du domaine {String((d.contact as { domain?: string }).domain ?? "")} — à vérifier avant envoi.
+                            </div>
+                          </div>
+                        )}
+
                         {/* OSINT social */}
                         {Boolean(d.has_any_social) && (
                           <div style={{
