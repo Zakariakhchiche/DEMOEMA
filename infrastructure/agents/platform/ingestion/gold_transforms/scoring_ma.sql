@@ -87,11 +87,21 @@ scored AS (
         (ce.siren IS NOT NULL) AS has_cession_recent,
         0::int AS n_contentieux_recent,
 
-        -- Ratios financiers (grille Orascom) — passthrough pour la fiche
+        -- Ratios financiers — passthrough pour la fiche
         es.ebitda_margin, es.ebit_margin, es.net_margin, es.ebitda_on_assets,
         es.debt_to_ebitda, es.debt_to_equity, es.debt_ratio, es.equity_ratio,
         es.dso_days, es.revenue_volatility, es.revenue_growth_yoy,
         es.financial_health_tier,
+        -- Ratios Phase 2 (bilan détaillé, jamais exploités) :
+        --   ROA = rentabilité économique (résultat net / total actif)
+        --   BFR jours = cash immobilisé dans l'exploitation (stocks + créances) en jours de CA
+        --   intensité capitalistique = total actif / CA (asset-heavy vs asset-light)
+        CASE WHEN es.total_actif_latest > 0
+             THEN (p.resultat_net_latest / es.total_actif_latest)::float8 END AS roa,
+        CASE WHEN p.ca_latest > 0
+             THEN ((COALESCE(es.stocks_latest,0) + COALESCE(es.creances_clients_latest,0)) / p.ca_latest * 365)::float8 END AS bfr_jours,
+        CASE WHEN p.ca_latest > 0
+             THEN (es.total_actif_latest / p.ca_latest)::float8 END AS intensite_capitalistique,
         COALESCE(es.has_negative_equity, false) AS has_negative_equity,
         COALESCE(es.has_negative_ebitda, false) AS has_negative_ebitda,
         COALESCE(es.has_high_leverage,   false) AS has_high_leverage,
@@ -241,6 +251,7 @@ SELECT
     r.ebitda_margin, r.ebit_margin, r.net_margin, r.ebitda_on_assets,
     r.debt_to_ebitda, r.debt_to_equity, r.debt_ratio, r.equity_ratio,
     r.dso_days, r.revenue_volatility, r.revenue_growth_yoy,
+    r.roa, r.bfr_jours, r.intensite_capitalistique,
     r.financial_health_tier, r.has_negative_equity, r.has_negative_ebitda,
     r.has_high_leverage, r.has_revenue_decline,
     NOW() AS materialized_at
@@ -269,6 +280,7 @@ SELECT
     s.ebitda_margin, s.ebit_margin, s.net_margin, s.ebitda_on_assets,
     s.debt_to_ebitda, s.debt_to_equity, s.debt_ratio, s.equity_ratio,
     s.dso_days, s.revenue_volatility, s.revenue_growth_yoy,
+    s.roa, s.bfr_jours, s.intensite_capitalistique,
     s.financial_health_tier, s.has_negative_equity, s.has_negative_ebitda,
     s.has_high_leverage, s.has_revenue_decline,
     NOW() AS materialized_at

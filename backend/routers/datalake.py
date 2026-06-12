@@ -2589,6 +2589,10 @@ async def scoring_detail(req: Request, siren: str):
                 ("debt_ratio", -5, 5), ("equity_ratio", -5, 5),
                 ("dso_days", 0, 3650), ("revenue_volatility", 0, 20),
                 ("revenue_growth_yoy", -1, 20),
+                # Ratios Phase 2 (bilan détaillé) : rentabilité éco, cash immobilisé,
+                # intensité capitalistique.
+                ("roa", -5, 5), ("bfr_jours", 0, 5000),
+                ("intensite_capitalistique", 0, 50),
             )},
             "financial_health_tier": data.get("financial_health_tier"),
             "has_negative_equity": bool(data.get("has_negative_equity")),
@@ -3227,13 +3231,18 @@ async def pitch_pdf(req: Request, siren: str):
             return f"{v:.2f}×" if isinstance(v, (int, float)) else "—"
         def _d(v):
             return f"{round(v)} j" if isinstance(v, (int, float)) else "—"
+        def _xc(v):
+            return f"{v:.1f}×" if isinstance(v, (int, float)) else "—"
         rr = [
             ("Marge EBITDA", _pct(r.get("ebitda_margin"))),
             ("Marge nette", _pct(r.get("net_margin"))),
+            ("ROA (rentabilité actifs)", _pct(r.get("roa"))),
             ("Dette / EBITDA", _x(r.get("debt_to_ebitda"))),
             ("Dette / Fonds propres", _x(r.get("debt_to_equity"))),
             ("Ratio d'endettement", _pct(r.get("debt_ratio"))),
             ("DSO (créances)", _d(r.get("dso_days"))),
+            ("BFR (stocks + créances)", _d(r.get("bfr_jours"))),
+            ("Intensité capitalistique", _xc(r.get("intensite_capitalistique"))),
             ("Croissance CA", _pct(r.get("revenue_growth_yoy"))),
         ]
         cells = "".join(
