@@ -123,8 +123,27 @@ SELECT
         )) >= 65 THEN $$B_WARM$$
         ELSE $$C_COLD$$
     END AS tier,
+    -- ─── Ratios financiers (passthrough depuis le feature store, grille Orascom) ───
+    es.proxy_ebitda,
+    es.ebitda_margin,
+    es.ebit_margin,
+    es.net_margin,
+    es.ebitda_on_assets,
+    es.debt_to_ebitda,
+    es.debt_to_equity,
+    es.debt_ratio,
+    es.equity_ratio,
+    es.dso_days,
+    es.revenue_volatility,
+    es.revenue_growth_yoy,
+    es.financial_health_tier,
+    COALESCE(es.has_negative_equity, false)  AS has_negative_equity,
+    COALESCE(es.has_negative_ebitda, false)  AS has_negative_ebitda,
+    COALESCE(es.has_high_leverage, false)    AS has_high_leverage,
+    COALESCE(es.has_revenue_decline, false)  AS has_revenue_decline,
     NOW() AS materialized_at
-FROM base b;
+FROM base b
+LEFT JOIN silver.entreprises_signals es ON es.siren = b.siren;
 
 CREATE INDEX ON gold.scoring_ma (siren);
 CREATE INDEX ON gold.scoring_ma (score_total DESC);
