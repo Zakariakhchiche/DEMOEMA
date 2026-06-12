@@ -2542,6 +2542,22 @@ async def scoring_detail(req: Request, siren: str):
             "sector_multiple": float(data["sector_multiple"]) if data.get("sector_multiple") else None,
             "ev_estimated_eur": float(data["ev_estimated_eur"]) if data.get("ev_estimated_eur") else None,
         },
+        # Ratios financiers (grille "Financial ratio assessment") — passthrough
+        # depuis silver.entreprises_signals via gold.scoring_ma.
+        "ratios": {
+            k: (float(data[k]) if data.get(k) is not None else None)
+            for k in (
+                "ebitda_margin", "ebit_margin", "net_margin", "ebitda_on_assets",
+                "debt_to_ebitda", "debt_to_equity", "debt_ratio", "equity_ratio",
+                "dso_days", "revenue_volatility", "revenue_growth_yoy",
+            )
+        } | {
+            "financial_health_tier": data.get("financial_health_tier"),
+            "has_negative_equity": bool(data.get("has_negative_equity")),
+            "has_negative_ebitda": bool(data.get("has_negative_ebitda")),
+            "has_high_leverage": bool(data.get("has_high_leverage")),
+            "has_revenue_decline": bool(data.get("has_revenue_decline")),
+        },
         # Contexte (filtres / affichage)
         "context": {
             "code_ape": data.get("code_ape"),
