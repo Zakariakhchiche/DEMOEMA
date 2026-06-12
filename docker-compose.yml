@@ -11,6 +11,10 @@ services:
       - "8000"
     networks:
       - web
+      # Réseau du compose agents : indispensable pour résoudre demomea-datalake-db
+      # (pool RO datalake). Sans ça, toute recréation du container casse le scoring
+      # avec « pool non initialisé / Name or service not known ».
+      - agents
 
   frontend:
     build:
@@ -46,6 +50,10 @@ services:
 
 networks:
   web:
+  # Réseau cree par docker-compose.agents.yml (DB datalake, agents-platform, neo4j).
+  agents:
+    external: true
+    name: demoema-agents_agents-net
 
 volumes:
   caddy_data:
