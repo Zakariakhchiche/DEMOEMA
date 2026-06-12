@@ -2459,6 +2459,18 @@ async def _dirigeant_full(
     }
 
 
+def _sane_ratio(v, lo: float, hi: float):
+    """Ratio financier borné pour l'affichage : None si absent ou hors plage
+    plausible (CA quasi-nul → dénominateur minuscule → valeur aberrante)."""
+    if v is None:
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if lo <= f <= hi else None
+
+
 @router.get("/scoring/{siren}")
 async def scoring_detail(req: Request, siren: str):
     """Détail scoring M&A v3 PRO — barème advisor 4 axes business multiplicatif.
@@ -2543,15 +2555,19 @@ async def scoring_detail(req: Request, siren: str):
             "ev_estimated_eur": float(data["ev_estimated_eur"]) if data.get("ev_estimated_eur") else None,
         },
         # Ratios financiers (grille "Financial ratio assessment") — passthrough
-        # depuis silver.entreprises_signals via gold.scoring_ma.
+        # depuis silver.entreprises_signals via gold.scoring_ma. Sanitisation
+        # d'affichage : sur les sociétés à CA quasi-nul (holdings/SCI) un
+        # dénominateur minuscule fait exploser marges/DSO (ex : -72M%) → null
+        # hors plage plausible (les drapeaux détresse, eux, restent justes).
         "ratios": {
-            k: (float(data[k]) if data.get(k) is not None else None)
-            for k in (
-                "ebitda_margin", "ebit_margin", "net_margin", "ebitda_on_assets",
-                "debt_to_ebitda", "debt_to_equity", "debt_ratio", "equity_ratio",
-                "dso_days", "revenue_volatility", "revenue_growth_yoy",
-            )
-        } | {
+            **{k: _sane_ratio(data.get(k), lo, hi) for k, lo, hi in (
+                ("ebitda_margin", -10, 10), ("ebit_margin", -10, 10),
+                ("net_margin", -10, 10), ("ebitda_on_assets", -5, 5),
+                ("debt_to_ebitda", -100, 100), ("debt_to_equity", -100, 100),
+                ("debt_ratio", -5, 5), ("equity_ratio", -5, 5),
+                ("dso_days", 0, 3650), ("revenue_volatility", 0, 20),
+                ("revenue_growth_yoy", -1, 20),
+            )},
             "financial_health_tier": data.get("financial_health_tier"),
             "has_negative_equity": bool(data.get("has_negative_equity")),
             "has_negative_ebitda": bool(data.get("has_negative_ebitda")),
