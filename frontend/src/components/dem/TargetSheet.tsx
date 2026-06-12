@@ -609,6 +609,30 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
                           🏗 Asset-rich{scoring.financials.immo_corporelles ? ` · ${fmtEur(scoring.financials.immo_corporelles)}` : ""}
                         </span>
                       )}
+                      {scoring.digital?.presence_score != null && (
+                        <span
+                          title={`Maturité digitale (empreinte web OSINT) : ${scoring.digital.presence_score}/100`}
+                          style={{
+                            fontSize: 11, padding: "2px 8px", borderRadius: 999,
+                            background: "rgba(96,165,250,0.10)",
+                            border: "1px solid rgba(96,165,250,0.30)",
+                            color: "var(--accent-blue)", fontWeight: 600,
+                            display: "inline-flex", alignItems: "center", gap: 5,
+                          }}>
+                          🌐 Digital {scoring.digital.presence_score}/100
+                          {scoring.digital.primary_domain && (
+                            <a
+                              href={`https://${scoring.digital.primary_domain}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              style={{ color: "var(--accent-blue)", textDecoration: "underline", fontWeight: 500 }}
+                            >
+                              {scoring.digital.primary_domain}
+                            </a>
+                          )}
+                        </span>
+                      )}
                     </div>
                     <ScoreAxes axes={scoring.axes} variant="detailed" />
                     <FinancialRatios ratios={scoring.ratios} />

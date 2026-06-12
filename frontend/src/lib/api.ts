@@ -315,6 +315,11 @@ export const datalakeApi = {
         has_high_leverage: boolean;
         has_revenue_decline: boolean;
       };
+      digital?: {
+        presence_score: number | null;
+        has_website: boolean;
+        primary_domain: string | null;
+      };
       context: Record<string, unknown>;
       score_total: number;
       feature_version: string;
