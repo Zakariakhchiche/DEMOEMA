@@ -35,6 +35,10 @@ function rowToCible(r: Record<string, unknown>): Partial<Cible> {
   const score =
     num(r.score_ma) ?? num(r.pro_ma_score) ?? num(r.score) ?? 0;
   return {
+    // Préserve les champs riches de gold.scoring_ma (axes, proxy_ebitda, tier,
+    // ratios, digital) que /cibles renvoie — sinon ils sont jetés avant les cartes
+    // du chat (EBITDA "—", pas d'axes). Les champs normalisés ci-dessous écrasent.
+    ...(r as Partial<Cible>),
     siren: str(r.siren),
     denomination: str(r.denomination) || str(r.nom),
     naf: str(r.naf),
