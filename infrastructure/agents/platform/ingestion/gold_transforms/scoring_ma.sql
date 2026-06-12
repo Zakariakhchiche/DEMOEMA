@@ -233,6 +233,10 @@ SELECT
         ELSE 'E_REJECT'
     END AS tier,
     r.deal_score_raw AS score_total,
+    -- Patrimoine au bilan (asset-rich / sale-leaseback) — immobilisations corporelles
+    -- (code liasse BX) + drapeau immo > 30 % de l'actif. Signal M&A : actif tangible
+    -- = collatéral / opération de cession-bail. Source dormante enfin exposée.
+    r.immo_corporelles, r.immo_corporelles_high,
     -- Ratios financiers (grille Orascom) — passthrough fiche
     r.ebitda_margin, r.ebit_margin, r.net_margin, r.ebitda_on_assets,
     r.debt_to_ebitda, r.debt_to_equity, r.debt_ratio, r.equity_ratio,
@@ -261,6 +265,7 @@ SELECT
     NULL::int AS deal_percentile,
     'Z_ELIM' AS tier,
     0 AS score_total,
+    s.immo_corporelles, s.immo_corporelles_high,
     s.ebitda_margin, s.ebit_margin, s.net_margin, s.ebitda_on_assets,
     s.debt_to_ebitda, s.debt_to_equity, s.debt_ratio, s.equity_ratio,
     s.dso_days, s.revenue_volatility, s.revenue_growth_yoy,
