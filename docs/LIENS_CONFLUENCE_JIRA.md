@@ -1,10 +1,10 @@
-# LIENS CONFLUENCE & JIRA — DEMOEMA
+# LIENS CONFLUENCE & JIRA — Origin
 
-> Index complet de toutes les ressources Confluence (27 pages) et Jira (12 Epics + 80+ tickets) du projet DEMOEMA.
+> Index complet de toutes les ressources Confluence (27 pages) et Jira (12 Epics + 80+ tickets) du projet Origin.
 >
 > Domaine Atlassian : `demoema.atlassian.net`
 > Email admin : `zkhchiche@hotmail.com`
-> Espace Confluence : `DEMOEMA` (id 65942)
+> Espace Confluence : `Origin` (id 65942)
 > Projet Jira : `SCRUM` ("demoema")
 
 ---
@@ -13,8 +13,8 @@
 
 | Ressource | URL |
 |---|---|
-| **Confluence — Espace DEMOEMA** | https://demoema.atlassian.net/wiki/spaces/DEMOEMA |
-| **Confluence — Page d'accueil** | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/overview |
+| **Confluence — Espace Origin** | https://demoema.atlassian.net/wiki/spaces/Origin |
+| **Confluence — Page d'accueil** | https://demoema.atlassian.net/wiki/spaces/Origin/overview |
 | **Jira — Board Scrum** | https://demoema.atlassian.net/jira/software/projects/SCRUM/boards/1 |
 | **Jira — Backlog** | https://demoema.atlassian.net/jira/software/projects/SCRUM/backlog |
 | **Jira — Timeline (vue Epic)** | https://demoema.atlassian.net/jira/software/projects/SCRUM/timeline |
@@ -27,63 +27,63 @@
 ### 🏠 Racine
 | Page | URL |
 |---|---|
-| DEMOEMA — Documentation projet (Home) | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/458753 |
+| Origin — Documentation projet (Home) | https://demoema.atlassian.net/wiki/spaces/Origin/pages/458753 |
 
 ### 📋 1. Vue d'ensemble
 | Page | URL |
 |---|---|
-| 1.1 État Réel 17/04/2026 (⚠️ OBSOLÈTE) | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/98325 |
-| **1.1bis État Réel 19/04/2026 (NOUVEAU GROUND TRUTH)** ⭐ | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/1146913 |
-| 1.2 Décisions Stratégiques Validées (9 décisions) | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/164000 |
+| 1.1 État Réel 17/04/2026 (⚠️ OBSOLÈTE) | https://demoema.atlassian.net/wiki/spaces/Origin/pages/98325 |
+| **1.1bis État Réel 19/04/2026 (NOUVEAU GROUND TRUTH)** ⭐ | https://demoema.atlassian.net/wiki/spaces/Origin/pages/1146913 |
+| 1.2 Décisions Stratégiques Validées (9 décisions) | https://demoema.atlassian.net/wiki/spaces/Origin/pages/164000 |
 
 ### 📊 2. Business & Marché
 | Page | URL |
 |---|---|
-| 2.1 Analyse Concurrentielle | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/327682 |
-| 2.2 Stratégie Pricing (3 scénarios) | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/458816 |
-| 2.3 Validation Marché | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/164027 |
-| 2.4 Brochure Commerciale ⭐ | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/1245246 |
-| 2.5 Pitch Deck Pré-amorçage ⭐ | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/1212462 |
-| 2.6 Product Gaps Persona ⭐ | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/1212482 |
+| 2.1 Analyse Concurrentielle | https://demoema.atlassian.net/wiki/spaces/Origin/pages/327682 |
+| 2.2 Stratégie Pricing (3 scénarios) | https://demoema.atlassian.net/wiki/spaces/Origin/pages/458816 |
+| 2.3 Validation Marché | https://demoema.atlassian.net/wiki/spaces/Origin/pages/164027 |
+| 2.4 Brochure Commerciale ⭐ | https://demoema.atlassian.net/wiki/spaces/Origin/pages/1245246 |
+| 2.5 Pitch Deck Pré-amorçage ⭐ | https://demoema.atlassian.net/wiki/spaces/Origin/pages/1212462 |
+| 2.6 Product Gaps Persona ⭐ | https://demoema.atlassian.net/wiki/spaces/Origin/pages/1212482 |
 
 ### 🗓️ 3. Planning & Roadmap
 | Page | URL |
 |---|---|
-| 3.1 Roadmap 4 ans | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/491521 |
-| 3.2 Plan Démarrage Q2-Q4 2026 | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/524289 |
-| 3.3 Kit Action 30 jours | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/327701 |
+| 3.1 Roadmap 4 ans | https://demoema.atlassian.net/wiki/spaces/Origin/pages/491521 |
+| 3.2 Plan Démarrage Q2-Q4 2026 | https://demoema.atlassian.net/wiki/spaces/Origin/pages/524289 |
+| 3.3 Kit Action 30 jours | https://demoema.atlassian.net/wiki/spaces/Origin/pages/327701 |
 
 ### 💰 4. Finance
 | Page | URL |
 |---|---|
-| **4.1 Finances Unifiées (source unique de vérité)** ⭐ | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/98306 |
-| 4.2 Modèle Financier (P&L mensuel) | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/327731 |
-| 4.3 Budget & Équipe | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/164052 |
+| **4.1 Finances Unifiées (source unique de vérité)** ⭐ | https://demoema.atlassian.net/wiki/spaces/Origin/pages/98306 |
+| 4.2 Modèle Financier (P&L mensuel) | https://demoema.atlassian.net/wiki/spaces/Origin/pages/327731 |
+| 4.3 Budget & Équipe | https://demoema.atlassian.net/wiki/spaces/Origin/pages/164052 |
 
 ### 🛠️ 5. Technique
 | Page | URL |
 |---|---|
-| 5.1 Architecture Data (144 sources) | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/557057 |
-| **5.2 Architecture Technique (V4.1 IONOS)** ⭐ | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/66068 |
-| 5.3 Validation API | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/164078 |
-| 5.4 Data Catalog & Lineage | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/1146882 |
-| **5.5 Ingestion Agents (Dual-Agent Ollama)** ⭐ | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/1245217 |
+| 5.1 Architecture Data (144 sources) | https://demoema.atlassian.net/wiki/spaces/Origin/pages/557057 |
+| **5.2 Architecture Technique (V4.1 IONOS)** ⭐ | https://demoema.atlassian.net/wiki/spaces/Origin/pages/66068 |
+| 5.3 Validation API | https://demoema.atlassian.net/wiki/spaces/Origin/pages/164078 |
+| 5.4 Data Catalog & Lineage | https://demoema.atlassian.net/wiki/spaces/Origin/pages/1146882 |
+| **5.5 Ingestion Agents (Dual-Agent Ollama)** ⭐ | https://demoema.atlassian.net/wiki/spaces/Origin/pages/1245217 |
 
 ### 🛡️ 6. Risques & Conformité
 | Page | URL |
 |---|---|
-| 6.1 Risques & Conformité | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/458839 |
-| 6.2 AI Act Compliance | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/327755 |
+| 6.1 Risques & Conformité | https://demoema.atlassian.net/wiki/spaces/Origin/pages/458839 |
+| 6.2 AI Act Compliance | https://demoema.atlassian.net/wiki/spaces/Origin/pages/327755 |
 
 ### 🔍 7. Audits & Historique
 | Page | URL |
 |---|---|
-| 7.1 Self Challenge V1 | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/524328 |
-| 7.2 Self Challenge V2 | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/491548 |
-| 7.3 Réponses Self Challenge | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/524309 |
-| 7.4 Cleanup Log | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/66094 |
-| 7.5 Challenge Questions (antérieur) | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/164098 |
-| 7.6 Self Challenge V3 Data Catalog ⭐ | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/pages/1245265 |
+| 7.1 Self Challenge V1 | https://demoema.atlassian.net/wiki/spaces/Origin/pages/524328 |
+| 7.2 Self Challenge V2 | https://demoema.atlassian.net/wiki/spaces/Origin/pages/491548 |
+| 7.3 Réponses Self Challenge | https://demoema.atlassian.net/wiki/spaces/Origin/pages/524309 |
+| 7.4 Cleanup Log | https://demoema.atlassian.net/wiki/spaces/Origin/pages/66094 |
+| 7.5 Challenge Questions (antérieur) | https://demoema.atlassian.net/wiki/spaces/Origin/pages/164098 |
+| 7.6 Self Challenge V3 Data Catalog ⭐ | https://demoema.atlassian.net/wiki/spaces/Origin/pages/1245265 |
 
 ---
 
@@ -212,7 +212,7 @@ SCRUM-63, SCRUM-64 — Deck Seed V3, Intros VCs seed FR/UE
 |---|---|
 | Console admin Atlassian | https://admin.atlassian.com |
 | Gestion tokens API | https://id.atlassian.com/manage-profile/security/api-tokens |
-| Permissions Confluence DEMOEMA | https://demoema.atlassian.net/wiki/spaces/DEMOEMA/space-settings/permissions |
+| Permissions Confluence Origin | https://demoema.atlassian.net/wiki/spaces/Origin/space-settings/permissions |
 | Permissions Jira SCRUM | https://demoema.atlassian.net/jira/people |
 | Inviter utilisateurs | https://demoema.atlassian.net/admin/invite-users |
 

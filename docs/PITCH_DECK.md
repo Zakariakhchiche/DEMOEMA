@@ -1,4 +1,4 @@
-# PITCH DECK DEMOEMA — Pré-amorçage 600k€
+# PITCH DECK Origin — Pré-amorçage 600k€
 
 > **Trame de pitch deck** à rebâtir dans Figma / PowerPoint / Pitch / Canva.
 >
@@ -27,7 +27,7 @@
 
 ## Contenu visible
 ```
-DEMOEMA
+Origin
 
 L'intelligence M&A pour
 les boutiques qui ne peuvent pas
@@ -39,12 +39,12 @@ Avril 2026
 ```
 
 ## Speaker notes
-- "Bonjour, je m'appelle [X], je lève 600k€ pour DEMOEMA. En 10 minutes je vous montre pourquoi."
+- "Bonjour, je m'appelle [X], je lève 600k€ pour Origin. En 10 minutes je vous montre pourquoi."
 - Ne pas dire "merci de m'accueillir" (waste de temps)
 
 ## Hints visuels
 - Fond sobre (blanc ou noir)
-- Logo DEMOEMA centré (si pas de logo, juste le nom en typo forte)
+- Logo Origin centré (si pas de logo, juste le nom en typo forte)
 - Ta photo en bas à droite (petite, ronde, sympathique)
 
 ---
@@ -80,7 +80,7 @@ inadaptés.
 
 ## Contenu visible
 ```
-DEMOEMA connecte l'associé M&A
+Origin connecte l'associé M&A
 au bon décisionnaire au bon moment.
 
 ⭐ Alertes signaux pré-cession (killer feature #1)
@@ -218,7 +218,7 @@ Profond   ●                                      ●
    ↕      Pappers                           Bureau van Dijk
           Société.com                        Pitchbook
                                              Capital IQ
-            ★ DEMOEMA (ici)
+            ★ Origin (ici)
 
 Lookup                                      Profond
           
@@ -461,7 +461,7 @@ Merci.
 ## Hints visuels
 - Sobre
 - Tes coordonnées grosses et lisibles
-- Logo DEMOEMA en bas
+- Logo Origin en bas
 
 ---
 

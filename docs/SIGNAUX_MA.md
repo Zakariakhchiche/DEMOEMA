@@ -1,4 +1,4 @@
-# Scoring M&A DEMOEMA — Approche advisor pro
+# Scoring M&A Origin — Approche advisor pro
 
 > Réécrit 2026-04-30 : passage du modèle additif 13 dimensions / 123 signaux
 > à un modèle **multiplicatif 4 axes business + 1 axe risk** calibré sur la

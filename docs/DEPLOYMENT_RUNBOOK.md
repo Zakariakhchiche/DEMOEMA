@@ -1,6 +1,6 @@
 # DEPLOYMENT RUNBOOK — VPS IONOS (V4.2)
 
-> Runbook opérationnel pour DEMOEMA sur VPS IONOS, déployé le 2026-04-20.
+> Runbook opérationnel pour Origin sur VPS IONOS, déployé le 2026-04-20.
 >
 > Public : founder, Lead Data Eng (juillet 26), astreinte future.
 >
@@ -85,7 +85,7 @@ Push sur `main` dans `backend/`, `frontend/`, `infrastructure/agents/` ou `infra
 ### Déploiement manuel
 
 ```bash
-cd ~/DEMOEMA
+cd ~/Origin
 ./infrastructure/scripts/deploy.sh backend main
 ./infrastructure/scripts/deploy.sh frontend main
 ./infrastructure/scripts/deploy.sh agents main

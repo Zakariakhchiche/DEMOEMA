@@ -1,8 +1,8 @@
-# 🏆 10 Features SaaS M&A jamais implémentées (moat DEMOEMA)
+# 🏆 10 Features SaaS M&A jamais implémentées (moat Origin)
 
 > Audit 29/04/2026 — features qu'AUCUN concurrent (Mergermarket, Dealogic, PitchBook,
 > CFNews, Décideurs, Capital IQ, FactSet, Bloomberg, Eikon Refinitiv) n'a aujourd'hui.
-> Chacune représente un avantage concurrentiel défendable pour EdRCF.
+> Chacune représente un avantage concurrentiel défendable pour Origin.
 
 ---
 
@@ -11,7 +11,7 @@
 ### Pain point
 Mergermarket / Dealogic publient les deals **APRÈS** le closing. Trop tard pour l'origination — un autre advisor a déjà signé.
 
-### Solution DEMOEMA
+### Solution Origin
 **Détection prédictive de cession à 6-12 mois avant closing** via 7 signaux faibles cumulés :
 
 ```yaml
@@ -48,7 +48,7 @@ Toutes les data déjà disponibles dans nos silvers M&A. Juste à coder le scori
 ### Pain point
 DD compliance manuelle = 3-8h (sanctions OFAC + UE + Gels avoirs FR + ICIJ + BODACC procédures + AMF + presse + judiliibre). Cherche un compliance officer dédié.
 
-### Solution DEMOEMA
+### Solution Origin
 **1 clic / 1 prompt** → rapport DD compliance PDF complet en 30s :
 
 - Sanctions OpenSanctions + OFAC + UE (silver.opensanctions)
@@ -60,7 +60,7 @@ DD compliance manuelle = 3-8h (sanctions OFAC + UE + Gels avoirs FR + ICIJ + BOD
 - HATVP politiques exposés (silver.hatvp_conflits_interets)
 - Press buzz négatif (silver.press_mentions_matched)
 
-Output : **PDF charte EdRCF** signable au client.
+Output : **PDF charte Origin** signable au client.
 
 ### Disruption
 Cognism / ZoomInfo font de la compliance basique (sanctions seules). Aucun ne fait l'aggregat 8 sources avec graphe ICIJ + DD politique.
@@ -83,7 +83,7 @@ Avocat M&A / family office cherche des dirigeants asset-rich (LBO/LBI seller-sid
 
 = 4-6h de recherche manuelle par dirigeant.
 
-### Solution DEMOEMA
+### Solution Origin
 Table `silver.parcelles_dirigeants` + `gold.parcelles_cibles` déjà fait (commit f23756f) :
 - Pour chaque dirigeant, somme valeur immo via SCI
 - Filtre `is_asset_rich >= 5M€`
@@ -104,7 +104,7 @@ Page dédiée "Asset-rich targets" + filtre dans Intelligence Targets.
 ### Pain point
 "Qui connaît qui ?" = clé du M&A. Aujourd'hui : LinkedIn manuel, 30 min par dirigeant.
 
-### Solution DEMOEMA
+### Solution Origin
 - `gold.network_mandats` : graphe SQL 50M edges person × entreprise (déjà spec'd)
 - ForceGraph2D plein écran avec depth recursif
 - Click n'importe quel dirigeant → tous ses co-mandataires depth 2-3
@@ -126,12 +126,12 @@ Page dédiée "Asset-rich targets" + filtre dans Intelligence Targets.
 ## Feature #5 — **AI Memory cross-clients** (privacy-first)
 
 ### Pain point
-Anne travaille sur **30 mandats par an** chez EdRCF. Au bout de 6 mois, elle ne se souvient plus de "qu'est-ce que j'avais regardé sur tel secteur" → re-recherche from scratch.
+Anne travaille sur **30 mandats par an** chez Origin. Au bout de 6 mois, elle ne se souvient plus de "qu'est-ce que j'avais regardé sur tel secteur" → re-recherche from scratch.
 
-### Solution DEMOEMA
+### Solution Origin
 - pgvector embeddings sur les conversations
 - LLM peut répondre "Tu m'avais demandé X il y a 3 mois, voici les nouveautés depuis"
-- **Privacy-first** : memory restreinte au workspace EdRCF (zéro leak inter-clients via RLS Postgres)
+- **Privacy-first** : memory restreinte au workspace Origin (zéro leak inter-clients via RLS Postgres)
 
 ### Disruption
 ChatGPT a "Memory" mais cross-conversations. Anthropic a la même chose. Aucun SaaS B2B M&A n'a ça avec privacy strict.
@@ -149,7 +149,7 @@ ChatGPT a "Memory" mais cross-conversations. Anthropic a la même chose. Aucun S
 ### Pain point
 Mergermarket scrape la presse mais sans contexte. Décideurs publie les deals mais 6 mois après.
 
-### Solution DEMOEMA
+### Solution Origin
 - Scraping Mediapart / Le Monde / Les Echos / La Tribune (via openclaw + 2captcha)
 - NLP (Claude) pour extraire : `[entreprise_cible, advisor_buy_side, advisor_sell_side, montant, secteur, status]`
 - Stockage dans `silver.press_deals_extracted`
@@ -166,16 +166,16 @@ Mergermarket scrape la presse mais sans contexte. Décideurs publie les deals ma
 ### Faisabilité
 Stack openclaw + DeepSeek déjà en place. À coder.
 
-**Effort** : 3 semaines · **Impact** : 🔥🔥🔥🔥🔥 (killer feature pour positionnement EdRCF)
+**Effort** : 3 semaines · **Impact** : 🔥🔥🔥🔥🔥 (killer feature pour positionnement Origin)
 
 ---
 
 ## Feature #7 — **Mandate Generator AI** (proposal en 5 min)
 
 ### Pain point
-EdRCF reçoit un appel : *"On veut vendre notre boîte chimie 30M€ EV"*. Pour répondre, Anne doit générer une proposition (analyse marché + benchmarks + roadmap mandat) → 4-8h.
+Origin reçoit un appel : *"On veut vendre notre boîte chimie 30M€ EV"*. Pour répondre, Anne doit générer une proposition (analyse marché + benchmarks + roadmap mandat) → 4-8h.
 
-### Solution DEMOEMA
+### Solution Origin
 Prompt : *"Génère-moi une proposition mandate sell-side pour Acme Industries (siren X), 30M€ EV cible, secteur chimie spé"*.
 
 L'IA génère :
@@ -186,7 +186,7 @@ L'IA génère :
 - Roadmap mandat 6 mois
 - Pricing fees suggéré
 
-Output : **PDF proposal** charte EdRCF, 8-12 pages.
+Output : **PDF proposal** charte Origin, 8-12 pages.
 
 ### Disruption
 McKinsey utilise GPT-4 pour leurs proposals mais c'est un workflow custom. Aucun SaaS M&A vertical n'embed ça.
@@ -200,7 +200,7 @@ McKinsey utilise GPT-4 pour leurs proposals mais c'est un workflow custom. Aucun
 ### Pain point
 Anne va voir des clients à La Défense / Lyon / Bordeaux. En métro / TGV elle veut continuer son sourcing. Mergermarket = pas de mobile (web seulement, dégradé).
 
-### Solution DEMOEMA
+### Solution Origin
 PWA installable iPhone / Android avec :
 - Chat AI mobile-first (voice mode optionnel)
 - Push notifications signaux M&A critiques
@@ -219,7 +219,7 @@ PWA installable iPhone / Android avec :
 ### Pain point
 Comparer 5 cibles M&A pour un client = ouvrir 5 tabs + Excel + 4h de copy-paste.
 
-### Solution DEMOEMA
+### Solution Origin
 Sélection 2-5 cards → "Compare" → vue dédiée avec :
 - Table de comparaison (toutes les features clés en colonnes)
 - Radar chart 9 dimensions superposées (5 colors)
@@ -239,7 +239,7 @@ PitchBook a un "Compare" mais 2 cibles max. CFNews zéro. Mergermarket zéro.
 ### Pain point M&A regulé
 Pour les mandats sensibles (PE, family office), le compliance officer client demande : *"Prouvez-moi que vous avez audité X sources avant de proposer cette cible"*.
 
-### Solution DEMOEMA
+### Solution Origin
 Chaque réponse AI affiche les **sources auditées** avec timestamp + version :
 - "Source INPI RNE consulté le 29/04/26 14:23 (version bronze v3.2)"
 - "Source DILA OpenData CASS_20250712 (incluse dans bronze juillet 2025)"
@@ -282,19 +282,19 @@ Personne ne fait ça. Toutes les decisions LLM dans le secteur M&A sont des blac
 **Sprint 3 (semaine 7-10)** : Press Tracker + Mandate Generator
 
 À 3 mois → MVP avec **6 killer features** qu'aucun concurrent n'a → positionnement
-défendable EdRCF "premium SaaS M&A FR né AI-first".
+défendable Origin "premium SaaS M&A FR né AI-first".
 
 ## 💰 Pricing power
 
 Ces features justifient un **pricing premium** vs Mergermarket :
 
 - Mergermarket : €4,000-6,000/an/user
-- DEMOEMA Pro : €5,000-8,000/an/user (équivalent + features uniques)
-- DEMOEMA Enterprise : €15,000-25,000/an/workspace (Pitch Ready + Audit Trail + Memory)
+- Origin Pro : €5,000-8,000/an/user (équivalent + features uniques)
+- Origin Enterprise : €15,000-25,000/an/workspace (Pitch Ready + Audit Trail + Memory)
 
 ARR cible Y2 (2027) : 100 users × 6,000€ + 20 enterprise × 18,000€ = **€960K ARR**.
 
 ---
 
-> Document concurrentiel. Confidentiel EdRCF.
-> Dernière maj 29/04/2026 (avec features identifiées via veille UX/UI SaaS 2026 + audit roadmap DEMOEMA).
+> Document concurrentiel. Confidentiel Origin.
+> Dernière maj 29/04/2026 (avec features identifiées via veille UX/UI SaaS 2026 + audit roadmap Origin).

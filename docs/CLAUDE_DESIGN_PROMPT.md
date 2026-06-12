@@ -1,4 +1,4 @@
-# 🎨 Prompt design DEMOEMA Front — AI-first Chat Interface
+# 🎨 Prompt design Origin Front — AI-first Chat Interface
 
 > Prompt à donner à **claude.ai/design** (ou v0.dev / lovable.dev / Bolt.new).
 > Vision **TOTALEMENT REPENSÉE 29/04/2026** : passage d'un dashboard SaaS classique
@@ -9,7 +9,7 @@
 
 # 🎯 LE PRODUIT EN UNE PHRASE
 
-> **DEMOEMA est un ChatGPT pour le M&A français** : tu poses une question naturelle
+> **Origin est un ChatGPT pour le M&A français** : tu poses une question naturelle
 > (ou tu cherches un SIREN), l'IA te répond avec des **fiches entreprises** dénormalisées
 > directement dans la conversation. Outil **simple et efficace** qui remplace
 > Mergermarket / Dealogic via une UX 2030.
@@ -32,7 +32,7 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ DEMOEMA  ⌘K Search  Workspace ▾    🔔  Avatar                    │  56px
+│ Origin  ⌘K Search  Workspace ▾    🔔  Avatar                    │  56px
 ├────────────┬─────────────────────────────────────────────────────┤
 │            │  Aurora gradient subtle background                  │
 │ + New      │                                                      │
@@ -122,7 +122,7 @@ Lien depuis chat ("@show graph") ou depuis fiche.
 
 ### 4. **Settings / Workspace** (modal)
 
-Préférences user (theme, density, notifications, API keys EdRCF, etc.).
+Préférences user (theme, density, notifications, API keys Origin, etc.).
 
 **C'est tout.** 4 écrans, point.
 
@@ -457,7 +457,7 @@ L'utilisateur doit pouvoir :
 > - Le tout dans une UI **sombre, glassmorphique, futuriste** mais **dense comme Bloomberg**
 > - Avec une **vitesse de Linear** et la **sobriété d'Anthropic**
 
-C'est ça DEMOEMA Front v2.
+C'est ça Origin Front v2.
 
 ---
 
@@ -468,14 +468,14 @@ C'est ça DEMOEMA Front v2.
 
 # 🚀 INNOVATIONS 2026 (intégrées au brief — issus veille UX/UI SaaS)
 
-Suite à veille SaaS UX/UI 2026 (sources : SaaSUI Blog, Orbix Studio, RankTracker, B2B mention G2, Averi, Linear gold standard, etc.), ajout de **3 patterns innovants sous-exploités** par les SaaS M&A actuels (Mergermarket, Dealogic, PitchBook) que DEMOEMA peut claim comme différenciateurs.
+Suite à veille SaaS UX/UI 2026 (sources : SaaSUI Blog, Orbix Studio, RankTracker, B2B mention G2, Averi, Linear gold standard, etc.), ajout de **3 patterns innovants sous-exploités** par les SaaS M&A actuels (Mergermarket, Dealogic, PitchBook) que Origin peut claim comme différenciateurs.
 
 ## Innovation #1 — **Adaptive UI** (interface auto-personnalisée)
 
 > *"Adaptive UI is where the interface builds itself based on your data, history, patterns and inputs at the time, creating what should be the best possible experience."* — UX Tigers 2026
 
 ### Concept
-Après 2 semaines d'usage, l'interface DEMOEMA s'adapte à **Anne Dupont** :
+Après 2 semaines d'usage, l'interface Origin s'adapte à **Anne Dupont** :
 - Son top 3 actions devient des **shortcuts épinglés** dans le chat input
 - Les cartes affichent en priorité les **champs qu'elle consulte le plus** (DD compliance ? Score patrimoine ? Réseau ?)
 - Le chat suggère des prompts basés sur son **historique** ("Comme tu as fait DD Acme la semaine dernière, voici DD Beta — secteur similaire")
@@ -524,12 +524,12 @@ Après 2 semaines d'usage, l'interface DEMOEMA s'adapte à **Anne Dupont** :
 ### Pain point M&A boutique
 Anne passe **2-4h par cible** à compiler manuellement les infos pour son livrable client. Mergermarket export = CSV brut moche.
 
-### Solution DEMOEMA
-Bouton "📄 Pitch Ready" sur chaque card / fiche → PDF design-matched (charte EdRCF) en **5 secondes** :
+### Solution Origin
+Bouton "📄 Pitch Ready" sur chaque card / fiche → PDF design-matched (charte Origin) en **5 secondes** :
 
 **Page 1 — Synthesis** :
 - Header : logo client + titre "Cible M&A — [Denomination]" + date
-- Score halo grand format (signature DEMOEMA)
+- Score halo grand format (signature Origin)
 - KPIs critiques 4 cards : CA, EBITDA, Effectif, Valorisation estimée
 - Verdict 1 phrase : *"Cible HIGH potentiel pour mandat sell-side mid-cap chimie"*
 
@@ -552,10 +552,10 @@ Bouton "📄 Pitch Ready" sur chaque card / fiche → PDF design-matched (charte
 **Page 5 — Annexes** :
 - Liens audit (siren INPI, BODACC, BALO si coté)
 - Disclaimer légal RGPD
-- Footer EdRCF + date génération
+- Footer Origin + date génération
 
 ### Customisation client
-Anne peut personnaliser le **template** (couleurs charte EdRCF, logo, mention pro) une seule fois → toutes les générations PDF appliquent ce template.
+Anne peut personnaliser le **template** (couleurs charte Origin, logo, mention pro) une seule fois → toutes les générations PDF appliquent ce template.
 
 ### Stack technique
 - React-PDF ou Puppeteer (HTML → PDF)
@@ -581,7 +581,7 @@ Anne peut personnaliser le **template** (couleurs charte EdRCF, logo, mention pr
     <Step done>Identité + finances</Step>
     <Step done>Compliance check</Step>
     <Step done>Réseau dirigeants</Step>
-    <Step active>Génération PDF charte EdRCF...</Step>
+    <Step active>Génération PDF charte Origin...</Step>
   </Steps>
   <DialogFooter>
     <DownloadLink href={pdfUrl}>📥 Télécharger PDF (1.2 MB)</DownloadLink>
@@ -594,12 +594,12 @@ Anne peut personnaliser le **template** (couleurs charte EdRCF, logo, mention pr
 ## Innovation #3 — **Proactive Alerts conversationnelles** (sticky engagement)
 
 ### Concept
-Au lieu d'attendre qu'Anne demande, **DEMOEMA initie la conversation** chaque matin avec les signaux pertinents pour ses cibles sauvées.
+Au lieu d'attendre qu'Anne demande, **Origin initie la conversation** chaque matin avec les signaux pertinents pour ses cibles sauvées.
 
 ### Exemple message AI proactif (8h00 Paris)
 
 ```
-✨ DEMOEMA  ·  Bonjour Anne ☕
+✨ Origin  ·  Bonjour Anne ☕
 
 J'ai analysé ta watchlist "Cibles tech IDF" cette nuit.
 
@@ -751,7 +751,7 @@ AI: Oui, tu travaillais sur Acme Industries SAS (siren 838291045).
 
 ## Innovation #7 — **Voice mode** (mobile-first PWA)
 
-Pendant qu'Anne marche entre 2 RDV à La Défense, elle peut **parler** à DEMOEMA depuis son iPhone :
+Pendant qu'Anne marche entre 2 RDV à La Défense, elle peut **parler** à Origin depuis son iPhone :
 
 ```
 🎙️ Anne (audio) : "Donne-moi le scoring de Capgemini"
@@ -846,7 +846,7 @@ Ces 10 innovations + le design system glassmorphism futuriste = **moat concurren
 # 🗄️ DATA EXPLORER MODE — accès direct aux tables (ajout v3)
 
 ## Pourquoi
-DEMOEMA stocke **512 GB / 115 bronze / 29 silver MV / 13 gold tables**. Une interface chat-first
+Origin stocke **512 GB / 115 bronze / 29 silver MV / 13 gold tables**. Une interface chat-first
 ne permet pas de **tout** explorer. Pour les power users (advisors expérimentés, analysts,
 compliance officers), il faut un **mode Data Explorer** qui complète le chat.
 
@@ -862,7 +862,7 @@ Cmd+Shift+E (ou icon 📊 dans la sidebar) → switch entre les 2 modes.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ DEMOEMA  💬 Chat | 📊 Explorer  Workspace ▾  🔔  Avatar          │  56px
+│ Origin  💬 Chat | 📊 Explorer  Workspace ▾  🔔  Avatar          │  56px
 ├────────────┬─────────────────────────────────────────────────────┤
 │            │                                                      │
 │ Tables     │  ┌─Table Browser──────────────────────────────────┐ │
@@ -1000,7 +1000,7 @@ User configure une vue → save avec nom + tags → réutilisable :
 </SavedView>
 ```
 
-Saved views sont partageables (lien `/v/abc123`) avec l'équipe EdRCF.
+Saved views sont partageables (lien `/v/abc123`) avec l'équipe Origin.
 
 ### 6. **Bulk actions sticky bar** (quand selection > 0)
 
@@ -1148,7 +1148,7 @@ Total composants UI = **5 chat + 5 explorer = 10 components**.
 ✅ User peut **trouver une row dans 8M dirigeants en < 3 secondes** (filter + sort)
 ✅ Export 100K rows → CSV en < 10 secondes
 ✅ User non-SQL peut faire des queries complexes via le visual builder
-✅ Saved views partageables avec équipe EdRCF
+✅ Saved views partageables avec équipe Origin
 ✅ Bulk actions sur 100+ rows fluides
 ✅ Mobile : Data Explorer dégradé (table → cards verticales)
 
@@ -1162,4 +1162,4 @@ Total composants UI = **5 chat + 5 explorer = 10 components**.
 | **📊 Explorer** | Power user (analyst, compliance) | "Browse 8M dirigeants" — direct DB access |
 | **🌐 Graphe** | Tous (exploration) | "Qui connaît qui ?" — réseau visuel |
 
-C'est la **bonne architecture** pour DEMOEMA.
+C'est la **bonne architecture** pour Origin.
