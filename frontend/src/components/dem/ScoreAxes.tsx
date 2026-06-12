@@ -43,6 +43,10 @@ function tone(value: number): string {
 export function ScoreAxes({ axes, variant = "compact" }: Props) {
   if (!axes) return null;
   const values = AXIS_META.map((m) => ({ ...m, value: axes[m.key] ?? 0 }));
+  // Les 4 axes v3 ne sont pas calculés dans le scoring_ma courant → tous à 0.
+  // Afficher "0/100" sur les 4 est trompeur (laisse croire à un score nul réel).
+  // On masque la section tant qu'aucun axe n'est renseigné.
+  if (values.every((a) => !a.value)) return null;
 
   if (variant === "compact") {
     // Mini-bars sur une ligne (intégré dans TargetCard)
