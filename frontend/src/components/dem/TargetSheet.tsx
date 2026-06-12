@@ -375,7 +375,7 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
           padding: "20px 28px 18px", borderBottom: "1px solid var(--border-subtle)",
           display: "flex", alignItems: "flex-start", gap: 18,
         }}>
-          <ScoreBadge value={target.score} size="lg" breakdown={target.score_breakdown} />
+          <ScoreBadge value={scoring?.deal_score ?? target.score} size="lg" breakdown={target.score_breakdown} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div id="target-sheet-title" style={{
               fontSize: 11, color: "var(--text-tertiary)",
