@@ -98,6 +98,96 @@ export function ScoreAxes({ axes, variant = "compact" }: Props) {
   );
 }
 
+/* ── Ratios financiers (grille "Financial ratio assessment") ─────────────── */
+
+type Ratios = {
+  ebitda_margin: number | null;
+  ebit_margin: number | null;
+  net_margin: number | null;
+  debt_to_ebitda: number | null;
+  debt_to_equity: number | null;
+  debt_ratio: number | null;
+  equity_ratio: number | null;
+  dso_days: number | null;
+  revenue_growth_yoy: number | null;
+  financial_health_tier: string | null;
+  has_negative_equity: boolean;
+  has_negative_ebitda: boolean;
+  has_high_leverage: boolean;
+  has_revenue_decline: boolean;
+} | null | undefined;
+
+// rating : +1 above / 0 average / -1 below (seuils grille Orascom). higherBetter
+// = un ratio élevé est bon (marges) ; sinon élevé = mauvais (dette, DSO).
+function rate(v: number | null, below: number, above: number, higherBetter: boolean): number | null {
+  if (v == null) return null;
+  if (higherBetter) return v >= above ? 1 : v < below ? -1 : 0;
+  return v <= above ? 1 : v > below ? -1 : 0;
+}
+const RATING_COLOR = ["var(--accent-emerald,#34d399)", "var(--accent-amber,#fbbf24)", "var(--text-muted,#9b2c2c)"];
+function ratingColor(r: number | null): string {
+  if (r == null) return "var(--text-tertiary,#8a8a92)";
+  return r > 0 ? RATING_COLOR[0] : r === 0 ? RATING_COLOR[1] : "#f87171";
+}
+const pct = (v: number | null) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
+const xfmt = (v: number | null) => (v == null ? "—" : `${v.toFixed(2)}×`);
+const dfmt = (v: number | null) => (v == null ? "—" : `${Math.round(v)} j`);
+
+export function FinancialRatios({ ratios }: { ratios: Ratios }) {
+  if (!ratios) return null;
+  const rows: { label: string; val: string; rating: number | null }[] = [
+    { label: "Marge EBITDA", val: pct(ratios.ebitda_margin), rating: rate(ratios.ebitda_margin, 0.08, 0.15, true) },
+    { label: "Marge nette", val: pct(ratios.net_margin), rating: rate(ratios.net_margin, 0.05, 0.15, true) },
+    { label: "Dette / EBITDA", val: xfmt(ratios.debt_to_ebitda), rating: rate(ratios.debt_to_ebitda, 4, 1.5, false) },
+    { label: "Dette / Fonds propres", val: xfmt(ratios.debt_to_equity), rating: rate(ratios.debt_to_equity, 2, 0.6, false) },
+    { label: "Ratio d'endettement", val: pct(ratios.debt_ratio), rating: rate(ratios.debt_ratio, 0.9, 0.4, false) },
+    { label: "DSO (créances)", val: dfmt(ratios.dso_days), rating: rate(ratios.dso_days, 75, 40, false) },
+    { label: "Croissance CA", val: pct(ratios.revenue_growth_yoy), rating: rate(ratios.revenue_growth_yoy, 0, 0.05, true) },
+  ].filter((r) => r.val !== "—");
+  if (rows.length === 0) return null;
+
+  const tierMeta: Record<string, { label: string; color: string }> = {
+    above_average: { label: "Au-dessus", color: RATING_COLOR[0] },
+    average: { label: "Acceptable", color: RATING_COLOR[1] },
+    below_average: { label: "En-dessous", color: "#f87171" },
+  };
+  const tier = ratios.financial_health_tier ? tierMeta[ratios.financial_health_tier] : null;
+  const flags = [
+    ratios.has_negative_equity && "Capitaux propres négatifs",
+    ratios.has_negative_ebitda && "EBITDA négatif",
+    ratios.has_high_leverage && "Surendettement",
+    ratios.has_revenue_decline && "Chute d'activité",
+  ].filter(Boolean) as string[];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)" }}>Ratios financiers</span>
+        {tier && (
+          <span style={{ fontSize: 10.5, fontWeight: 700, color: tier.color, padding: "1px 8px", borderRadius: 999, background: "rgba(255,255,255,0.05)" }}>
+            {tier.label}
+          </span>
+        )}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "4px 12px" }}>
+        {rows.map((r) => (
+          <div key={r.label} style={{ display: "contents" }}>
+            <span style={{ fontSize: 11.5, color: "var(--text-secondary,#c0c0c8)" }}>{r.label}</span>
+            <span className="dem-mono tab-num" style={{ fontSize: 11.5, fontWeight: 700, color: ratingColor(r.rating), textAlign: "right" }}>{r.val}</span>
+          </div>
+        ))}
+      </div>
+      {flags.length > 0 && (
+        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 2 }}>
+          {flags.map((f) => (
+            <span key={f} style={{ fontSize: 9.5, fontWeight: 600, color: "#f87171", padding: "1px 7px", borderRadius: 999, background: "rgba(248,113,113,0.12)" }}>⚠ {f}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface TierBadgeProps {
   tier?: "A_HOT" | "B_WARM" | "C_PIPELINE" | "D_WATCH" | "E_REJECT" | "Z_ELIM" | string;
   percentile?: number;

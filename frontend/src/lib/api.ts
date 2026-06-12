@@ -289,6 +289,24 @@ export const datalakeApi = {
         sector_multiple: number | null;
         ev_estimated_eur: number | null;
       };
+      ratios?: {
+        ebitda_margin: number | null;
+        ebit_margin: number | null;
+        net_margin: number | null;
+        ebitda_on_assets: number | null;
+        debt_to_ebitda: number | null;
+        debt_to_equity: number | null;
+        debt_ratio: number | null;
+        equity_ratio: number | null;
+        dso_days: number | null;
+        revenue_volatility: number | null;
+        revenue_growth_yoy: number | null;
+        financial_health_tier: string | null;
+        has_negative_equity: boolean;
+        has_negative_ebitda: boolean;
+        has_high_leverage: boolean;
+        has_revenue_decline: boolean;
+      };
       context: Record<string, unknown>;
       score_total: number;
       feature_version: string;

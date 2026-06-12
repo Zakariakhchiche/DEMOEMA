@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Icon } from "./Icon";
 import { ScoreBadge } from "./ScoreBadge";
-import { ScoreAxes, TierBadge } from "./ScoreAxes";
+import { ScoreAxes, TierBadge, FinancialRatios } from "./ScoreAxes";
 import { DirigeantDrillContent } from "./DirigeantDrillContent";
 import { CompanyCompliancePanel, type CompanyCompliance } from "./CompliancePanel";
 import { GroupTab } from "./GroupTab";
@@ -599,6 +599,7 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
                       )}
                     </div>
                     <ScoreAxes axes={scoring.axes} variant="detailed" />
+                    <FinancialRatios ratios={scoring.ratios} />
                     {(scoring.risk.has_sanction_ofac_eu || scoring.risk.has_proc_collective_recent ||
                       scoring.risk.has_sanction_cnil || scoring.risk.has_sanction_dgccrf ||
                       scoring.risk.n_contentieux_recent > 0 || scoring.risk.has_late_filing) && (
