@@ -198,6 +198,18 @@ async def query_table(
         rows = await pool.fetch(sql, *params)
     except asyncpg.UndefinedTableError:
         raise HTTPException(status_code=503, detail=f"Table {full} pas encore matérialisée dans le datalake")
+    except asyncpg.ObjectNotInPrerequisiteStateError:
+        # Matview existante mais non peuplée (WITH NO DATA / jamais REFRESH) :
+        # on renvoie une table vide proprement au lieu d'un 500 qui casse l'explorer.
+        return {
+            "table": full,
+            "columns": meta["preview_cols"],
+            "rows": [],
+            "limit": limit,
+            "offset": offset,
+            "has_more": False,
+            "note": "Vue matérialisée pas encore peuplée",
+        }
     except asyncpg.UndefinedColumnError as e:
         raise HTTPException(status_code=500, detail=f"Schema mismatch: {e}")
     except Exception as e:
