@@ -597,6 +597,18 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
                           Risk haircut −{Math.round((1 - scoring.risk.multiplier) * 100)}%
                         </span>
                       )}
+                      {scoring.financials.asset_rich && (
+                        <span
+                          title={`Immobilisations corporelles ${scoring.financials.immo_corporelles ? fmtEur(scoring.financials.immo_corporelles) : ""} (> 30 % de l'actif) — candidat cession-bail / actif tangible en collatéral`}
+                          style={{
+                            fontSize: 11, padding: "2px 8px", borderRadius: 999,
+                            background: "rgba(52,211,153,0.10)",
+                            border: "1px solid rgba(52,211,153,0.30)",
+                            color: "var(--accent-emerald)", fontWeight: 600,
+                          }}>
+                          🏗 Asset-rich{scoring.financials.immo_corporelles ? ` · ${fmtEur(scoring.financials.immo_corporelles)}` : ""}
+                        </span>
+                      )}
                     </div>
                     <ScoreAxes axes={scoring.axes} variant="detailed" />
                     <FinancialRatios ratios={scoring.ratios} />

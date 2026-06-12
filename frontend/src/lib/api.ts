@@ -288,6 +288,8 @@ export const datalakeApi = {
         proxy_margin: number | null;
         sector_multiple: number | null;
         ev_estimated_eur: number | null;
+        immo_corporelles?: number | null;
+        asset_rich?: boolean;
       };
       ratios?: {
         ebitda_margin: number | null;

@@ -2571,6 +2571,10 @@ async def scoring_detail(req: Request, siren: str):
             ),
             "sector_multiple": float(data["sector_multiple"]) if data.get("sector_multiple") else None,
             "ev_estimated_eur": float(data["ev_estimated_eur"]) if data.get("ev_estimated_eur") else None,
+            # Patrimoine au bilan (asset-rich / sale-leaseback) — immobilisations
+            # corporelles + drapeau immo > 30 % de l'actif.
+            "immo_corporelles": float(data["immo_corporelles"]) if data.get("immo_corporelles") else None,
+            "asset_rich": bool(data.get("immo_corporelles_high")),
         },
         # Ratios financiers (grille "Financial ratio assessment") — passthrough
         # depuis silver.entreprises_signals via gold.scoring_ma. Sanitisation
@@ -3371,6 +3375,7 @@ async def pitch_pdf(req: Request, siren: str):
     Score <strong>{score}/100</strong> — {'tier-1, prioritaire' if score >= 80 else 'tier-1, à qualifier' if score >= 70 else 'tier-2, surveillance'}.
     {('Attention : société CESSÉE le ' + (date_fermeture or '')) if is_cesse else ''}
     {('Compliance : ' + str(n_sanctions) + ' red flag(s) OpenSanctions à expliquer en DD.') if n_sanctions else 'Compliance OK (OpenSanctions UE/US/UK/UN, ICIJ, PEP).'}
+    {f' Patrimoine : <strong>asset-rich</strong> — {_fmt_eur((scoring or {}).get("financials", {}).get("immo_corporelles"))} d&apos;immobilisations corporelles (&gt;30 % de l&apos;actif), candidat cession-bail.' if scoring and (scoring.get("financials") or {}).get("asset_rich") else ''}
   </p>
 </div>
 
