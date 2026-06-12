@@ -21,6 +21,12 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import sys
+
+# Permet de lancer le script sans `-w /app` (cwd quelconque) : on garantit que
+# le package `ingestion` est importable.
+if "/app" not in sys.path:
+    sys.path.insert(0, "/app")
 
 from ingestion.silver_codegen import generate_silver_sql
 
