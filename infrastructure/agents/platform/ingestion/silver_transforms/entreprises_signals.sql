@@ -186,8 +186,9 @@ base AS (
         (b.ca_latest - bs.ca_avant_dernier) / NULLIF(bs.ca_avant_dernier, 0) AS revenue_growth_yoy,
         -- ─── NOUVEAU : drapeaux de détresse (alimentent compliance + Dim 3) ───
         b.capitaux_propres_latest < 0      AS has_negative_equity,
-        b.resultat_exploitation_latest < 0 AS has_negative_ebitda,
-        (b.emprunts_dettes_latest / NULLIF(b.resultat_exploitation_latest, 0) > 4
+        -- Détresse calculée sur l'EBITDA RÉEL (EBIT + dotations), pas sur l'EBIT seul.
+        (b.resultat_exploitation_latest + COALESCE(b.dotations_exploitation_latest, 0)) < 0 AS has_negative_ebitda,
+        (b.emprunts_dettes_latest / NULLIF((b.resultat_exploitation_latest + COALESCE(b.dotations_exploitation_latest, 0)), 0) > 4
             OR b.emprunts_dettes_latest / NULLIF(b.capitaux_propres_latest, 0) > 2) AS has_high_leverage,
         ((b.ca_latest - bs.ca_avant_dernier) / NULLIF(bs.ca_avant_dernier, 0)) < -0.15 AS has_revenue_decline
     FROM cibles c
