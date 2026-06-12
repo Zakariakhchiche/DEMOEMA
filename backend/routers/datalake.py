@@ -3217,7 +3217,7 @@ async def pitch_pdf(req: Request, siren: str):
                 f'<div class="axes">{bars}</div>'
             )
 
-    # ─── Ratios financiers (grille Orascom, même source que la fiche) ───
+    # ─── Ratios financiers (même source que la fiche) ───
     ratios_html = ""
     if scoring and scoring.get("ratios"):
         r = scoring["ratios"] or {}
@@ -3257,7 +3257,7 @@ async def pitch_pdf(req: Request, siren: str):
             tier_fin = {"above_average": "Au-dessus", "average": "Acceptable",
                         "below_average": "En-dessous"}.get(r.get("financial_health_tier"), "")
             ratios_html = (
-                f'<h2>Ratios financiers (grille Orascom){f" — {tier_fin}" if tier_fin else ""}</h2>'
+                f'<h2>Ratios financiers{f" — {tier_fin}" if tier_fin else ""}</h2>'
                 f'<table>{cells}</table>{flags_html}'
             )
 
