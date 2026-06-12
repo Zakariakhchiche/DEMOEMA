@@ -147,6 +147,12 @@ export function TopHeader({ mode, setMode, onCmdK }: Props) {
           color: "var(--accent-purple)",
           fontWeight: 600, letterSpacing: "0.05em",
         }}>BETA</span>
+        <a href="/methodologie" title="Sources & méthodologie des données"
+          style={{
+            fontSize: 11, marginLeft: 4, padding: "2px 8px", borderRadius: 999,
+            color: "var(--text-tertiary, #8a8a92)", textDecoration: "none",
+            border: "1px solid var(--border-subtle, rgba(255,255,255,0.08))",
+          }}>ⓘ Méthodologie</a>
       </div>
 
       {!isMobile && (
