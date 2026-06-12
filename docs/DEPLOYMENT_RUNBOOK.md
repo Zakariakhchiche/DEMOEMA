@@ -4,7 +4,7 @@
 >
 > Public : founder, Lead Data Eng (juillet 26), astreinte future.
 >
-> Référence infra : [`../infrastructure/README.md`](../infrastructure/README.md) · Architecture : [`ARCHITECTURE_TECHNIQUE.md`](./ARCHITECTURE_TECHNIQUE.md)
+> Référence infra : [`../infrastructure/`](../infrastructure/) · Architecture : [`ARCHITECTURE_TECHNIQUE.md`](./ARCHITECTURE_TECHNIQUE.md)
 
 ---
 

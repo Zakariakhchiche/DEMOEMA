@@ -4,7 +4,6 @@
 >
 > **Source unique de vérité chiffrée** : [`FINANCES_UNIFIE.md`](./FINANCES_UNIFIE.md)
 > **Décisions verrouillées** : [`DECISIONS_VALIDEES.md`](./DECISIONS_VALIDEES.md)
-> **État réel au 17/04/2026** : [`REPONSES_SELF_CHALLENGE.md`](./REPONSES_SELF_CHALLENGE.md) (rien n'est fait → calendrier décale +3 mois)
 > **Plan opérationnel détaillé Q2-Q4 2026** : [`PLAN_DEMARRAGE_Q2-Q4_2026.md`](./PLAN_DEMARRAGE_Q2-Q4_2026.md)
 >
 > ⚠️ **Calendrier** : toute référence "Q1 2026" dans ce document doit être lue comme **"Q2 2026 (avril-juin)"** — le projet démarre réellement en avril 2026.
