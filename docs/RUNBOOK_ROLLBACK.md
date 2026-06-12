@@ -1,4 +1,4 @@
-# DEMOEMA — Rollback Runbook
+# Origin — Rollback Runbook
 
 Procédure pour remettre la prod sur un commit antérieur en cas d'incident.
 
@@ -31,8 +31,8 @@ Déclenchement manuel :
 ```bash
 # Ouvrir docs/DEPLOY_LOG.md et trouver le dernier deploy marqué stable (pas [ROLLED BACK], pas [HOTFIX]).
 # Ou, en SSH sur VPS :
-ssh -i ~/.ssh/id_ed25519 root@82.165.242.205
-cd /root/DEMOEMA
+ssh -i ~/.ssh/id_ed25519 root@82.165.57.191
+cd /root/Origin
 git log --oneline -10
 # Identifier le SHA court du dernier commit connu bon.
 ```

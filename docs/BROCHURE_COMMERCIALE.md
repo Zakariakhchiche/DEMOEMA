@@ -1,4 +1,4 @@
-# DEMOEMA — Brochure commerciale
+# Origin — Brochure commerciale
 
 > **Document de présentation destiné aux prospects (boutiques M&A, fonds PE, banques d'affaires).**
 >
@@ -12,7 +12,7 @@
 >
 > 🚀 **MVP EN PRODUCTION — 7 modules live, 300+ cibles M&A déjà en base**
 >
-> DEMOEMA (EdRCF 6.0) est **déjà en production sur Vercel** depuis mars 2026. Les modules principaux sont opérationnels. Le développement actif continue pour le scaling (sweep INSEE 16M → 50 000 cibles) et les killer features (Alertes pré-cession, Who advises whom).
+> Origin (Origin) est **déjà en production sur Vercel** depuis mars 2026. Les modules principaux sont opérationnels. Le développement actif continue pour le scaling (sweep INSEE 16M → 50 000 cibles) et les killer features (Alertes pré-cession, Who advises whom).
 >
 > **Signalétique utilisée** :
 > - ✅ **En production aujourd'hui**
@@ -38,7 +38,7 @@
 
 # PARTIE 1 — LE POSITIONNEMENT
 
-## DEMOEMA en une phrase
+## Origin en une phrase
 
 > **La plateforme d'intelligence M&A pensée pour les boutiques qui ne peuvent pas se payer Bureau van Dijk et qui trouvent Pappers insuffisant.**
 
@@ -95,7 +95,7 @@ Un associé M&A français passe en moyenne **3 heures par jour** à :
 
 # PARTIE 3 — NOTRE SOLUTION
 
-## Ce que DEMOEMA vous apporte
+## Ce que Origin vous apporte
 
 ### ✅ Dashboard Intelligence M&A — **EN PRODUCTION**
 - Métriques temps réel de votre pipeline M&A
@@ -190,7 +190,7 @@ Un **graphe interactif** des dirigeants et leurs mandats croisés :
 
 ### 3️⃣ 🏗️ **Q3 2026** — ⭐ Alertes signaux pré-cession (killer feature #1)
 
-DEMOEMA monitore en permanence les signaux publics annonciateurs d'une cession à venir :
+Origin monitore en permanence les signaux publics annonciateurs d'une cession à venir :
 
 - 🔔 **Changement de mandataires sociaux** (BODACC) — signal prédictif fort de cession sous 12-18 mois
 - 🔔 **Nomination d'un CFO externe** à un dirigeant 55+ sans successeur → préparation transmission
@@ -254,14 +254,14 @@ Un copilot spécialisé M&A, qui saura :
 
 **Scénario** : un client vous demande "trouvez-moi 5 cibles dans le secteur X, chiffre d'affaires 10-30 M€, en région Y".
 
-**Avant DEMOEMA**
+**Avant Origin**
 - Recherche Pappers par NAF + CA : 2h
 - Filtrage manuel sur Excel : 1h
 - Qualification individuelle (chaque fiche) : 3h
 - Recherche dirigeants LinkedIn : 1h
 - **Total : ~7h**
 
-**Avec DEMOEMA**
+**Avec Origin**
 - Recherche multi-critères avec scoring automatique : 15 min
 - Liste triée avec 10 attributs par cible : 0 min (affichage auto)
 - Fiches enrichies pré-qualifiées : 30 min
@@ -274,7 +274,7 @@ Un copilot spécialisé M&A, qui saura :
 
 **Scénario** : un intermédiaire vous propose d'acheter une société. Avant de pitcher votre client acquéreur, il faut qualifier.
 
-**Avant DEMOEMA**
+**Avant Origin**
 - Vérifier SIREN, statuts, KBIS (Infogreffe) : 30 min
 - Lire comptes déposés (INPI) : 45 min
 - Vérifier sanctions / procédures : 20 min
@@ -282,7 +282,7 @@ Un copilot spécialisé M&A, qui saura :
 - Benchmark concurrentiel : 1h
 - **Total : ~3h30**
 
-**Avec DEMOEMA**
+**Avec Origin**
 - Ouvrir la fiche 360° : 5 min
 - Consulter le graphe dirigeants : 10 min
 - Voir les comparables sectoriels : 5 min
@@ -295,14 +295,14 @@ Un copilot spécialisé M&A, qui saura :
 
 **Scénario** : vous avez un mandat vendeur. Il vous faut 30 acquéreurs potentiels qualifiés.
 
-**Avant DEMOEMA**
+**Avant Origin**
 - Brainstorm équipe : 2h
 - Recherche manuelle des candidats : 4h
 - Vérification capacité financière : 2h
 - Identification des contacts décisionnaires : 3h
 - **Total : ~11h**
 
-**Avec DEMOEMA**
+**Avec Origin**
 - Entrer la cible dans le copilot : 1 min
 - Obtenir buyer list auto (30 candidats) : immédiat
 - Enrichir par capacité financière : automatique
@@ -315,13 +315,13 @@ Un copilot spécialisé M&A, qui saura :
 
 **Scénario** : vous couvrez le secteur agro-alimentaire. Vous voulez être le premier sur les deals qui bougent.
 
-**Avant DEMOEMA**
+**Avant Origin**
 - Veille presse manuelle hebdo : 3h/semaine
 - Suivi BODACC manuel : 2h/semaine
 - Recherche mandataires sociaux nouveaux : 2h/semaine
 - **Total : ~7h/semaine = 350h/an**
 
-**Avec DEMOEMA**
+**Avec Origin**
 - Alertes email quotidiennes ciblées secteur
 - Dashboard "mouvements de la semaine"
 - Signaux pré-cession automatiques
@@ -333,14 +333,14 @@ Un copilot spécialisé M&A, qui saura :
 
 **Scénario** : vous devez pitcher un client sur une cible en 48h avant concurrents.
 
-**Avant DEMOEMA**
+**Avant Origin**
 - Collecte data multi-sources : 1 journée
 - Analyse comptes : 1 journée
 - Contentieux / sanctions / procédures : 0.5 journée
 - Synthèse DD brief : 0.5 journée
 - **Total : ~3 jours**
 
-**Avec DEMOEMA**
+**Avec Origin**
 - Rapport DD auto-généré : 2 min
 - Validation humaine et enrichissement : 2h
 - Analyse approfondie par le copilot : 1h
@@ -355,7 +355,7 @@ Un copilot spécialisé M&A, qui saura :
 
 ## Matrice comparative
 
-| Critère | Pappers Pro | Société.com | Diane/BvD | Pitchbook | **DEMOEMA (roadmap)** |
+| Critère | Pappers Pro | Société.com | Diane/BvD | Pitchbook | **Origin (roadmap)** |
 |---|---|---|---|---|---|
 | **Prix /user/mois** | 39€ | 39€ | 1 250€ (15k/an) | 2 500€ (30k/an) | **199€** |
 | **Couverture FR** | 100% | 100% | 100% | 60% | **100%** |
@@ -369,20 +369,20 @@ Un copilot spécialisé M&A, qui saura :
 | **Souveraineté data** | FR | FR | UK (Moody's) | US | **FR strict** ✅ |
 | **Conformité AI Act** | ⚠️ | ⚠️ | ❌ | ❌ | ✅ natif dès Q3 2026 |
 
-*Calendrier de livraison DEMOEMA : 🏗️ Q3 2026 · 🔨 Q4 2026 · ⏳ Y2 2027. Voir programme bêta-testeur.*
+*Calendrier de livraison Origin : 🏗️ Q3 2026 · 🔨 Q4 2026 · ⏳ Y2 2027. Voir programme bêta-testeur.*
 
 ## Nos 3 promesses différenciantes
 
 ### 🎯 Promesse 1 — 10× moins cher que Bureau van Dijk, à qualité équivalente sur le mid-market
 
 - Diane/BvD : 15-50k€/user/an minimum, contrats annuels rigides
-- DEMOEMA Enterprise : à partir de **15k€/an** (toute l'équipe, pas par user)
+- Origin Enterprise : à partir de **15k€/an** (toute l'équipe, pas par user)
 - Soit **5 à 10× moins cher** pour la même profondeur sur les entreprises FR mid-market
 
 ### 🎯 Promesse 2 — 5× plus puissant que Pappers sur le M&A
 
 - Pappers Pro : lookup statique, pas de graphe visuel, pas de scoring, pas d'alertes
-- DEMOEMA Pro : **tout ça + copilot + signaux pré-cession + historique advisors**
+- Origin Pro : **tout ça + copilot + signaux pré-cession + historique advisors**
 - Pour **5× le prix** (199€ vs 39€) mais pour un métier (M&A) qui facture 150-300€/h
 
 ### 🎯 Promesse 3 — 100% souverain + AI Act natif
@@ -540,7 +540,7 @@ Pour protéger légalement nos clients :
 
 ## Rapports one-shot (sans abonnement)
 
-Pour tester DEMOEMA sans engagement :
+Pour tester Origin sans engagement :
 
 - 💼 **Rapport "Cible" complet** — **490 €**
   Fiche enrichie 360° d'une entreprise, livrée en 24h
@@ -551,14 +551,14 @@ Pour tester DEMOEMA sans engagement :
 
 ## Comparaison rapide du coût
 
-| Votre stack actuelle | DEMOEMA Pro |
+| Votre stack actuelle | Origin Pro |
 |---|---|
 | Pappers × 5 users = 245 €/mois | |
 | LinkedIn Sales Nav × 5 = 400 €/mois | |
 | Infogreffe Pro = 100 €/mois | |
 | CFNews = 250 €/mois | |
 | Capital IQ licence = 1 250 €/mois | |
-| **Total = ~2 250 €/mois** | **DEMOEMA Pro × 5 = 995 €/mois** |
+| **Total = ~2 250 €/mois** | **Origin Pro × 5 = 995 €/mois** |
 | | **Économie : -55%** |
 
 ## Add-ons à venir
@@ -603,7 +603,7 @@ En tant que **boutique pionnière**, vous avez droit à :
 
 # PARTIE 10 — PARCOURS BÊTA-TESTEUR (Q3 2026 onwards)
 
-## Comment vous découvrez DEMOEMA en bêta
+## Comment vous découvrez Origin en bêta
 
 ### Mois 1 — Onboarding personnalisé (octobre 2026)
 - Call 1h avec le founder (pas un commercial)
@@ -613,7 +613,7 @@ En tant que **boutique pionnière**, vous avez droit à :
 
 ### Mois 2 — Premiers cas d'usage réels
 - Test sur 3 cibles de votre pipeline actuel
-- Génération de votre première **buyer list** via DEMOEMA (mode manuel Q4, copilot IA Y2)
+- Génération de votre première **buyer list** via Origin (mode manuel Q4, copilot IA Y2)
 - Export Excel avec vos templates M&A
 - Premier ressenti partagé (call 30 min de feedback)
 
@@ -725,7 +725,7 @@ En tant que **boutique pionnière**, vous avez droit à :
 
 ## Notre histoire
 
-DEMOEMA est née d'une frustration concrète :
+Origin est née d'une frustration concrète :
 
 > *"Quand j'étais en M&A, je payais Pappers plusieurs centaines d'euros/mois. Au-delà du prix, ce qui me frustrait c'était de switcher entre 5 outils pour préparer un simple teaser. Personne ne m'offrait une fiche vraiment intelligente, prédictive, avec le graphe des dirigeants. J'ai décidé de construire l'outil que j'aurais voulu avoir."*
 >
@@ -737,7 +737,7 @@ DEMOEMA est née d'une frustration concrète :
 - Le problème n'est pas l'accès à la donnée, c'est la **centralisation, la fraîcheur et l'intelligence** (graphe, signaux, IA)
 - Les **outils premium (BvD, Pitchbook)** sont réservés à un top 1% qui peut payer 30-80k€/user/an
 - Les **200 boutiques M&A françaises mid-market** sont coincées entre "trop cher (BvD)" et "pas assez puissant (Pappers)"
-- DEMOEMA comble ce gap avec **UX moderne + prix accessible + intelligence prédictive + souveraineté FR**
+- Origin comble ce gap avec **UX moderne + prix accessible + intelligence prédictive + souveraineté FR**
 
 ## Notre roadmap 4 ans
 
@@ -861,7 +861,7 @@ DEMOEMA est née d'une frustration concrète :
 
 Avant d'envoyer ce PDF à un prospect :
 
-- [ ] Personnalisé avec le logo DEMOEMA final
+- [ ] Personnalisé avec le logo Origin final
 - [ ] Ajout des 2-3 logos bêta-testeurs (avec accord)
 - [ ] Ajout des advisors confirmés
 - [ ] Ajout des témoignages clients signés
@@ -873,4 +873,4 @@ Avant d'envoyer ce PDF à un prospect :
 
 ---
 
-_Document commercial DEMOEMA v1.0 — Avril 2026. À convertir en PDF mis en page avant diffusion. Mettez à jour cette version après chaque cohorte de bêta-testeurs._
+_Document commercial Origin v1.0 — Avril 2026. À convertir en PDF mis en page avant diffusion. Mettez à jour cette version après chaque cohorte de bêta-testeurs._

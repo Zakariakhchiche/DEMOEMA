@@ -15,7 +15,7 @@
 
 ## Classification de notre système IA
 
-### Composants IA dans DEMOEMA
+### Composants IA dans Origin
 
 | Composant | Risque AI Act | Statut |
 |---|---|---|

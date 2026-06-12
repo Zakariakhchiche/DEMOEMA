@@ -1,8 +1,8 @@
 # ARCHITECTURE TECHNIQUE — V4.2 (VPS IONOS partiellement déployé)
 
-> ✅ **V4.2 — Migration applicative exécutée le 2026-04-20** sur VPS IONOS `82.165.242.205` (Debian 13, 12 vCPU, 24 GiB RAM, 709 GB).
+> ✅ **V4.2 — Migration applicative exécutée le 2026-04-20** sur VPS IONOS `82.165.57.191` (Debian 13, 12 vCPU, 24 GiB RAM, 709 GB).
 >
-> ⚠️ **Note d'honnêteté** : le déploiement réalisé est **plus simple** que la cible V4.1 "Postgres nu + Dagster + dbt + Ollama dual-agent". Le founder a retenu **Supabase self-hosted + Caddy + 3 containers DEMOEMA** : gain de temps, stack éprouvée, migration cloud→self-hosted directe. Les composants Ollama, Dagster, dbt, Redis dédié, MinIO, monitoring **restent à ajouter** (roadmap Q3 2026 post Lead Data Eng).
+> ⚠️ **Note d'honnêteté** : le déploiement réalisé est **plus simple** que la cible V4.1 "Postgres nu + Dagster + dbt + Ollama dual-agent". Le founder a retenu **Supabase self-hosted + Caddy + 3 containers Origin** : gain de temps, stack éprouvée, migration cloud→self-hosted directe. Les composants Ollama, Dagster, dbt, Redis dédié, MinIO, monitoring **restent à ajouter** (roadmap Q3 2026 post Lead Data Eng).
 >
 > | Couche | V4.0 (avant) | **V4.2 (réel 2026-04-20)** | Statut |
 > |---|---|---|---|
@@ -13,7 +13,7 @@
 > | Storage objet | ❌ | **Supabase Storage** self-hosted (API compatible S3) | ✅ PROD |
 > | Reverse proxy | Vercel edge | **Caddy 2.8** (container `demomea-caddy`) avec ACME automatique (pas de certbot cron) | ✅ PROD |
 > | LLM user-facing | Claude API SSE | Claude API SSE (inchangé) | ✅ PROD |
-> | CI/CD | Vercel auto-deploy | `/root/DEMOEMA/deploy.sh` (`git pull && docker compose up -d --build`) — workflow GitHub Actions présent localement mais non activé | 🔧 Partiel |
+> | CI/CD | Vercel auto-deploy | `/root/Origin/deploy.sh` (`git pull && docker compose up -d --build`) — workflow GitHub Actions présent localement mais non activé | 🔧 Partiel |
 > | Cache Redis | ❌ | ❌ **non déployé** | ❌ SCRUM-76 à faire |
 > | Orchestration (Dagster) | Vercel Cron | ❌ **non déployé** | ❌ Q3 2026 |
 > | Transformation (dbt) | Python inline | ❌ **non déployé** | ❌ Q3 2026 |
@@ -22,7 +22,7 @@
 > | Backups | Supabase auto | ❌ **non configuré** | ❌ **SCRUM-91 URGENT** |
 > | TLS | Vercel | Caddy ACME auto (Let's Encrypt) | ✅ PROD |
 >
-> **Containers actifs** (2026-04-20 03:00 UTC) : 3 DEMOEMA (`demomea-caddy`, `demomea-backend`, `demomea-frontend`) + 15 Supabase (`supabase-db/-auth/-studio/-storage/-kong/-realtime/-pooler/-rest/-meta/-analytics/-vector/-imgproxy/-edge-functions`).
+> **Containers actifs** (2026-04-20 03:00 UTC) : 3 Origin (`demomea-caddy`, `demomea-backend`, `demomea-frontend`) + 15 Supabase (`supabase-db/-auth/-studio/-storage/-kong/-realtime/-pooler/-rest/-meta/-analytics/-vector/-imgproxy/-edge-functions`).
 >
 > **Coût VPS réel** : ~65-80 €/mois (12 vCPU/24 GB IONOS Paris).
 >

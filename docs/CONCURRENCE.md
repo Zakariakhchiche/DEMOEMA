@@ -156,7 +156,7 @@
 
 ## Positionnement final proposé
 
-> **DEMOEMA = "L'OS des équipes M&A européennes mid-market : datalake + graphe + copilot."**
+> **Origin = "L'OS des équipes M&A européennes mid-market : datalake + graphe + copilot."**
 
 ### Trois différenciateurs structurants
 

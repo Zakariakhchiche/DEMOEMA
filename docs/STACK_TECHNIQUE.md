@@ -1,4 +1,4 @@
-# Stack Technique — EdRCF 6.0
+# Stack Technique — Origin
 
 ## 1. Architecture actuelle
 
@@ -80,7 +80,7 @@ OSINT:     holehe + maigret + sherlock (enrichissement dirigeants)
 ### Gap identifie
 
 Aucun MCP server n'existe pour : INPI RNE, BODACC, BALO, BOAMP, Gels des Avoirs,
-HATVP, DVF, Judilibre. C'est une opportunite pour EdRCF de construire et
+HATVP, DVF, Judilibre. C'est une opportunite pour Origin de construire et
 potentiellement open-sourcer un MCP unifie.
 
 ## 5. Projets similaires (veille concurrentielle)
@@ -106,7 +106,7 @@ potentiellement open-sourcer un MCP unifie.
 
 ### Conclusion
 
-EdRCF est unique : aucun projet open-source ne combine intelligence entreprise FR
+Origin est unique : aucun projet open-source ne combine intelligence entreprise FR
 + pipeline M&A + signaux + graphes dirigeants + copilot AI dans une seule plateforme.
 
 ## 6. Cout total de la stack

@@ -1,6 +1,6 @@
 # PRODUCT GAPS — Retour persona cible (Pierre, associé M&A)
 
-> **Source** : simulation role-play par auditeur externe le 2026-04-17. Un associé M&A mid-market fictif (Pierre, 47 ans, boutique 12 pers., 15 deals/an) a évalué la proposition actuelle de DEMOEMA et identifié **6 pains non résolus** + **10 features manquantes**.
+> **Source** : simulation role-play par auditeur externe le 2026-04-17. Un associé M&A mid-market fictif (Pierre, 47 ans, boutique 12 pers., 15 deals/an) a évalué la proposition actuelle de Origin et identifié **6 pains non résolus** + **10 features manquantes**.
 >
 > **Objectif de ce doc** : donner à l'agent produit une liste actionnable de features à intégrer dans la roadmap Y1-Y3 pour que le produit matche le vrai pain du persona cible.
 >
@@ -21,7 +21,7 @@
 > **"Le premier outil qui connecte un associé M&A avec le bon décisionnaire au bon moment."**
 
 Ou variante plus opérationnelle :
-> **"Vous perdez 3h/jour sur des cibles mortes. DEMOEMA élimine 60% du bruit et vous dit qui appeler en premier."**
+> **"Vous perdez 3h/jour sur des cibles mortes. Origin élimine 60% du bruit et vous dit qui appeler en premier."**
 
 **Justification** : Pierre ne cherche pas "plus de data". Il cherche **moins de bruit + meilleurs contacts**. C'est mesurable, testable, vendable.
 
@@ -191,13 +191,13 @@ Ou variante plus opérationnelle :
 
 ### Feature #6 — Extension Chrome / LinkedIn enrichment
 
-**Description** : extension navigateur qui enrichit les pages LinkedIn + sites d'entreprises en temps réel avec les données DEMOEMA.
+**Description** : extension navigateur qui enrichit les pages LinkedIn + sites d'entreprises en temps réel avec les données Origin.
 
-**Value** : Pierre ne change pas son workflow. Il continue à browser LinkedIn et voit les infos DEMOEMA en overlay.
+**Value** : Pierre ne change pas son workflow. Il continue à browser LinkedIn et voit les infos Origin en overlay.
 
 **Implémentation** :
 - Chrome extension basique (~4-6 semaines)
-- API DEMOEMA `/enrich?linkedin_url=...`
+- API Origin `/enrich?linkedin_url=...`
 - **Note légale** : l'extension ne scrape pas LinkedIn, elle enrichit uniquement l'URL visitée par l'user
 
 **Priorité** : 🟠 **Y2 Q1 2027**
@@ -266,7 +266,7 @@ Ou variante plus opérationnelle :
 
 **Description** : avant le pitch investisseur, obtenir :
 - 2-3 logos de boutiques M&A reconnues visibles sur le site (avec accord)
-- 1 case study documenté : "Boutique X a trouvé deal Y en Z semaines grâce à DEMOEMA"
+- 1 case study documenté : "Boutique X a trouvé deal Y en Z semaines grâce à Origin"
 - Advisor board visible : 3 noms avec leur ancien titre (ex: "Jean Dupont, ex-partner Lazard")
 - **2 LOI signées** visibles (même bêta gratuit)
 

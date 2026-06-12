@@ -48,7 +48,7 @@ Fréquence  : Mise à jour mensuelle (J+3 après fin de mois)
 - Entreprises actives total : ~11M
 - PME + ETI : ~3.5M
 - PME/ETI actives avec 10+ salariés : ~500 000
-- PME/ETI dans les NAF cibles EdRCF (62 codes) : **~50 000–80 000**
+- PME/ETI dans les NAF cibles Origin (62 codes) : **~50 000–80 000**
 
 ### BODACC bulk events (signal-driven)
 

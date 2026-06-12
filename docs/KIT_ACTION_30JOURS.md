@@ -25,12 +25,12 @@
 > À adapter pour chacune des 2 boutiques. Personnaliser le **prénom + détail de la conversation précédente**.
 
 ```
-Objet : Suivi de notre échange sur DEMOEMA — proposition exclusive
+Objet : Suivi de notre échange sur Origin — proposition exclusive
 
 Bonjour [Prénom],
 
 Tu te souviens, on s'était vus il y a [X semaines/mois] et tu avais
-regardé la démo de DEMOEMA — j'avais beaucoup apprécié ton retour et
+regardé la démo de Origin — j'avais beaucoup apprécié ton retour et
 ton intérêt pour la solution.
 
 Depuis, j'ai pris la décision d'accélérer le projet sérieusement
@@ -74,7 +74,7 @@ Objet : Question rapide pour [Nom boutique] — outil sourcing M&A
 
 Bonjour [Prénom],
 
-Je construis DEMOEMA, une plateforme d'intelligence M&A 100% sur sources
+Je construis Origin, une plateforme d'intelligence M&A 100% sur sources
 publiques (s'affranchir de Pappers). Démo : demoema.vercel.app
 
 J'interview en ce moment 30 associés/partners de boutiques M&A FR
@@ -151,10 +151,10 @@ Merci !
 > Document court (1 page) à signer rapidement avec les boutiques motivées. Non binding mais sérieux.
 
 ```
-LETTRE D'INTENTION — Bêta-testeur premium DEMOEMA
+LETTRE D'INTENTION — Bêta-testeur premium Origin
 
 Entre :
-DEMOEMA SAS (en cours de constitution)
+Origin SAS (en cours de constitution)
 représentée par [Ton nom], fondateur
 [Adresse / SIREN à venir]
 
@@ -164,14 +164,14 @@ représentée par [Prénom Nom], [titre]
 [Adresse / SIREN]
 
 PRÉAMBULE
-DEMOEMA développe une plateforme d'intelligence M&A 100% basée sur des
+Origin développe une plateforme d'intelligence M&A 100% basée sur des
 sources publiques (s'affranchir de Pappers et BvD/Diane). Le bêta-test
 permettra de valider l'usage produit avec un acteur réel du marché
 mid-market FR.
 
 1. OBJET
 [Boutique] s'engage à participer au programme bêta-testeur premium de
-DEMOEMA dès la livraison du MVP V1 (visé Q4 2026).
+Origin dès la livraison du MVP V1 (visé Q4 2026).
 
 2. ENGAGEMENTS DE [BOUTIQUE]
 - Accepter de tester la plateforme pendant 6 mois
@@ -180,7 +180,7 @@ DEMOEMA dès la livraison du MVP V1 (visé Q4 2026).
 - À l'issue de la beta, considérer souscrire à un abonnement payant
   (sans engagement contractuel immédiat)
 
-3. ENGAGEMENTS DE DEMOEMA
+3. ENGAGEMENTS DE Origin
 - Accès gratuit à la plateforme pendant 6 mois pour 1 à 3 utilisateurs
 - Tarif préférentiel à vie post-beta : -30% vs prix public catalogue
 - Roadmap influencée par les retours bêta-testeurs
@@ -201,7 +201,7 @@ Cette LOI est valable jusqu'au lancement effectif de la beta (visé Q4
 Fait à [Ville], le [date]
 en deux exemplaires originaux.
 
-Pour DEMOEMA                          Pour [Boutique]
+Pour Origin                          Pour [Boutique]
 [Signature]                           [Signature]
 [Nom + titre]                         [Nom + titre]
 ```
@@ -248,7 +248,7 @@ Pour DEMOEMA                          Pour [Boutique]
 - Source : 2 boutiques interviewées + thèse vécue par le founder
 
 ### Slide 2 — Solution
-**"DEMOEMA agrège 140 sources publiques + scoring IA prédictif + graphe dirigeants en 1 plateforme."**
+**"Origin agrège 140 sources publiques + scoring IA prédictif + graphe dirigeants en 1 plateforme."**
 - 100% sources publiques = pas de coût de licence + indépendance
 - Score "trajectoire" propriétaire = qui va se vendre dans 12 mois ?
 - UX moderne + copilot conversationnel

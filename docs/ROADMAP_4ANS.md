@@ -245,7 +245,7 @@
 - [ ] **5 modules verticaux** finis : Healthcare, Industrial, ESS, Real Estate, Tech
 - [ ] **Modèles prédictifs** par vertical
 - [ ] **Benchmarks live** par secteur
-- [ ] **Index propriétaires** (ex : "Indice consolidation EdRCF")
+- [ ] **Index propriétaires** (ex : "Indice consolidation Origin")
 
 ### Q4 2029 — Préparation exit ou Series B
 

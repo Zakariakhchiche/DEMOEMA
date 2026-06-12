@@ -1,4 +1,4 @@
-# DEMOEMA — Manual Ops Inventory
+# Origin — Manual Ops Inventory
 
 Inventaire des opérations **actuellement manuelles** (friction humaine récurrente). Le mandat "tout automatisé" (audit brief v5 §16 philosophie) impose que cette liste **décroisse** à chaque sprint. Si elle stagne ou augmente, on régresse.
 
@@ -33,7 +33,7 @@ Chaque entrée :
 | 17 | Review PR Dependabot patch/minor | Hebdo | L11.2 auto-merge Dependabot | 🔴 |
 | 18 | Vérification infos RGPD conformité | Annuel | L9 automatiser registre + DPO alertes | 🔴 |
 | 19 | Génération rapport Cible pour client | Sur commande | L10 pipeline Stripe + WeasyPrint + S3 | 🔴 |
-| 20 | Review dashboards Supabase Studio pour anomalies | Hebdo | L11.12 Grafana dashboards DEMOEMA | 🔴 |
+| 20 | Review dashboards Supabase Studio pour anomalies | Hebdo | L11.12 Grafana dashboards Origin | 🔴 |
 
 **Total entrées manuelles initiales** : **20**
 **Cible fin Tier 1 (juin 2026)** : ≤ 15 (items 1, 2, 3, 7, 9 auto)

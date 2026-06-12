@@ -15,7 +15,7 @@
 
 ## Pourquoi cette phase est non-négociable
 
-Le risque #1 d'un projet data ambitieux comme DEMOEMA n'est **PAS technique** — il est de **construire la mauvaise chose**.
+Le risque #1 d'un projet data ambitieux comme Origin n'est **PAS technique** — il est de **construire la mauvaise chose**.
 
 À ce stade, je ne sais pas avec certitude :
 - Si les boutiques M&A FR achèteraient à 199€/mois ou 1990€/mois
