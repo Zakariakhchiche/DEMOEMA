@@ -692,11 +692,17 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
                   <Icon name="sparkles" size={16} color="var(--accent-purple)" />
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 600, color: "var(--accent-purple)", marginBottom: 4 }}>Verdict DEMOEMA</div>
-                    <div style={{ fontSize: 13, color: "var(--text-primary)", lineHeight: 1.55 }}>
-                      Cible <strong>{target.score >= 80 ? "HIGH" : target.score >= 70 ? "MID-HIGH" : "MID"} potentiel</strong>{naf && naf !== "—" ? ` · NAF ${naf}` : ""}.
-                      Score {target.score}/100 — {target.score >= 80 ? "tier-1, prioritaire" : target.score >= 70 ? "tier-1, à qualifier" : "tier-2, surveillance"}.
-                      {(data?.red_flags.length ?? 0) > 0 && " Attention : red flags compliance à expliquer en DD."}
-                    </div>
+                    {(() => {
+                      // Score live (scoring_ma) prioritaire sur la prop figée de la liste.
+                      const verdictScore = scoring?.deal_score ?? target.score;
+                      return (
+                        <div style={{ fontSize: 13, color: "var(--text-primary)", lineHeight: 1.55 }}>
+                          Cible <strong>{verdictScore >= 80 ? "HIGH" : verdictScore >= 70 ? "MID-HIGH" : "MID"} potentiel</strong>{naf && naf !== "—" ? ` · NAF ${naf}` : ""}.
+                          Score {verdictScore}/100 — {verdictScore >= 80 ? "tier-1, prioritaire" : verdictScore >= 70 ? "tier-1, à qualifier" : "tier-2, surveillance"}.
+                          {(data?.red_flags.length ?? 0) > 0 && " Attention : red flags compliance à expliquer en DD."}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
 
