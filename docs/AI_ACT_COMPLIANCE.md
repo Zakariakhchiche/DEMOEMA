@@ -7,7 +7,7 @@
 > - ✅ **CGU clause obligatoire** : interdiction usage décisionnel automatique sur personnes physiques
 > - ✅ **DPIA Q3 2026** par cabinet RGPD (12k€)
 >
-> Source unique : [`FINANCES_UNIFIE.md`](./FINANCES_UNIFIE.md) · État réel : [`REPONSES_SELF_CHALLENGE.md`](./REPONSES_SELF_CHALLENGE.md)
+> Source unique : [`FINANCES_UNIFIE.md`](./FINANCES_UNIFIE.md)
 >
 > Le règlement européen sur l'IA est entré progressivement en vigueur depuis 2024. Application complète aux systèmes IA généralistes en **août 2026**, et à la majorité des systèmes en **août 2027**. Notre copilot LLM est concerné.
 

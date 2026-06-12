@@ -3,7 +3,6 @@
 > ⚠️ **Document V2 — pour les chiffres canoniques, voir [`FINANCES_UNIFIE.md`](./FINANCES_UNIFIE.md)** (source unique de vérité post-audit 2026-04-17).
 >
 > Décisions verrouillées : [`DECISIONS_VALIDEES.md`](./DECISIONS_VALIDEES.md)
-> État réel : [`REPONSES_SELF_CHALLENGE.md`](./REPONSES_SELF_CHALLENGE.md)
 >
 > ⚠️ **Calendrier** : Y1 2026 démarre **en avril 2026** (pas janvier) — équipe complète prévue pour octobre 2026.
 >

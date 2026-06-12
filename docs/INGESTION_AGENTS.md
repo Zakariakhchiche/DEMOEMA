@@ -274,6 +274,6 @@ CREATE TABLE audit.source_freshness (
 
 - Décision stack : [`DECISIONS_VALIDEES.md` §9 V4](./DECISIONS_VALIDEES.md)
 - Architecture cible : [`ARCHITECTURE_TECHNIQUE.md` V4.1](./ARCHITECTURE_TECHNIQUE.md)
-- Sources data : [`ARCHITECTURE_DATA_V2.md`](./ARCHITECTURE_DATA_V2.md)
-- Lineage : [`DATACATALOG.md`](./DATACATALOG.md)
+- Sources data : [`CATALOGUE_SOURCES.md`](./CATALOGUE_SOURCES.md) · [`CARTOGRAPHIE_DONNEES.md`](./CARTOGRAPHIE_DONNEES.md)
+- Lineage : [`LINEAGE_DONNEES.md`](./LINEAGE_DONNEES.md)
 - Tickets Jira : Epic SCRUM-67 (à créer)

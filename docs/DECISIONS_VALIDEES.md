@@ -10,8 +10,6 @@
 > - **Option A** — Migration Scaleway + Postgres self-hosted avant commercialisation Enterprise (effort 2-4 semaines)
 > - **Option B** — Conserver Vercel/Supabase Y1, migrer Y2 avant Seed (pragmatique, risque commercial Enterprise)
 >
-> Voir [`ETAT_REEL_2026-04-19.md`](./ETAT_REEL_2026-04-19.md) pour contexte complet.
->
 > ⚠️ **Mises à jour post-audit SELF_CHALLENGE (2026-04-17 PM)** :
 > - Pré-amorçage : **600k€** (cible verrouillée), au lieu de 200-700k€
 > - DPO : **5k€/mois (60k€/an)** verrouillé
@@ -46,7 +44,7 @@
 | 6 | **Stack technique Y1** | Garder front Next.js + refactorer backend en parallèle | Vélocité préservée, dette technique maîtrisée |
 | 7 | **Souveraineté** | ~~Scaleway strict FR~~ → **VPS IONOS FR/DE** (cf. décision #9 V4) | Indispensable pour Enterprise UE, AI Act friendly |
 | 8 | **Europe** | Y3 (focus FR Y1-Y2) | PMF FR avant expansion |
-| **9** ⭐ | **Stack Hosting (V4 audit Git 19/04, EXÉCUTÉE 20/04)** | **Option A : Migration complète vers VPS IONOS — DÉPLOYÉE 2026-04-20**. Postgres 16 self-hosted + Dagster + dbt + FastAPI + Next.js 15 + JWT standalone + ⭐ Dual-agent Ollama (Qwen2.5-Coder 14B Worker + Qwen2.5 32B Superviseur). Epic SCRUM-66 + SCRUM-80 → **Done** (22 stories fermées). | Migration exécutée en sprint flash 5 jours (vs 2-4 semaines prévues) avant closing pré-amorçage pour capitaliser la souveraineté dans le pitch. VPS IONOS M (6 vCPU, 32 GB, Paris) = **65 €/mois réel** vs 200 € Scaleway managé estimé. Gain commercial : argument Enterprise souverain disponible dès juin. Artefacts versionnés : [`infrastructure/`](../infrastructure/). Runbook : [`DEPLOYMENT_RUNBOOK.md`](./DEPLOYMENT_RUNBOOK.md). Ground truth : [`ETAT_REEL_2026-04-20.md`](./ETAT_REEL_2026-04-20.md). |
+| **9** ⭐ | **Stack Hosting (V4 audit Git 19/04, EXÉCUTÉE 20/04)** | **Option A : Migration complète vers VPS IONOS — DÉPLOYÉE 2026-04-20**. Postgres 16 self-hosted + Dagster + dbt + FastAPI + Next.js 15 + JWT standalone + ⭐ Dual-agent Ollama (Qwen2.5-Coder 14B Worker + Qwen2.5 32B Superviseur). Epic SCRUM-66 + SCRUM-80 → **Done** (22 stories fermées). | Migration exécutée en sprint flash 5 jours (vs 2-4 semaines prévues) avant closing pré-amorçage pour capitaliser la souveraineté dans le pitch. VPS IONOS M (6 vCPU, 32 GB, Paris) = **65 €/mois réel** vs 200 € Scaleway managé estimé. Gain commercial : argument Enterprise souverain disponible dès juin. Artefacts versionnés : [`infrastructure/`](../infrastructure/). Runbook : [`DEPLOYMENT_RUNBOOK.md`](./DEPLOYMENT_RUNBOOK.md). |
 
 ---
 
@@ -219,7 +217,6 @@ Suite aux décisions, voici ce qu'on **n'engage pas** Y1-Y2 :
 
 - ✅ [`PLAN_DEMARRAGE_Q2-Q4_2026.md`](./PLAN_DEMARRAGE_Q2-Q4_2026.md) : sprint plan 39 semaines avril → décembre 2026
 - ✅ [`KIT_ACTION_30JOURS.md`](./KIT_ACTION_30JOURS.md) : 7 templates terrain (email re-contact, InMail, interview, LOI, sourcing, pitch deck, BPI)
-- ✅ [`ETAT_REEL_2026-04-17.md`](./ETAT_REEL_2026-04-17.md) : baseline officielle point zéro
 - ✅ [`FINANCES_UNIFIE.md`](./FINANCES_UNIFIE.md) : source unique de vérité chiffrée
 
 ### Prochains livrables possibles à la demande

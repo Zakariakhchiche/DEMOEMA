@@ -3,7 +3,6 @@
 > ⚠️ **Document V2 — pricing à valider après les 30 interviews clients prévues Q2 2026.**
 >
 > Source de vérité chiffres : [`FINANCES_UNIFIE.md`](./FINANCES_UNIFIE.md)
-> État réel : [`REPONSES_SELF_CHALLENGE.md`](./REPONSES_SELF_CHALLENGE.md)
 >
 > ⚠️ **Erreur arithmétique corrigée** : "2000 clients × 10k€ Enterprise = 20M€ ARR Y4" était **mathématiquement impossible** (TAM PE/M&A FR ≈ 1000 acteurs total). Le mix Y4 cible est désormais **8-15M€ ARR** avec ~2000 clients **toutes catégories confondues** (mix Free/Starter/Pro/Enterprise) et non 2000 Enterprise.
 >

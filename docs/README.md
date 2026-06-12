@@ -51,10 +51,6 @@ Trois différenciateurs structurants vs concurrents (Pappers, Diane/BvD, Pitchbo
 |---|---|
 | [`FINANCES_UNIFIE.md`](./FINANCES_UNIFIE.md) | ⭐ **SOURCE UNIQUE** : ARR, MRR, équipe, salaires, levées, cap table à 100% (V3.1 dilution réaliste) |
 | [`DECISIONS_VALIDEES.md`](./DECISIONS_VALIDEES.md) | ✅ 8 décisions stratégiques verrouillées |
-| [`ETAT_REEL_2026-04-17.md`](./ETAT_REEL_2026-04-17.md) | 📍 **Baseline officielle** : point zéro projet (démo, 0 client, 0 revenu) |
-| [`REPONSES_SELF_CHALLENGE.md`](./REPONSES_SELF_CHALLENGE.md) | 🔴 Réponses aux questions critiques audit V1 |
-| [`SELF_CHALLENGE_V2.md`](./SELF_CHALLENGE_V2.md) | 🔴 Audit propagation V3 (résolu V3.1) |
-| [`CLEANUP_LOG.md`](./CLEANUP_LOG.md) | 📝 Trace nettoyage et propagation |
 
 ### 📅 Plan & exécution
 
@@ -78,7 +74,10 @@ Trois différenciateurs structurants vs concurrents (Pappers, Diane/BvD, Pitchbo
 
 | Document | Contenu |
 |---|---|
-| [`ARCHITECTURE_DATA_V2.md`](./ARCHITECTURE_DATA_V2.md) | Catalogue **143 sources** (140 actives) en 19 couches |
+| [`CATALOGUE_SOURCES.md`](./CATALOGUE_SOURCES.md) | Catalogue complet des ~60 sources du datalake (volume, intérêt M&A, statut) |
+| [`CARTOGRAPHIE_DONNEES.md`](./CARTOGRAPHIE_DONNEES.md) | Cartographie bronze → silver → gold de la donnée |
+| [`LINEAGE_DONNEES.md`](./LINEAGE_DONNEES.md) | Lineage champ par champ (CA, EBITDA, deal score…) avec schémas |
+| [`METHODOLOGIE_DONNEES.md`](./METHODOLOGIE_DONNEES.md) | Tous les calculs et chiffres expliqués (formules, validation) |
 | [`ARCHITECTURE_TECHNIQUE.md`](./ARCHITECTURE_TECHNIQUE.md) | Stack cible — start small : Postgres + DuckDB Y1 |
 | [`VALIDATION_API.md`](./VALIDATION_API.md) | Méthodologie de validation des sources avant intégration |
 
@@ -88,8 +87,6 @@ Trois différenciateurs structurants vs concurrents (Pappers, Diane/BvD, Pitchbo
 |---|---|
 | [`RISQUES_CONFORMITE.md`](./RISQUES_CONFORMITE.md) | Risques juridiques, techniques, business |
 | [`AI_ACT_COMPLIANCE.md`](./AI_ACT_COMPLIANCE.md) | Conformité Règlement IA UE (sans fine-tuning, CGU clause "no automated decision") |
-| [`SELF_CHALLENGE.md`](./SELF_CHALLENGE.md) | 131 questions d'auto-audit |
-| [`CHALLENGE_QUESTIONS.md`](./CHALLENGE_QUESTIONS.md) | Revue critique antérieure |
 
 ### 📚 Documentation héritée (V1 du repo)
 
@@ -202,7 +199,6 @@ Build to sell potentiel à 5-7 ans vers **8 acquéreurs réels** :
 
 **Artefacts créés**
 - ➕ [`../infrastructure/`](../infrastructure/) : docker-compose + nginx + systemd + postgres/init.sql + scripts bootstrap/deploy/backup/restore + agents CrewAI
-- ➕ [`ETAT_REEL_2026-04-20.md`](./ETAT_REEL_2026-04-20.md) nouvelle baseline
 - ➕ [`DEPLOYMENT_RUNBOOK.md`](./DEPLOYMENT_RUNBOOK.md) runbook opérationnel complet
 - 🔄 [`ARCHITECTURE_TECHNIQUE.md`](./ARCHITECTURE_TECHNIQUE.md) V4.1 cible → V4.2 déployée
 - 🔄 [`DECISIONS_VALIDEES.md`](./DECISIONS_VALIDEES.md) décision #9 "actée" → "exécutée 20/04"

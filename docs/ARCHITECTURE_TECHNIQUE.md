@@ -26,14 +26,12 @@
 >
 > **Coût VPS réel** : ~65-80 €/mois (12 vCPU/24 GB IONOS Paris).
 >
-> Source ground truth : [`ETAT_REEL_2026-04-20.md`](./ETAT_REEL_2026-04-20.md).
 > Runbook : [`DEPLOYMENT_RUNBOOK.md`](./DEPLOYMENT_RUNBOOK.md).
 > Configs réelles snapshots : [`../infrastructure/vps-current/`](../infrastructure/vps-current/).
 > Artefacts target V4.3 non déployés : [`../infrastructure/`](../infrastructure/) racine.
 > Décisions : [`DECISIONS_VALIDEES.md`](./DECISIONS_VALIDEES.md) §9.
 > Epics Jira : SCRUM-66 (migration, **7/12 Done**) · SCRUM-80 (agents, **0/10 démarré**).
 >
-> Source ground truth : [`ETAT_REEL_2026-04-19.md`](./ETAT_REEL_2026-04-19.md).
 > Décision verrouillée : [`DECISIONS_VALIDEES.md`](./DECISIONS_VALIDEES.md) §9.
 > Tracking : ticket Jira SCRUM-65 (Done) + Epic migration SCRUM-66.
 >
