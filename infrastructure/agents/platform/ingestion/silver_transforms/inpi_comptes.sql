@@ -28,10 +28,25 @@ SELECT
     max(CASE WHEN l.code::text = 'FL' THEN COALESCE(l.m3, l.m1) END) AS ventes_marchandises,
     max(CASE WHEN l.code::text = 'FJ' THEN l.m1 END)                 AS ca_france,
     max(CASE WHEN l.code::text = 'FK' THEN l.m1 END)                 AS ca_export,
-    max(CASE WHEN l.code::text = 'FR' THEN COALESCE(l.m3, l.m1) END) AS ca_net,
+    -- 🔧 FIX CA 2026-06-12 : le VRAI chiffre d'affaires net = FJ (m3 = total
+    --   France+Export), PAS FR. FR = "Total des produits d'exploitation" (CA +
+    --   production stockée FM + reprises FP + autres) → surévaluait le CA de
+    --   15-25%. Validé vs recherche-entreprises.gouv : FJ colle au centime.
+    --   Fallback FR si FJ absent (régime simplifié). On garde FR à part.
+    COALESCE(
+        max(CASE WHEN l.code::text = 'FJ' THEN l.m3 END),
+        max(CASE WHEN l.code::text = 'FR' THEN COALESCE(l.m3, l.m1) END)
+    ) AS ca_net,
+    max(CASE WHEN l.code::text = 'FR' THEN COALESCE(l.m3, l.m1) END) AS total_produits_exploitation,
     max(CASE WHEN l.code::text = 'HN' THEN COALESCE(l.m1, l.m3) END) AS resultat_net,
     max(CASE WHEN l.code::text = 'HH' THEN COALESCE(l.m1, l.m3) END) AS resultat_avant_impot,
     max(CASE WHEN l.code::text = 'GG' THEN COALESCE(l.m1, l.m3) END) AS resultat_exploitation,
+    -- Dotations d'exploitation (amortissements GA + provisions GB/GC/GD) → permet
+    -- l'EBITDA RÉEL = résultat d'exploitation + dotations (au lieu d'un proxy).
+    (COALESCE(max(CASE WHEN l.code::text = 'GA' THEN COALESCE(l.m3, l.m1) END), 0)
+     + COALESCE(max(CASE WHEN l.code::text = 'GB' THEN COALESCE(l.m3, l.m1) END), 0)
+     + COALESCE(max(CASE WHEN l.code::text = 'GC' THEN COALESCE(l.m3, l.m1) END), 0)
+     + COALESCE(max(CASE WHEN l.code::text = 'GD' THEN COALESCE(l.m3, l.m1) END), 0)) AS dotations_exploitation,
     -- ─── ACTIF (page 1, net N en m3) — inchangé ───
     max(CASE WHEN l.code::text = 'CO' THEN l.m3 END) AS total_actif,
     max(CASE WHEN l.code::text = 'BJ' THEN l.m3 END) AS immo_incorporelles,

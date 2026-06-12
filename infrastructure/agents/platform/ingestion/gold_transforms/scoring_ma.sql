@@ -116,6 +116,9 @@ scored AS (
         osc.digital_presence_score,
         (osc.primary_domain IS NOT NULL AND osc.primary_domain <> '') AS has_website,
         osc.primary_domain,
+        -- EBITDA RÉEL depuis le feature store (résultat exploitation + dotations) —
+        -- remplace le proxy resultat_net+5%capital pour l'affichage et l'EV.
+        es.proxy_ebitda AS ebitda_reel,
 
         -- Ratios financiers — passthrough pour la fiche
         es.ebitda_margin, es.ebit_margin, es.net_margin, es.ebitda_on_assets,
@@ -246,8 +249,8 @@ scored_with_composite AS (
         -- pénalise l'ensemble (≠ moyenne additive qui sature). GREATEST(.,1) évite log(0).
         (POWER(GREATEST(s.transmission_score, 1) * GREATEST(s.attractivity_score, 1) * GREATEST(s.scale_score, 1), 1.0/3.0) * s.risk_multiplier)::int AS deal_score_raw,
         CASE
-            WHEN s.proxy_ebitda > 0 THEN
-                (s.proxy_ebitda * s.sector_multiple
+            WHEN COALESCE(s.ebitda_reel, s.proxy_ebitda) > 0 THEN
+                (COALESCE(s.ebitda_reel, s.proxy_ebitda) * s.sector_multiple
                  * (CASE WHEN s.ca_latest >= 50000000 THEN 1.4
                          WHEN s.ca_latest >= 10000000 THEN 1.2
                          ELSE 1.0 END))::numeric(20,0)
@@ -266,7 +269,7 @@ SELECT
     r.siren, r.denomination, r.code_ape, r.adresse_dept, r.adresse_commune,
     r.forme_juridique, r.capital_social, r.age_entreprise, r.effectif_salarie,
     r.ca_latest, r.capitaux_propres_latest, r.resultat_net_latest,
-    r.proxy_ebitda, r.proxy_margin, r.sector_multiple,
+    COALESCE(r.ebitda_reel, r.proxy_ebitda) AS proxy_ebitda, r.proxy_margin, r.sector_multiple,
     r.is_sector_premium, r.is_geo_premium, r.is_stable, r.is_multi_etab, r.is_clean_legal_form,
     r.age_dirigeant_max, r.has_dirigeant_senior,
     r.n_dirigeants, r.n_mandats_dirigeant_max, r.has_pro_ma,
@@ -307,7 +310,7 @@ SELECT
     s.siren, s.denomination, s.code_ape, s.adresse_dept, s.adresse_commune,
     s.forme_juridique, s.capital_social, s.age_entreprise, s.effectif_salarie,
     s.ca_latest, s.capitaux_propres_latest, s.resultat_net_latest,
-    s.proxy_ebitda, s.proxy_margin, s.sector_multiple,
+    COALESCE(s.ebitda_reel, s.proxy_ebitda) AS proxy_ebitda, s.proxy_margin, s.sector_multiple,
     s.is_sector_premium, s.is_geo_premium, s.is_stable, s.is_multi_etab, s.is_clean_legal_form,
     s.age_dirigeant_max, s.has_dirigeant_senior,
     s.n_dirigeants, s.n_mandats_dirigeant_max, s.has_pro_ma,
