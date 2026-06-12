@@ -353,7 +353,9 @@ function str(v: unknown): string {
 
 export function rowToTarget(r: Record<string, unknown>): Target {
   const ca = num(r.ca_dernier) ?? num(r.ca_net) ?? num(r.chiffre_affaires) ?? 0;
-  const ebitda = num(r.ebitda_dernier) ?? num(r.resultat_net);
+  // proxy_ebitda (gold.scoring_ma) : EBITDA estimé exposé par /cibles — évite le
+  // "—" sur les cartes quand ebitda_dernier comptable n'est pas dispo.
+  const ebitda = num(r.ebitda_dernier) ?? num(r.proxy_ebitda) ?? num(r.resultat_net);
   const score = num(r.score_ma) ?? num(r.pro_ma_score) ?? num(r.score) ?? 0;
   const naf = str(r.naf) || str(r.code_ape) || "";
   const ville = str(r.ville) || str(r.libelle_commune) || "";
