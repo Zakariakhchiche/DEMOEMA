@@ -1,4 +1,8 @@
 silver_name: silver.dgccrf_sanctions
+
+# SQL versionné dans silver_transforms/dgccrf_sanctions.sql (capturé du cache audit 2026-06-12).
+# Appliqué tel quel (pas de LLM) ; maintainer regénère seulement si échec.
+hand_authored: true
 goal: >
   Sanctions DGCCRF (Direction Générale Concurrence Consommation Répression Fraudes)
   France, normalisées + match siren via inpi_comptes.denomination.
