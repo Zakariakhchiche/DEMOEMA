@@ -152,12 +152,18 @@ scored AS (
             + CASE WHEN p.lei IS NOT NULL THEN 5 ELSE 0 END
         ))::int AS scale_score,
 
-        -- STRUCTURE : suitability (forme juridique + pro M&A + multi-mandats + holding)
+        -- STRUCTURE : suitability transaction. La forme juridique propre est quasi
+        -- universelle (98 %) → poids faible (table stakes). On SUPPRIME le double-
+        -- comptage has_pro_ma + mandats≥5 (même signal sous-jacent : 141 149 chacun)
+        -- au profit d'une gradation mandats + capital social. Saturation 24 %→4 %.
         LEAST(100, GREATEST(0,
-            CASE WHEN p.is_clean_legal_form THEN 40 ELSE 10 END
-            + CASE WHEN p.has_pro_ma THEN 25 ELSE 0 END
-            + CASE WHEN p.n_mandats_dirigeant_max >= 5 THEN 15 ELSE 0 END
-            + CASE WHEN p.has_holding_patrimoniale THEN 20 ELSE 0 END
+            (CASE WHEN p.is_clean_legal_form THEN 20 ELSE 0 END)
+            + (CASE WHEN p.has_holding_patrimoniale THEN 25 ELSE 0 END)
+            + (CASE WHEN p.n_mandats_dirigeant_max >= 10 THEN 30
+                    WHEN p.n_mandats_dirigeant_max >= 5 THEN 20
+                    WHEN p.n_mandats_dirigeant_max >= 2 THEN 10 ELSE 0 END)
+            + (CASE WHEN COALESCE(p.capital_social, 0) >= 1000000 THEN 25
+                    WHEN COALESCE(p.capital_social, 0) >= 100000 THEN 12 ELSE 0 END)
         ))::int AS structure_score,
 
         -- RISK multiplier (0 = éliminé : sanction OFAC/EU, radiée, procédure collective)

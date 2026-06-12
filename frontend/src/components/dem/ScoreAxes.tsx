@@ -88,7 +88,9 @@ export function ScoreAxes({ axes, variant = "compact" }: Props) {
             <div style={{
               position: "absolute", left: 0, top: 0, bottom: 0,
               width: `${Math.max(0, Math.min(100, axis.value))}%`,
-              background: `linear-gradient(90deg, ${tone(axis.value)}88, ${tone(axis.value)})`,
+              // Couleur pleine via token (un gradient `${var()}88` est invalide → le
+              // navigateur l'ignore et la barre restait vide ; cf. variante compact).
+              background: tone(axis.value),
               borderRadius: 3,
               transition: "width 0.4s cubic-bezier(.16,1,.3,1)",
             }} />
