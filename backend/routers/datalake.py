@@ -1832,6 +1832,12 @@ async def _dirigeant_full(
            FROM src""",
         nom_for_sql, nom_for_sql_na, prenom_for_sql, prenom_for_sql_na, date_n,
     ), timeout_s=18.0)
+    # asyncpg.Record est immuable → on le convertit en dict, car le code en aval
+    # y assigne des clés (sci_per_siren, n_sci_individual, total_capital_sci…).
+    # Sans ça : TypeError 'asyncpg.Record' object does not support item assignment
+    # → 500 sur toute la fiche dirigeant ayant des SCI.
+    if sci is not None and not isinstance(sci, dict):
+        sci = dict(sci)
 
     # 2 bis. Valeur réelle du patrimoine SCI : agrégation des derniers comptes
     # déposés à l'INPI pour chaque siren SCI du dirigeant.
