@@ -434,13 +434,27 @@ export function rowToPerson(r: Record<string, unknown>, idx = 0): Person {
   };
 }
 
-export async function fetchTargets(opts: { limit?: number; minScore?: number; q?: string } = {}): Promise<Target[]> {
+export async function fetchTargets(opts: {
+  limit?: number; minScore?: number; q?: string; dept?: string; naf?: string;
+  minCa?: number; maxCa?: number; minEbitdaMargin?: number; maxDebtEbitda?: number;
+  minAgeDirigeant?: number; isAssetRich?: boolean; isDistressed?: boolean;
+  sort?: NonNullable<Parameters<typeof datalakeApi.searchCibles>[0]>["sort"];
+} = {}): Promise<Target[]> {
   try {
     const r = await datalakeApi.searchCibles({
       limit: opts.limit ?? 8,
       minScore: opts.minScore,
       q: opts.q,
-      sort: "score_ma",
+      dept: opts.dept,
+      naf: opts.naf,
+      minCa: opts.minCa,
+      maxCa: opts.maxCa,
+      minEbitdaMargin: opts.minEbitdaMargin,
+      maxDebtEbitda: opts.maxDebtEbitda,
+      minAgeDirigeant: opts.minAgeDirigeant,
+      isAssetRich: opts.isAssetRich,
+      isDistressed: opts.isDistressed,
+      sort: opts.sort ?? "score_ma",
     });
     return r.cibles.map((c) => rowToTarget(c as Record<string, unknown>));
   } catch (e) {

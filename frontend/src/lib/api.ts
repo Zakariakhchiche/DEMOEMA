@@ -112,7 +112,14 @@ export const datalakeApi = {
     isProMa?: boolean;
     isAssetRich?: boolean;
     hasRedFlags?: boolean;
-    sort?: "score_ma" | "ca_dernier" | "date_creation";
+    minCa?: number;
+    maxCa?: number;
+    minEbitdaMargin?: number;
+    maxDebtEbitda?: number;
+    minAgeDirigeant?: number;
+    isDistressed?: boolean;
+    hasWebsite?: boolean;
+    sort?: "score_ma" | "ca_dernier" | "date_creation" | "ebitda" | "ebitda_margin" | "roa" | "transmission" | "attractivity" | "scale" | "structure" | "age_dirigeant" | "capital_social";
     limit?: number;
   } = {}) => {
     const p = new URLSearchParams();
@@ -124,6 +131,13 @@ export const datalakeApi = {
     if (opts.isAssetRich) p.set("is_asset_rich", "true");
     if (opts.hasRedFlags === true) p.set("has_red_flags", "true");
     if (opts.hasRedFlags === false) p.set("has_red_flags", "false");
+    if (opts.minCa != null) p.set("min_ca", String(opts.minCa));
+    if (opts.maxCa != null) p.set("max_ca", String(opts.maxCa));
+    if (opts.minEbitdaMargin != null) p.set("min_ebitda_margin", String(opts.minEbitdaMargin));
+    if (opts.maxDebtEbitda != null) p.set("max_debt_ebitda", String(opts.maxDebtEbitda));
+    if (opts.minAgeDirigeant != null) p.set("min_age_dirigeant", String(opts.minAgeDirigeant));
+    if (opts.isDistressed != null) p.set("is_distressed", String(opts.isDistressed));
+    if (opts.hasWebsite) p.set("has_website", "true");
     if (opts.sort) p.set("sort", opts.sort);
     p.set("limit", String(opts.limit ?? 20));
     const raw = await jget<{ cibles: Record<string, unknown>[]; has_more: boolean }>(
