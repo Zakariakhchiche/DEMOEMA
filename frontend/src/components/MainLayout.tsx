@@ -19,13 +19,13 @@ export default function MainLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  // `/` (shell DEMOEMA full design) + sous-routes fullscreen ⇒ pas de wrap EDRCF.
+  // `/` (shell Origin full design) + sous-routes fullscreen ⇒ pas de wrap Origin.
   const isFullscreen =
     pathname === "/" ||
     FULLSCREEN_PREFIXES.some((r) => pathname?.startsWith(r));
 
   if (isFullscreen) {
-    // Mode fullscreen : juste les enfants, pas de sidebar/header/widgets EDRCF
+    // Mode fullscreen : juste les enfants, pas de sidebar/header/widgets Origin
     return <>{children}</>;
   }
 

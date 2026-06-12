@@ -1022,7 +1022,7 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
         <h1 style={{
           position: "absolute", width: 1, height: 1, padding: 0, margin: -1,
           overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap", border: 0,
-        }}>Chat M&A — DEMOEMA Copilot</h1>
+        }}>Chat M&A — Origin Copilot</h1>
         <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "8px 24px 20px" }}>
           <div style={{ maxWidth: 920, margin: "0 auto" }}>
             {messages.map((m, i) =>

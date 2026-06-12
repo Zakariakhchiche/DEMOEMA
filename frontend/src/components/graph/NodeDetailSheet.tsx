@@ -159,7 +159,7 @@ export default function NodeDetailSheet({ node, onClose }: NodeDetailSheetProps)
           <Zap size={18} className="text-indigo-400 shrink-0" />
           <p className="text-xs text-gray-400 leading-relaxed font-medium">
             Connexion identifiée via le{" "}
-            <span className="text-white font-bold">réseau EdRCF 6.0</span>.
+            <span className="text-white font-bold">réseau Origin</span>.
             Analyse de proximité basée sur les données Pappers et le mapping
             relationnel.
           </p>

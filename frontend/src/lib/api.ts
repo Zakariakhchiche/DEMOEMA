@@ -1,5 +1,5 @@
 /**
- * Client API typé pour le backend FastAPI EdRCF.
+ * Client API typé pour le backend FastAPI Origin.
  *
  * En prod (Caddy), le backend est exposé sur le même domaine via reverse proxy
  * (`/api/*` → backend:8000). En dev, NEXT_PUBLIC_API_URL peut pointer vers

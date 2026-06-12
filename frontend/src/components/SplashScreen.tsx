@@ -55,7 +55,7 @@ export default function SplashScreen() {
                 <Zap size={24} className="text-white relative z-10" />
               </div>
               <span className="text-white font-black text-3xl tracking-tighter uppercase leading-none">
-                EdRCF 6.0
+                Origin
               </span>
             </div>
             <span className="text-[9px] font-black text-indigo-400/80 uppercase tracking-[0.45em] leading-none">
@@ -80,7 +80,7 @@ export default function SplashScreen() {
             transition={{ delay: 0.6, duration: 0.4 }}
             className="absolute bottom-6 text-[8px] font-black text-gray-700 uppercase tracking-[0.3em]"
           >
-            Edmond de Rothschild CF · v6.0
+            Origin CF · v6.0
           </motion.div>
         </motion.div>
       )}

@@ -205,7 +205,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
           <div style={{ fontSize: 11, color: "var(--text-tertiary)", paddingTop: 8, borderTop: "1px solid var(--border-subtle)" }}>
             Utilisateur : <span style={{ color: "var(--text-secondary)" }}>Anne Dupont</span><br />
             Modèle IA : DeepSeek<br />
-            Version : EdRCF 6.0 BETA
+            Version : Origin BETA
           </div>
         </div>
       </div>

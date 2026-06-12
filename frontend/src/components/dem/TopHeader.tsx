@@ -139,7 +139,7 @@ export function TopHeader({ mode, setMode, onCmdK }: Props) {
           background: "conic-gradient(from 90deg, #60a5fa, #a78bfa, #67e8f9, #60a5fa)",
           boxShadow: "0 0 16px -2px rgba(167,139,250,0.5)",
         }} />
-        <div style={{ fontWeight: 700, letterSpacing: "-0.02em", fontSize: 15, color: "var(--text-primary)" }}>DEMOEMA</div>
+        <div style={{ fontWeight: 700, letterSpacing: "-0.02em", fontSize: 15, color: "var(--text-primary)" }}>Origin</div>
         <span style={{
           fontSize: 10, padding: "2px 6px", borderRadius: 4,
           background: "rgba(167,139,250,0.10)",

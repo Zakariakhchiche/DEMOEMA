@@ -88,7 +88,7 @@ export function ConversationsSidebar({
           <Sparkles className="h-4 w-4 text-white" />
         </div>
         <div className="flex-1">
-          <div className="text-sm font-semibold text-zinc-100">DEMOEMA</div>
+          <div className="text-sm font-semibold text-zinc-100">Origin</div>
           <div className="text-[10px] uppercase tracking-wider text-zinc-500">
             M&amp;A Copilot
           </div>

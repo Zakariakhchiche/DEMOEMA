@@ -116,7 +116,7 @@ export default function SignalsPage() {
     if (filteredSignals.length === 0) return;
     const date = new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
     const lines = [
-      `EDRCF 6.0 — Rapport Intelligence Signaux`,
+      `Origin — Rapport Intelligence Signaux`,
       `Généré le ${date}`,
       `${filteredSignals.length} signaux | Filtre: ${filter} | Dimension: ${DIMENSION_FR[dimensionFilter] || dimensionFilter}`,
       `${"─".repeat(60)}`,
@@ -132,12 +132,12 @@ export default function SignalsPage() {
       lines.push("");
     });
     lines.push(`${"─".repeat(60)}`);
-    lines.push(`© Edmond de Rothschild Corporate Finance — EDRCF 6.0`);
+    lines.push(`© Origin — Origin`);
     const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `EDRCF_Signaux_${new Date().toISOString().slice(0, 10)}.txt`;
+    a.download = `Origin_Signaux_${new Date().toISOString().slice(0, 10)}.txt`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -166,7 +166,7 @@ export default function SignalsPage() {
             </div>
           </div>
           <p className="text-gray-400 text-sm font-medium">
-            Detection d&apos;anomalies et declencheurs strategiques calibres par EDRCF 6.0.
+            Detection d&apos;anomalies et declencheurs strategiques calibres par Origin.
           </p>
         </div>
 

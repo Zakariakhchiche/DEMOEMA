@@ -108,7 +108,7 @@ export default function ReportPage() {
                <div className="w-12 h-12 bg-black flex items-center justify-center rounded-xl">
                   <Fingerprint size={28} className="text-white" />
                </div>
-               <span className="font-black text-3xl tracking-tighter uppercase">EDRCF 6.0</span>
+               <span className="font-black text-3xl tracking-tighter uppercase">Origin</span>
             </div>
             <h1 className="text-5xl font-black tracking-tighter mb-2 italic uppercase">Dossier : Origination</h1>
             <p className="text-gray-500 font-bold uppercase tracking-[0.3em] text-xs">Weak Signals Radar • {mounted ? currentDate : "Loading..."}</p>
@@ -298,7 +298,7 @@ export default function ReportPage() {
         {/* Footer */}
         <div className="mt-12 pt-12 border-t border-black flex flex-col sm:flex-row justify-between items-center gap-6 text-[8px] font-black text-gray-400 uppercase tracking-widest">
            <div className="flex gap-8">
-              <span>EDRCF-ARCHIVE-V6</span>
+              <span>Origin-ARCHIVE-V6</span>
               <span>CONFIDENTIALITY LEVEL: INTERNAL</span>
               <span>GEN-TIME: {mounted ? currentTime : "Sync..."}</span>
            </div>

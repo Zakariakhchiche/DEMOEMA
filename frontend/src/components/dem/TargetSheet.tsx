@@ -727,7 +727,7 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
                 }}>
                   <Icon name="sparkles" size={16} color="var(--accent-purple)" />
                   <div>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--accent-purple)", marginBottom: 4 }}>Verdict DEMOEMA</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--accent-purple)", marginBottom: 4 }}>Verdict Origin</div>
                     {(() => {
                       // Score live (scoring_ma) prioritaire sur la prop figée de la liste.
                       const verdictScore = scoring?.deal_score ?? target.score;

@@ -34,7 +34,7 @@ export function AiMessage({ children, streaming, header }: { children: React.Rea
       <div style={{ flex: 1, minWidth: 0 }}>
         {header && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, fontSize: 11.5, color: "var(--text-tertiary)" }}>
-            <span style={{ fontWeight: 600, color: "var(--accent-purple)" }}>DEMOEMA</span>
+            <span style={{ fontWeight: 600, color: "var(--accent-purple)" }}>Origin</span>
             <span>·</span>
             <span>{header}</span>
           </div>

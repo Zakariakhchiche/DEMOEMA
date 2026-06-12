@@ -12,7 +12,7 @@ interface ScoreBadgeProps {
 }
 
 /**
- * Score halo badge — signature DEMOEMA.
+ * Score halo badge — signature Origin.
  * - score >= 70 : emerald glow (Tier 1, hot M&A)
  * - score 50-69 : amber glow (Tier 2)
  * - score 30-49 : rose subtle (Tier 3)

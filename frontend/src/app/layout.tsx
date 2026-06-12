@@ -24,13 +24,13 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "EdRCF 6.0 | AI Origination Platform",
-  description: "Plateforme d'origination M&A propulsée par l'IA — Edmond de Rothschild Corporate Finance.",
+  title: "Origin | AI Origination Platform",
+  description: "Plateforme d'origination M&A propulsée par l'IA — Origin.",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "EdRCF 6.0",
+    title: "Origin",
   },
   icons: {
     icon: [

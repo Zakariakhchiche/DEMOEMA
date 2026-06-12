@@ -273,7 +273,7 @@ export default function TargetsPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `EDRCF_Intelligence_Vault_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `Origin_Intelligence_Vault_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };

@@ -1,4 +1,4 @@
-// Format helpers DEMOEMA — affichages standards INSEE / M&A.
+// Format helpers Origin — affichages standards INSEE / M&A.
 
 /**
  * Formatte un SIREN au format INSEE officiel "XXX XXX XXX".
