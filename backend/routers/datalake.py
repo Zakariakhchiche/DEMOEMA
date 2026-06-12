@@ -3061,6 +3061,14 @@ async def pitch_pdf(req: Request, siren: str):
     presse = f.get("presse", [])
     red_flags = f.get("red_flags", [])
 
+    # Scoring réel (gold.scoring_ma) — MÊME source que la TargetSheet, pour que le
+    # PDF soit cohérent avec l'interface (deal_score géométrique + 4 axes + ratios).
+    # Fallback sur l'heuristique CA si scoring_ma indispo / siren absent.
+    try:
+        scoring = await scoring_detail(req, siren)
+    except Exception:
+        scoring = None
+
     def _h(s):
         return str(s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
@@ -3102,12 +3110,15 @@ async def pitch_pdf(req: Request, siren: str):
     exercices = fiche.get("exercices", [])
     ca_history = fiche.get("ca_history", [])
 
-    # Score breakdown (même heuristique que rowToTarget)
-    try:
-        ca_n = float(fiche.get("ca_dernier") or 0)
-    except (TypeError, ValueError):
-        ca_n = 0
-    score = min(95, 50 + int(ca_n / 200_000)) if ca_n else 50
+    # Deal score : vrai scoring_ma si dispo (cohérence interface), sinon heuristique CA.
+    if scoring and scoring.get("deal_score") is not None:
+        score = int(scoring["deal_score"])
+    else:
+        try:
+            ca_n = float(fiche.get("ca_dernier") or 0)
+        except (TypeError, ValueError):
+            ca_n = 0
+        score = min(95, 50 + int(ca_n / 200_000)) if ca_n else 50
 
     dirigeants_html = "".join(
         f"""<tr>
@@ -3172,6 +3183,80 @@ async def pitch_pdf(req: Request, siren: str):
         </table>
         """
 
+    # ─── Scoring 4 axes business (même rendu que ScoreAxes côté fiche) ───
+    axes_html = ""
+    if scoring and scoring.get("axes"):
+        ax = scoring["axes"] or {}
+        AX = [("Transmission", ax.get("transmission")), ("Attractivity", ax.get("attractivity")),
+              ("Scale", ax.get("scale")), ("Structure", ax.get("structure"))]
+        bars = ""
+        for lab, v in AX:
+            if v is None:
+                continue
+            vi = max(0, min(100, int(v)))
+            col = "#10b981" if vi >= 70 else "#3b82f6" if vi >= 50 else "#f59e0b" if vi >= 30 else "#9ca3af"
+            bars += (
+                f'<div class="axis"><div class="axis-top"><span>{lab}</span>'
+                f'<strong>{vi}<span style="color:#9ca3af;font-weight:400">/100</span></strong></div>'
+                f'<div class="axis-track"><div class="axis-fill" style="width:{vi}%;background:{col}"></div></div></div>'
+            )
+        tier_lbl = {"A_HOT": "A · Hot", "B_WARM": "B · Warm", "C_PIPELINE": "C · Pipeline",
+                    "D_WATCH": "D · Watch", "E_REJECT": "E · Reject", "Z_ELIM": "Z · Éliminé"}.get(
+            scoring.get("tier"), _h(scoring.get("tier") or ""))
+        pct = scoring.get("deal_percentile")
+        if bars:
+            axes_html = (
+                f'<h2>Scoring M&amp;A — 4 axes business</h2>'
+                f'<div style="font-size:11px;color:#52525b;margin-bottom:8px">Deal score <strong style="color:#18181b">{score}/100</strong>'
+                f'{f" · tier {tier_lbl}" if tier_lbl else ""}{f" · percentile {pct}" if pct else ""} '
+                f'— composite géométrique (Transmission × Attractivity × Scale)^⅓ × risque.</div>'
+                f'<div class="axes">{bars}</div>'
+            )
+
+    # ─── Ratios financiers (grille Orascom, même source que la fiche) ───
+    ratios_html = ""
+    if scoring and scoring.get("ratios"):
+        r = scoring["ratios"] or {}
+        def _pct(v):
+            return f"{v * 100:.1f}%" if isinstance(v, (int, float)) else "—"
+        def _x(v):
+            return f"{v:.2f}×" if isinstance(v, (int, float)) else "—"
+        def _d(v):
+            return f"{round(v)} j" if isinstance(v, (int, float)) else "—"
+        rr = [
+            ("Marge EBITDA", _pct(r.get("ebitda_margin"))),
+            ("Marge nette", _pct(r.get("net_margin"))),
+            ("Dette / EBITDA", _x(r.get("debt_to_ebitda"))),
+            ("Dette / Fonds propres", _x(r.get("debt_to_equity"))),
+            ("Ratio d'endettement", _pct(r.get("debt_ratio"))),
+            ("DSO (créances)", _d(r.get("dso_days"))),
+            ("Croissance CA", _pct(r.get("revenue_growth_yoy"))),
+        ]
+        cells = "".join(
+            f'<tr><td>{lab}</td><td style="text-align:right;font-weight:600;font-variant-numeric:tabular-nums">{val}</td></tr>'
+            for lab, val in rr if val != "—"
+        )
+        flags = [
+            r.get("has_negative_equity") and "Capitaux propres négatifs",
+            r.get("has_negative_ebitda") and "EBITDA négatif",
+            r.get("has_high_leverage") and "Surendettement",
+            r.get("has_revenue_decline") and "Chute d'activité",
+        ]
+        flags = [x for x in flags if x]
+        flags_html = (
+            '<div style="margin-top:6px">' + "".join(
+                f'<span style="display:inline-block;background:#fee2e2;color:#b91c1c;padding:1px 7px;'
+                f'border-radius:999px;font-size:9px;font-weight:600;margin-right:4px">⚠ {_h(x)}</span>'
+                for x in flags) + '</div>'
+        ) if flags else ""
+        if cells:
+            tier_fin = {"above_average": "Au-dessus", "average": "Acceptable",
+                        "below_average": "En-dessous"}.get(r.get("financial_health_tier"), "")
+            ratios_html = (
+                f'<h2>Ratios financiers (grille Orascom){f" — {tier_fin}" if tier_fin else ""}</h2>'
+                f'<table>{cells}</table>{flags_html}'
+            )
+
     html = f"""<!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -3220,6 +3305,11 @@ async def pitch_pdf(req: Request, siren: str):
   .ca-history .bar {{ background: linear-gradient(180deg, #6366f1, #818cf8); border-radius: 2px 2px 0 0; min-height: 4px; margin: 0 auto; width: 36px; }}
   .ca-history .ca-val {{ font-size: 9px; color: #52525b; margin-top: 2px; font-variant-numeric: tabular-nums; }}
   .ca-history th {{ font-size: 9px; text-align: center; }}
+  .axes {{ display: flex; flex-direction: column; gap: 8px; }}
+  .axis-top {{ display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; margin-bottom: 3px; }}
+  .axis-top span {{ font-weight: 600; }}
+  .axis-track {{ width: 100%; height: 6px; border-radius: 3px; background: #f1f1f4; overflow: hidden; }}
+  .axis-fill {{ height: 6px; border-radius: 3px; }}
   .source-tag {{
     display: inline-block; padding: 2px 6px; border-radius: 3px;
     background: #e0f2fe; color: #0369a1; font-size: 9px; font-weight: 600;
@@ -3283,6 +3373,10 @@ async def pitch_pdf(req: Request, siren: str):
     {('Compliance : ' + str(n_sanctions) + ' red flag(s) OpenSanctions à expliquer en DD.') if n_sanctions else 'Compliance OK (OpenSanctions UE/US/UK/UN, ICIJ, PEP).'}
   </p>
 </div>
+
+{axes_html}
+
+{ratios_html}
 
 {ca_bars_html}
 
