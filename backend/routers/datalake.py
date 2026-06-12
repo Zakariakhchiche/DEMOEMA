@@ -314,7 +314,11 @@ async def _enrich_dirigeant_contacts(pool, siren: str, dirigeants: list) -> None
         if k and urls:
             li_by_nom[k] = urls[0]
     for d in dirigeants:
-        if not isinstance(d, dict) or d.get("type_dirigeant") != "personne physique":
+        if not isinstance(d, dict):
+            continue
+        # Personne physique : type_dirigeant souvent None dans le path silver →
+        # on exclut seulement les personnes morales (siren_dirigeant renseigné).
+        if d.get("type_dirigeant") == "personne morale" or d.get("siren_dirigeant"):
             continue
         prenom_raw = (d.get("prenom") or "").split(",")[0].split()[0] if d.get("prenom") else ""
         prenom = _email_token(prenom_raw)
