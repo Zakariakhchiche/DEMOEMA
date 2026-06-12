@@ -159,14 +159,39 @@ COPILOT_TOOLS = [
         "type": "function",
         "function": {
             "name": "search_cibles",
-            "description": "Recherche cibles M&A dans le datalake silver. Filtres optionnels: texte, département, score minimum. Retourne 5-20 cibles avec siren, denomination, NAF, ville, CA, EBITDA.",
+            "description": (
+                "Recherche/sélection AVANCÉE de cibles M&A sur gold.scoring_ma "
+                "(mêmes données que la fiche : 4 axes, ratios financiers complets, "
+                "asset-rich, digital). Combine filtres + tri. Retourne par cible : "
+                "siren, denomination, naf, ville, ca_dernier, proxy_ebitda, deal_score, "
+                "tier, axes (transmission/attractivity/scale/structure), ET ratios "
+                "(ebitda_margin, net_margin, debt_to_ebitda, roa, dso_days, bfr_jours, "
+                "interest_coverage, gross_margin, intensite_capitalistique), "
+                "digital_presence_score, primary_domain. Exemples d'usage : "
+                "'bureaux d'études (naf=7112) avec ca>100M' → naf='7112', min_ca=100000000 ; "
+                "'meilleur EBITDA' → sort='ebitda' ; 'forte marge EBITDA' → sort='ebitda_margin' "
+                "ou min_ebitda_margin=0.15 ; 'peu endettées' → max_debt_ebitda=3 ; "
+                "'dirigeant senior à céder' → min_age_dirigeant=65, sort='transmission' ; "
+                "'asset-rich' → is_asset_rich=true ; 'en détresse' → is_distressed=true."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "q": {"type": "string", "description": "Texte recherché (denomination ILIKE) — ex: 'Carrefour', 'tech IDF'"},
+                    "q": {"type": "string", "description": "Texte recherché (denomination ILIKE) — ex: 'Carrefour'"},
                     "dept": {"type": "string", "description": "Code département 2 chiffres ex: '75', '92'"},
-                    "min_score": {"type": "integer", "description": "Score M&A minimum 0-100"},
-                    "limit": {"type": "integer", "description": "Nombre résultats (default 5, max 20)"},
+                    "naf": {"type": "string", "description": "Préfixe code NAF/APE ex: '7112' (ingénierie/BE), '6630' (gestion), '2351' (ciment)"},
+                    "min_score": {"type": "integer", "description": "Deal score M&A minimum 0-100"},
+                    "min_ca": {"type": "number", "description": "CA minimum en euros ex: 100000000 pour 100M€"},
+                    "max_ca": {"type": "number", "description": "CA maximum en euros"},
+                    "min_ebitda_margin": {"type": "number", "description": "Marge EBITDA min en fraction ex: 0.15 = 15%"},
+                    "max_debt_ebitda": {"type": "number", "description": "Ratio dette/EBITDA max ex: 3"},
+                    "min_age_dirigeant": {"type": "integer", "description": "Âge dirigeant min ex: 65 (transmission)"},
+                    "is_asset_rich": {"type": "boolean", "description": "Cibles asset-rich (holding patrimoniale/immobilier)"},
+                    "is_distressed": {"type": "boolean", "description": "Sociétés en détresse financière"},
+                    "has_website": {"type": "boolean", "description": "Présence web (maturité digitale)"},
+                    "has_red_flags": {"type": "boolean", "description": "Avec (true) ou sans (false) red flag compliance"},
+                    "sort": {"type": "string", "description": "Tri: score_ma|ca_dernier|ebitda|ebitda_margin|roa|transmission|attractivity|scale|structure|age_dirigeant|capital_social (default score_ma)"},
+                    "limit": {"type": "integer", "description": "Nombre résultats (default 10, max 30)"},
                 },
             },
         },
@@ -641,21 +666,40 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
     """Execute un tool LLM en appelant l'endpoint interne du datalake."""
     try:
         if name == "search_cibles":
-            params = {k: v for k, v in args.items() if v is not None}
-            params.setdefault("limit", 5)
-            async with httpx.AsyncClient(timeout=10) as client:
+            _allowed = {"q", "dept", "naf", "min_score", "min_ca", "max_ca",
+                        "min_ebitda_margin", "max_debt_ebitda", "min_age_dirigeant",
+                        "is_pro_ma", "is_asset_rich", "is_distressed", "has_website",
+                        "has_red_flags", "sort", "limit"}
+            params = {k: v for k, v in args.items() if v is not None and k in _allowed}
+            params["limit"] = max(1, min(int(params.get("limit", 10)), 30))
+            async with httpx.AsyncClient(timeout=15) as client:
                 r = await client.get(f"{datalake_base}/api/datalake/cibles", params=params)
                 if r.status_code == 200:
                     data = r.json()
                     cibles = data.get("cibles", [])
-                    return {"n_cibles": len(cibles), "cibles": [
-                        {"siren": c.get("siren"), "denomination": c.get("denomination"),
-                         "naf": c.get("naf"), "forme": c.get("forme_juridique"),
-                         "ville": c.get("ville"), "dept": c.get("dept"),
-                         "ca_dernier": c.get("ca_dernier"), "ebitda_dernier": c.get("ebitda_dernier"),
-                         "score_ma": c.get("score_ma"), "marge_pct": c.get("marge_pct")}
-                        for c in cibles
-                    ]}
+                    def _pick(c):
+                        out = {"siren": c.get("siren"), "denomination": c.get("denomination"),
+                               "naf": c.get("naf"), "ville": c.get("ville"), "dept": c.get("dept"),
+                               "ca_dernier": c.get("ca_dernier") or c.get("ca_latest"),
+                               "deal_score": c.get("score_ma"), "tier": c.get("tier"),
+                               "axes": {"transmission": c.get("transmission_score"), "attractivity": c.get("attractivity_score"),
+                                        "scale": c.get("scale_score"), "structure": c.get("structure_score")},
+                               "proxy_ebitda": c.get("proxy_ebitda"), "ev_estimated_eur": c.get("ev_estimated_eur")}
+                        # ratios financiers (uniquement les non-nuls, pour économiser les tokens)
+                        ratios = {k: c.get(k) for k in (
+                            "ebitda_margin", "net_margin", "debt_to_ebitda", "debt_to_equity",
+                            "debt_ratio", "dso_days", "roa", "bfr_jours", "interest_coverage",
+                            "gross_margin", "intensite_capitalistique", "financial_health_tier")
+                            if c.get(k) is not None}
+                        if ratios:
+                            out["ratios"] = ratios
+                        if c.get("digital_presence_score") is not None:
+                            out["digital_presence_score"] = c.get("digital_presence_score")
+                        if c.get("primary_domain"):
+                            out["primary_domain"] = c.get("primary_domain")
+                        return out
+                    return {"n_cibles": len(cibles), "filtres_appliques": params,
+                            "cibles": [_pick(c) for c in cibles]}
                 return {"error": f"HTTP {r.status_code}", "cibles": []}
 
         elif name == "search_entreprise_by_name":

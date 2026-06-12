@@ -4585,7 +4585,15 @@ async def cibles_search(
     is_pro_ma: bool | None = None,
     is_asset_rich: bool | None = None,
     has_red_flags: bool | None = None,
-    sort: str = Query("score_ma", pattern="^(score_ma|ca_dernier|date_creation)$"),
+    # Filtres financiers avancés (sélections riches — mêmes données que la fiche).
+    min_ca: float | None = None,
+    max_ca: float | None = None,
+    min_ebitda_margin: float | None = None,   # ex 0.15 = marge EBITDA ≥ 15 %
+    max_debt_ebitda: float | None = None,     # ex 3 = dette/EBITDA ≤ 3
+    min_age_dirigeant: int | None = None,     # ex 65 = dirigeant ≥ 65 ans
+    is_distressed: bool | None = None,        # détresse financière
+    has_website: bool | None = None,          # présence web OSINT
+    sort: str = Query("score_ma", pattern="^(score_ma|ca_dernier|date_creation|ebitda|ebitda_margin|roa|transmission|attractivity|scale|structure|age_dirigeant|capital_social)$"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
@@ -4599,17 +4607,23 @@ async def cibles_search(
     # Hash compact des params pour clé de cache
     cache_key = (
         f"cibles:{q}|{dept}|{naf}|{min_score}|{is_pro_ma}|"
-        f"{is_asset_rich}|{has_red_flags}|{sort}|{limit}|{offset}"
+        f"{is_asset_rich}|{has_red_flags}|{min_ca}|{max_ca}|{min_ebitda_margin}|"
+        f"{max_debt_ebitda}|{min_age_dirigeant}|{is_distressed}|{has_website}|"
+        f"{sort}|{limit}|{offset}"
     )
     cached = _gen_cache_get(cache_key, 60.0)
     if cached is not None:
         return cached
 
+    adv = dict(min_ca=min_ca, max_ca=max_ca, min_ebitda_margin=min_ebitda_margin,
+               max_debt_ebitda=max_debt_ebitda, min_age_dirigeant=min_age_dirigeant,
+               is_distressed=is_distressed, has_website=has_website)
+
     pool = _pool(req)
 
     if await _table_exists(pool, "gold", "entreprises_master"):
         try:
-            result = await _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_rich, has_red_flags, sort, limit, offset)
+            result = await _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_rich, has_red_flags, sort, limit, offset, adv)
             _gen_cache_set(cache_key, result)
             return result
         except Exception as e:
@@ -4633,14 +4647,14 @@ async def _cibles_with_routing(pool, sort: str, limit: int, offset: int):
         try:
             return await _cibles_from_gold(
                 pool, None, None, None, None, None, None, None,
-                sort, limit, offset,
+                sort, limit, offset, None,
             )
         except Exception as e:
             print(f"[cibles routing] gold a échoué, fallback silver: {type(e).__name__}: {e}")
     return await _cibles_from_silver(pool, None, None, None, None, sort, limit, offset)
 
 
-async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_rich, has_red_flags, sort, limit, offset):
+async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_rich, has_red_flags, sort, limit, offset, adv=None):
     # Si gold.scoring_ma existe (matérialisée par silver_runner), on l'utilise
     # comme source de vérité pour le score (103 signaux × 12 dimensions).
     # Sinon fallback sur entreprises_master.score_ma (formule heuristique 8
@@ -4665,7 +4679,15 @@ async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_r
         extra_select = (
             ", sm.transmission_score, sm.attractivity_score, sm.scale_score, "
             "sm.structure_score, sm.tier, sm.deal_percentile, sm.risk_multiplier, "
-            "sm.ev_estimated_eur, sm.proxy_margin, sm.sector_multiple"
+            "sm.ev_estimated_eur, sm.proxy_margin, sm.sector_multiple, "
+            # Ratios financiers complets (mêmes données que la fiche) — pour que le
+            # chat puisse remonter/justifier les sélections.
+            "sm.proxy_ebitda, sm.ebitda_margin, sm.net_margin, sm.debt_to_ebitda, "
+            "sm.debt_to_equity, sm.debt_ratio, sm.dso_days, sm.roa, sm.bfr_jours, "
+            "sm.interest_coverage, sm.gross_margin, sm.intensite_capitalistique, "
+            "sm.financial_health_tier, sm.has_negative_equity, sm.has_high_leverage, "
+            "sm.has_negative_ebitda, sm.has_revenue_decline, sm.digital_presence_score, "
+            "sm.has_website, sm.primary_domain"
         )
 
     # Statut "actif" v3 = insee_etat_administratif != 'F' (F = Fermé/Radié)
@@ -4700,12 +4722,47 @@ async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_r
     elif has_red_flags is False and has_scoring:
         where.append("(sm.risk_multiplier IS NULL OR sm.risk_multiplier >= 1.0)")
 
-    # Mapping order_col v3
+    # ─── Filtres financiers avancés (sélections riches type interface) ───
+    adv = adv or {}
+    if adv.get("min_ca") is not None:
+        params.append(float(adv["min_ca"]))
+        where.append(f"t.ca_latest >= ${len(params)}")
+    if adv.get("max_ca") is not None:
+        params.append(float(adv["max_ca"]))
+        where.append(f"t.ca_latest <= ${len(params)}")
+    if adv.get("min_age_dirigeant") is not None:
+        params.append(int(adv["min_age_dirigeant"]))
+        where.append(f"t.age_dirigeant_max >= ${len(params)}")
+    if has_scoring:
+        if adv.get("min_ebitda_margin") is not None:
+            params.append(float(adv["min_ebitda_margin"]))
+            where.append(f"sm.ebitda_margin >= ${len(params)}")
+        if adv.get("max_debt_ebitda") is not None:
+            params.append(float(adv["max_debt_ebitda"]))
+            where.append(f"(sm.debt_to_ebitda IS NOT NULL AND sm.debt_to_ebitda <= ${len(params)})")
+        if adv.get("is_distressed") is True:
+            where.append("(COALESCE(sm.has_negative_equity,false) OR COALESCE(sm.has_high_leverage,false) "
+                         "OR COALESCE(sm.has_negative_ebitda,false) OR COALESCE(sm.has_revenue_decline,false))")
+        elif adv.get("is_distressed") is False:
+            where.append("(COALESCE(sm.has_negative_equity,false)=false AND COALESCE(sm.has_high_leverage,false)=false "
+                         "AND COALESCE(sm.has_negative_ebitda,false)=false AND COALESCE(sm.has_revenue_decline,false)=false)")
+        if adv.get("has_website") is True:
+            where.append("COALESCE(sm.has_website,false) = true")
+
+    # Mapping order_col v3 (sm.* nécessite has_scoring, sinon retombe sur score)
+    _sm_sorts = {
+        "ebitda": "sm.proxy_ebitda", "ebitda_margin": "sm.ebitda_margin", "roa": "sm.roa",
+        "transmission": "sm.transmission_score", "attractivity": "sm.attractivity_score",
+        "scale": "sm.scale_score", "structure": "sm.structure_score",
+    }
     order_col = {
         "score_ma": score_col,
         "ca_dernier": "t.ca_latest",
         "date_creation": "t.date_immatriculation",
-    }[sort]
+        "age_dirigeant": "t.age_dirigeant_max",
+        "capital_social": "t.capital_social",
+        **({k: v for k, v in _sm_sorts.items()} if has_scoring else {}),
+    }.get(sort, score_col)
     sql = f"""
         SELECT row_to_json(t.*) AS row, {score_col} AS score_ma_resolved{extra_select}
         FROM gold.entreprises_master t
@@ -4730,14 +4787,25 @@ async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_r
         v.setdefault("date_creation", v.get("date_immatriculation"))
         v.setdefault("is_pro_ma", v.get("has_pro_ma"))
         v.setdefault("is_asset_rich", v.get("has_holding_patrimoniale"))
-        # Hydrate les champs scoring v3 (axes + tier + EV) si dispo
+        # Hydrate les champs scoring v3 (axes + tier + EV + ratios complets) si dispo
+        _float_keys = {
+            "risk_multiplier", "proxy_margin", "sector_multiple", "ev_estimated_eur",
+            "proxy_ebitda", "ebitda_margin", "net_margin", "debt_to_ebitda", "debt_to_equity",
+            "debt_ratio", "dso_days", "roa", "bfr_jours", "interest_coverage", "gross_margin",
+            "intensite_capitalistique",
+        }
         for k in (
             "transmission_score", "attractivity_score", "scale_score", "structure_score",
             "tier", "deal_percentile", "risk_multiplier", "ev_estimated_eur",
             "proxy_margin", "sector_multiple",
+            "proxy_ebitda", "ebitda_margin", "net_margin", "debt_to_ebitda", "debt_to_equity",
+            "debt_ratio", "dso_days", "roa", "bfr_jours", "interest_coverage", "gross_margin",
+            "intensite_capitalistique", "financial_health_tier", "has_negative_equity",
+            "has_high_leverage", "has_negative_ebitda", "has_revenue_decline",
+            "digital_presence_score", "has_website", "primary_domain",
         ):
             if k in r and r[k] is not None:
-                v[k] = float(r[k]) if k in ("risk_multiplier", "proxy_margin", "sector_multiple", "ev_estimated_eur") else r[k]
+                v[k] = float(r[k]) if k in _float_keys else r[k]
         cibles.append(v)
     return {"cibles": cibles, "limit": limit, "offset": offset, "has_more": len(cibles) == limit, "source": "gold", "scoring_v2": has_scoring}
 
