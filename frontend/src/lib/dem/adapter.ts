@@ -391,13 +391,10 @@ export function rowToTarget(r: Record<string, unknown>): Target {
       { label: "score_ma", value: Math.round(score) },
       { label: "ca_total", value: ca >= 20_000_000 ? 15 : ca >= 5_000_000 ? 8 : 3 },
     ],
-    ca_history: ca ? [
-      Math.round(ca * 0.65 / 1e6),
-      Math.round(ca * 0.78 / 1e6),
-      Math.round(ca * 0.86 / 1e6),
-      Math.round(ca * 0.93 / 1e6),
-      Math.round(ca / 1e6),
-    ] : [],
+    // Pas d'historique CA synthétique : on n'invente AUCUNE donnée. Le vrai
+    // historique (exercices INPI) est dans la fiche ; la carte ne montre pas de
+    // mini-courbe tant qu'on n'a pas les vrais points.
+    ca_history: [],
     // Scoring v3 PRO — 4 axes business + tier + EV
     axes: (num(r.transmission_score) != null || num(r.attractivity_score) != null) ? {
       transmission: num(r.transmission_score) ?? 0,

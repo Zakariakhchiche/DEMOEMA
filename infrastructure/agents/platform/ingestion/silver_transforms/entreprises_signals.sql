@@ -56,7 +56,8 @@ dernier_bilan AS (
         c.immo_corporelles,
         c.total_actif,
         c.total_passif,
-        c.resultat_exploitation AS resultat_exploitation_latest,   -- EBIT (proxy EBITDA)
+        c.resultat_exploitation AS resultat_exploitation_latest,   -- EBIT (réel)
+        c.dotations_exploitation AS dotations_exploitation_latest, -- amort.+prov. (réel)
         c.emprunts_dettes       AS emprunts_dettes_latest,
         c.creances_clients      AS creances_clients_latest,
         c.stocks                AS stocks_latest,
@@ -167,13 +168,15 @@ base AS (
         b.ca_export_latest,
         bs.ca_avant_dernier,
         bs.total_actif_avant_dernier,
-        -- ─── NOUVEAU : ratios financiers (grille Orascom). NULLIF anti-DIV/0 ───
-        b.resultat_exploitation_latest AS proxy_ebitda,
-        b.resultat_exploitation_latest / NULLIF(b.ca_latest, 0)            AS ebitda_margin,
+        -- ─── Ratios financiers. NULLIF anti-DIV/0 ───
+        -- EBITDA RÉEL = résultat d'exploitation (EBIT) + dotations amort./prov.
+        -- (au lieu du proxy = EBIT seul). Données 100% issues de la liasse INPI.
+        (b.resultat_exploitation_latest + COALESCE(b.dotations_exploitation_latest, 0)) AS proxy_ebitda,
+        (b.resultat_exploitation_latest + COALESCE(b.dotations_exploitation_latest, 0)) / NULLIF(b.ca_latest, 0) AS ebitda_margin,
         b.resultat_exploitation_latest / NULLIF(b.ca_latest, 0)            AS ebit_margin,
         b.resultat_net_latest          / NULLIF(b.ca_latest, 0)           AS net_margin,
-        b.resultat_exploitation_latest / NULLIF((COALESCE(b.total_actif,0) + COALESCE(bs.total_actif_avant_dernier, b.total_actif)) / 2.0, 0) AS ebitda_on_assets,
-        b.emprunts_dettes_latest       / NULLIF(b.resultat_exploitation_latest, 0) AS debt_to_ebitda,
+        (b.resultat_exploitation_latest + COALESCE(b.dotations_exploitation_latest, 0)) / NULLIF((COALESCE(b.total_actif,0) + COALESCE(bs.total_actif_avant_dernier, b.total_actif)) / 2.0, 0) AS ebitda_on_assets,
+        b.emprunts_dettes_latest       / NULLIF((b.resultat_exploitation_latest + COALESCE(b.dotations_exploitation_latest, 0)), 0) AS debt_to_ebitda,
         b.emprunts_dettes_latest       / NULLIF(b.capitaux_propres_latest, 0) AS debt_to_equity,
         (COALESCE(b.total_actif, 0) - COALESCE(b.capitaux_propres_latest, 0)) / NULLIF(b.total_actif, 0) AS debt_ratio,
         b.capitaux_propres_latest      / NULLIF(b.total_passif, 0)        AS equity_ratio,
