@@ -4807,6 +4807,33 @@ async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_r
             if k in r and r[k] is not None:
                 v[k] = float(r[k]) if k in _float_keys else r[k]
         cibles.append(v)
+
+    # VRAI historique CA — 5 derniers exercices déposés (silver.inpi_comptes,
+    # ca_net = code FJ). Données 100% réelles INPI, pour la mini-courbe des cartes
+    # (remplace l'ancien historique synthétique). Fetch groupé, léger (indexé siren).
+    sirens = [c.get("siren") for c in cibles if c.get("siren")]
+    if sirens:
+        try:
+            hist_rows = await pool.fetch(
+                """
+                SELECT siren, array_agg(ca_net ORDER BY date_cloture) AS hist
+                FROM (
+                    SELECT siren, date_cloture, ca_net,
+                           row_number() OVER (PARTITION BY siren ORDER BY date_cloture DESC) rn
+                    FROM silver.inpi_comptes
+                    WHERE siren = ANY($1::text[]) AND ca_net IS NOT NULL AND ca_net > 0
+                ) t WHERE rn <= 5 GROUP BY siren
+                """,
+                sirens,
+            )
+            hist_by_siren = {hr["siren"]: [float(x) for x in (hr["hist"] or [])] for hr in hist_rows}
+            for c in cibles:
+                h = hist_by_siren.get(c.get("siren"))
+                if h and len(h) >= 2:
+                    c["ca_history"] = h  # CA réel ordre ancien→récent
+        except Exception as e:
+            print(f"[cibles ca_history] skip: {type(e).__name__}: {e}")
+
     return {"cibles": cibles, "limit": limit, "offset": offset, "has_more": len(cibles) == limit, "source": "gold", "scoring_v2": has_scoring}
 
 
