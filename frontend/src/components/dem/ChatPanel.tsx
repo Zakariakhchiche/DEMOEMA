@@ -442,31 +442,67 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
       wordCount <= 5 && hasCapName && !ACTION_WORDS.test(text) &&
       !SOURCING_KEYWORDS.test(text);
 
+    // Intent "liste/sélection de sociétés" : tout nom commun société/entreprise OU
+    // critère financier (EBITDA, marge, CA, dette, transmission…) doit générer des
+    // cartes entreprise. Sinon "donne-moi les sociétés avec le meilleur EBITDA"
+    // ne sortait aucune carte.
+    const COMPANY_NOUN = /(soci[ée]t[ée]s?|entreprises?|cibles?|bo[îi]tes?|holdings?)/i;
+    const FIN_CRITERIA = /(ebitda|marge|rentab|endett|\bdette|ratio|\broa\b|asset[-\s]?rich|immobili|patrimoine|transmission|cession|capital social|chiffre d.affaires|\bca\b|millions?|milliards?|md€|top\s*\d|meilleur|plus\s+(gros|grand|rentable|élev|de\s+\d)|sans red flag|d[ée]tresse|difficult)/i;
+    const isCompanyListIntent = COMPANY_NOUN.test(text) || FIN_CRITERIA.test(text);
+
     const isSourcingIntent = !isComplianceOrNetwork && (
       isSiren || isCompare || isCompanyLookup ||
-      SOURCING_KEYWORDS.test(text) || HAS_DEPT.test(text)
+      SOURCING_KEYWORDS.test(text) || HAS_DEPT.test(text) || isCompanyListIntent
     );
 
-    // Extraction simple : si dept détecté on l'envoie en filtre. Le mot-clé secteur
-    // (premier match SOURCING_KEYWORDS) sert de q ILIKE. Pour SIREN explicite, q = siren.
-    // Pour un lookup d'entreprise (Capgemini, Carrefour…), on envoie le nom complet trim.
-    const queryParams: { limit: number; q?: string; dept?: string } = { limit: 5 };
+    // Dérive tri + filtres depuis la question → les cartes correspondent à la demande
+    // (évite "toujours les mêmes top cibles").
+    const queryParams: {
+      limit: number; q?: string; dept?: string; naf?: string; minCa?: number;
+      minEbitdaMargin?: number; maxDebtEbitda?: number; minAgeDirigeant?: number;
+      isAssetRich?: boolean; isDistressed?: boolean;
+      sort?: NonNullable<Parameters<typeof fetchTargets>[0]>["sort"];
+    } = { limit: 6 };
+    const low = text.toLowerCase();
     if (isSiren) {
       queryParams.q = text.trim();
     } else if (isCompanyLookup) {
       queryParams.q = text.trim();
       queryParams.limit = 1;
     } else if (isSourcingIntent) {
+      // Secteur → préfixe NAF
+      const NAF_MAP: [RegExp, string][] = [
+        [/bureau[x]?\s*d.?[ée]tude|ing[ée]nierie/, "7112"], [/conseil|consulting/, "7022"],
+        [/chimie/, "20"], [/pharma/, "21"], [/informatique|logiciel|saas|\btech\b|num[ée]rique/, "62"],
+        [/agroalim|agro-?alim/, "10"], [/transport|logistique/, "49"], [/btp|construction|b[âa]timent/, "41"],
+        [/assurance/, "65"], [/banque|gestion d.actif|asset manag/, "64"], [/immobilier/, "68"],
+        [/naval/, "30"], [/m[ée]canique|industrie/, "28"],
+      ];
+      for (const [re, naf] of NAF_MAP) if (re.test(low)) { queryParams.naf = naf; break; }
+      // Seuil CA "plus de 100 millions"
+      const caM = low.match(/(?:plus de|sup[ée]rieur[e]?s?\s*[àa]|>\s*|au-?dessus de|d[ée]passe)\s*([\d.,]+)\s*(milliard|md|million|m€|m\b)/);
+      if (caM) { const n = parseFloat(caM[1].replace(/\s/g, "").replace(",", ".")); queryParams.minCa = /milliard|md/.test(caM[2]) ? n * 1e9 : n * 1e6; }
+      // Marge EBITDA seuil
+      const margeM = low.match(/(\d{1,2})\s*%/);
+      if (/marge/.test(low) && margeM) { queryParams.minEbitdaMargin = parseInt(margeM[1], 10) / 100; queryParams.sort = "ebitda_margin"; }
+      else if (/marge/.test(low)) queryParams.sort = "ebitda_margin";
+      if (/ebitda/.test(low) && !/marge/.test(low)) queryParams.sort = "ebitda";
+      if (/rentab|\broa\b|rentabilit/.test(low)) queryParams.sort = "roa";
+      if (/transmission|c[ée]der|cession|retraite|senior|7\d\s*ans|6[5-9]\s*ans/.test(low)) { queryParams.sort = "transmission"; queryParams.minAgeDirigeant = 65; }
+      if (/asset[-\s]?rich|immobili|cession-?bail/.test(low)) queryParams.isAssetRich = true;
+      if (/d[ée]tresse|difficult|distress|surendett/.test(low)) queryParams.isDistressed = true;
+      if (/peu endett|faible (dette|endett)|sans dette|d[ée]sendett/.test(low)) queryParams.maxDebtEbitda = 3;
+      // Secteur texte si NAF non mappé
       const sectorMatch = text.match(SOURCING_KEYWORDS);
-      const deptMatch = text.match(HAS_DEPT);
-      if (sectorMatch && !["cible", "cibles", "trouve", "liste", "sourcing", "recherche", "score m&a", "leader", "pme", "eti"].includes(sectorMatch[1].toLowerCase())) {
+      if (!queryParams.naf && sectorMatch && !["cible", "cibles", "trouve", "liste", "sourcing", "recherche", "score m&a", "leader", "pme", "eti", "finance"].includes(sectorMatch[1].toLowerCase())) {
         queryParams.q = sectorMatch[1];
       }
+      const deptMatch = text.match(HAS_DEPT);
       if (deptMatch) {
         const v = deptMatch[1].toLowerCase();
         const map: Record<string, string> = { "ile-de-france": "75", "ile de france": "75", idf: "75", paca: "13", bretagne: "35", normandie: "76" };
-        queryParams.dept = map[v] || (/^\d/.test(v) ? v : undefined) || "";
-        if (!queryParams.dept) delete queryParams.dept;
+        const d = map[v] || (/^\d/.test(v) ? v : "");
+        if (d) queryParams.dept = d;
       }
     }
 
