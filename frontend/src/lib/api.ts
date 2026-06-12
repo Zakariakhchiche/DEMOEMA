@@ -303,6 +303,9 @@ export const datalakeApi = {
         dso_days: number | null;
         revenue_volatility: number | null;
         revenue_growth_yoy: number | null;
+        roa?: number | null;
+        bfr_jours?: number | null;
+        intensite_capitalistique?: number | null;
         financial_health_tier: string | null;
         has_negative_equity: boolean;
         has_negative_ebitda: boolean;

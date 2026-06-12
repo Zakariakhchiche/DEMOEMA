@@ -116,6 +116,9 @@ type Ratios = {
   equity_ratio: number | null;
   dso_days: number | null;
   revenue_growth_yoy: number | null;
+  roa?: number | null;
+  bfr_jours?: number | null;
+  intensite_capitalistique?: number | null;
   financial_health_tier: string | null;
   has_negative_equity: boolean;
   has_negative_ebitda: boolean;
@@ -138,16 +141,20 @@ function ratingColor(r: number | null): string {
 const pct = (v: number | null) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
 const xfmt = (v: number | null) => (v == null ? "—" : `${v.toFixed(2)}×`);
 const dfmt = (v: number | null) => (v == null ? "—" : `${Math.round(v)} j`);
+const xc = (v: number | null) => (v == null ? "—" : `${v.toFixed(1)}×`);
 
 export function FinancialRatios({ ratios }: { ratios: Ratios }) {
   if (!ratios) return null;
   const rows: { label: string; val: string; rating: number | null }[] = [
     { label: "Marge EBITDA", val: pct(ratios.ebitda_margin), rating: rate(ratios.ebitda_margin, 0.08, 0.15, true) },
     { label: "Marge nette", val: pct(ratios.net_margin), rating: rate(ratios.net_margin, 0.05, 0.15, true) },
+    { label: "ROA (rentabilité actifs)", val: pct(ratios.roa ?? null), rating: rate(ratios.roa ?? null, 0.02, 0.08, true) },
     { label: "Dette / EBITDA", val: xfmt(ratios.debt_to_ebitda), rating: rate(ratios.debt_to_ebitda, 4, 1.5, false) },
     { label: "Dette / Fonds propres", val: xfmt(ratios.debt_to_equity), rating: rate(ratios.debt_to_equity, 2, 0.6, false) },
     { label: "Ratio d'endettement", val: pct(ratios.debt_ratio), rating: rate(ratios.debt_ratio, 0.9, 0.4, false) },
     { label: "DSO (créances)", val: dfmt(ratios.dso_days), rating: rate(ratios.dso_days, 75, 40, false) },
+    { label: "BFR (stocks + créances)", val: dfmt(ratios.bfr_jours ?? null), rating: rate(ratios.bfr_jours ?? null, 120, 45, false) },
+    { label: "Intensité capitalistique", val: xc(ratios.intensite_capitalistique ?? null), rating: null },
     { label: "Croissance CA", val: pct(ratios.revenue_growth_yoy), rating: rate(ratios.revenue_growth_yoy, 0, 0.05, true) },
   ].filter((r) => r.val !== "—");
   if (rows.length === 0) return null;
