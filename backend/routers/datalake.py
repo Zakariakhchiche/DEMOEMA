@@ -2593,6 +2593,10 @@ async def scoring_detail(req: Request, siren: str):
                 # intensité capitalistique.
                 ("roa", -5, 5), ("bfr_jours", 0, 5000),
                 ("intensite_capitalistique", 0, 50),
+                # Ratios Phase 2 (postes liasse détaillés) : couverture des intérêts
+                # (service de la dette), DPO (paiement fournisseurs), marge sur conso.
+                ("interest_coverage", -100, 500), ("dpo_jours", 0, 730),
+                ("gross_margin", -1, 1),
             )},
             "financial_health_tier": data.get("financial_health_tier"),
             "has_negative_equity": bool(data.get("has_negative_equity")),
@@ -3237,10 +3241,13 @@ async def pitch_pdf(req: Request, siren: str):
             ("Marge EBITDA", _pct(r.get("ebitda_margin"))),
             ("Marge nette", _pct(r.get("net_margin"))),
             ("ROA (rentabilité actifs)", _pct(r.get("roa"))),
+            ("Marge sur consommations", _pct(r.get("gross_margin"))),
             ("Dette / EBITDA", _x(r.get("debt_to_ebitda"))),
             ("Dette / Fonds propres", _x(r.get("debt_to_equity"))),
+            ("Couverture des intérêts", _xc(r.get("interest_coverage"))),
             ("Ratio d'endettement", _pct(r.get("debt_ratio"))),
             ("DSO (créances)", _d(r.get("dso_days"))),
+            ("DPO (fournisseurs)", _d(r.get("dpo_jours"))),
             ("BFR (stocks + créances)", _d(r.get("bfr_jours"))),
             ("Intensité capitalistique", _xc(r.get("intensite_capitalistique"))),
             ("Croissance CA", _pct(r.get("revenue_growth_yoy"))),

@@ -47,6 +47,29 @@ FROM silver.cession_events
 WHERE siren IS NOT NULL AND is_recent = true;
 CREATE INDEX ON _cession_idx (siren);
 
+-- Phase 2 : postes de liasse détaillés JAMAIS exploités, extraits du DERNIER
+-- exercice par siren depuis bronze.inpi_comptes_liasses (codes CERFA validés
+-- empiriquement) — restreint aux cibles. Débloque couverture des intérêts, DPO,
+-- marge sur consommations.
+--   GU = intérêts et charges assimilées (charges financières)
+--   FS+FU+FT+FV = achats marchandises/matières + variations de stock (consommés)
+--   DX = dettes fournisseurs et comptes rattachés (passif → m1 prioritaire)
+CREATE TEMP TABLE _liasse_phase2 AS
+WITH ext AS (
+    SELECT DISTINCT ON (l.siren, l.code) l.siren, l.code,
+        CASE WHEN l.code = 'DX' THEN COALESCE(l.m1, l.m3) ELSE COALESCE(l.m3, l.m1) END AS val
+    FROM bronze.inpi_comptes_liasses l
+    WHERE l.code IN ('GU','FS','FU','FT','FV','DX')
+      AND l.siren IN (SELECT siren FROM gold.entreprises_master)
+    ORDER BY l.siren, l.code, l.date_cloture DESC NULLS LAST
+)
+SELECT siren,
+    sum(val) FILTER (WHERE code = 'GU')                          AS charges_interets,
+    sum(val) FILTER (WHERE code IN ('FS','FU','FT','FV'))        AS achats_consommes,
+    sum(val) FILTER (WHERE code = 'DX')                          AS dettes_fournisseurs
+FROM ext GROUP BY siren;
+CREATE INDEX ON _liasse_phase2 (siren);
+
 -- Construction principale via JOINS rapides
 CREATE TABLE gold.scoring_ma AS
 WITH proxy AS (
@@ -176,6 +199,18 @@ scored AS (
                     WHEN COALESCE(p.capital_social, 0) >= 100000 THEN 12 ELSE 0 END)
         ))::int AS structure_score,
 
+        -- Ratios Phase 2 (postes liasse détaillés) — garde achats > 2 % du CA pour
+        -- exclure les holdings (achats ≈ 0 → ratios absurdes).
+        --   couverture intérêts = résultat exploitation / charges d'intérêts (service de la dette)
+        --   DPO = dettes fournisseurs / achats × 365 (délai paiement fournisseurs)
+        --   marge sur consommations = (CA − achats consommés) / CA
+        CASE WHEN lp.charges_interets > 0 AND es.resultat_exploitation_latest IS NOT NULL
+             THEN (es.resultat_exploitation_latest / lp.charges_interets)::float8 END AS interest_coverage,
+        CASE WHEN lp.achats_consommes > p.ca_latest * 0.02 AND lp.dettes_fournisseurs IS NOT NULL
+             THEN (lp.dettes_fournisseurs / lp.achats_consommes * 365)::float8 END AS dpo_jours,
+        CASE WHEN lp.achats_consommes > p.ca_latest * 0.02 AND p.ca_latest > 0
+             THEN ((p.ca_latest - lp.achats_consommes) / p.ca_latest)::float8 END AS gross_margin,
+
         -- RISK multiplier (0 = éliminé : sanction OFAC/EU, radiée, procédure collective)
         CASE
             WHEN sa.siren IS NOT NULL THEN 0
@@ -194,6 +229,7 @@ scored AS (
     LEFT JOIN _bodacc_proc_idx bp ON bp.siren = p.siren
     LEFT JOIN _cession_idx ce ON ce.siren = p.siren
     LEFT JOIN silver.entreprises_signals es ON es.siren = p.siren
+    LEFT JOIN _liasse_phase2 lp ON lp.siren = p.siren
 ),
 scored_with_composite AS (
     SELECT
@@ -252,6 +288,7 @@ SELECT
     r.debt_to_ebitda, r.debt_to_equity, r.debt_ratio, r.equity_ratio,
     r.dso_days, r.revenue_volatility, r.revenue_growth_yoy,
     r.roa, r.bfr_jours, r.intensite_capitalistique,
+    r.interest_coverage, r.dpo_jours, r.gross_margin,
     r.financial_health_tier, r.has_negative_equity, r.has_negative_ebitda,
     r.has_high_leverage, r.has_revenue_decline,
     NOW() AS materialized_at
@@ -281,6 +318,7 @@ SELECT
     s.debt_to_ebitda, s.debt_to_equity, s.debt_ratio, s.equity_ratio,
     s.dso_days, s.revenue_volatility, s.revenue_growth_yoy,
     s.roa, s.bfr_jours, s.intensite_capitalistique,
+    s.interest_coverage, s.dpo_jours, s.gross_margin,
     s.financial_health_tier, s.has_negative_equity, s.has_negative_ebitda,
     s.has_high_leverage, s.has_revenue_decline,
     NOW() AS materialized_at
