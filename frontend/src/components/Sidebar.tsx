@@ -64,7 +64,7 @@ export default function Sidebar() {
           </div>
           <div>
             <span className="text-white font-black text-base tracking-tighter uppercase block leading-none">
-              EdRCF 6.0
+              Origin
             </span>
             <div className="flex items-center gap-1.5 mt-1">
               <div className="w-1 h-1 rounded-full bg-indigo-500" />

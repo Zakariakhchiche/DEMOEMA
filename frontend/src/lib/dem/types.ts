@@ -1,5 +1,5 @@
 /**
- * DEMOEMA shell types — port du Claude Design vers TypeScript.
+ * Origin shell types — port du Claude Design vers TypeScript.
  * Les types `Target` et `Person` sont alimentés par /api/datalake/*. Les autres
  * (Conversation, Pipeline, Watchlist, Audit) restent mock pour le moment et
  * peuvent évoluer vers des endpoints dédiés.

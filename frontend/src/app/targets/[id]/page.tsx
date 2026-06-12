@@ -162,7 +162,7 @@ export default function TargetDetail() {
             </div>
             <div className="flex flex-col sm:flex-row sm:items-center gap-4">
                <div className="flex items-center gap-2.5 px-3 py-1 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[10px] font-black uppercase tracking-widest w-fit">
-                  {targetData.sector} &bull; EDRCF 6.0
+                  {targetData.sector} &bull; Origin
                </div>
                <p className="text-gray-500 text-[10px] sm:text-xs font-black uppercase tracking-[0.2em]">
                   ID: <span className="text-gray-300">{targetData.id.toUpperCase()}</span> &bull; Fenetre: <span className="text-white">{targetData.analysis?.window ?? "N/A"}</span>

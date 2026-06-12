@@ -224,7 +224,7 @@ export default function RelationshipGraph() {
           {/* Bottom info badge */}
           <div className="absolute bottom-4 lg:bottom-6 left-4 lg:left-6 z-10">
             <div className="px-3 lg:px-4 py-1.5 lg:py-2 rounded-xl lg:rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-[9px] lg:text-[10px] tracking-widest uppercase font-black text-indigo-400 flex items-center gap-2">
-              <Info size={12} /> Données réseau EdRCF 6.0
+              <Info size={12} /> Données réseau Origin
             </div>
           </div>
         </div>

@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Icon } from "./Icon";
 import type { Target } from "@/lib/dem/types";
 
-const STEPS = ["Identité + finances", "Compliance check", "Réseau dirigeants", "Génération PDF charte EdRCF"];
+const STEPS = ["Identité + finances", "Compliance check", "Réseau dirigeants", "Génération PDF charte Origin"];
 
 export function PitchModal({ target, onClose }: { target: Target; onClose: () => void }) {
   const [progress, setProgress] = useState(0);

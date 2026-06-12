@@ -3415,7 +3415,7 @@ async def pitch_pdf(req: Request, siren: str):
   <div class="score-circle">{score}</div>
   <div style="flex:1">
     <div style="font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; color: #6366f1; font-weight: 600;">
-      EdRCF Pitch Ready · Cible M&A · NAF {naf}{f" — {naf_lib}" if naf_lib and naf_lib != naf else ""}
+      Origin Pitch Ready · Cible M&A · NAF {naf}{f" — {naf_lib}" if naf_lib and naf_lib != naf else ""}
     </div>
     <h1>{deno} {f'<span style="font-size:16px;color:#71717a;font-weight:500">({sigle})</span>' if sigle else ""} {cesse_badge}</h1>
     <div class="meta-row">
@@ -3453,7 +3453,7 @@ async def pitch_pdf(req: Request, siren: str):
 </div>
 
 <div class="verdict">
-  <h3>Verdict DEMOEMA</h3>
+  <h3>Verdict Origin</h3>
   <p style="margin:0">
     Cible <strong>{'HIGH' if score >= 80 else 'MID-HIGH' if score >= 70 else 'MID'} potentiel</strong> ·
     Score <strong>{score}/100</strong> — {'tier-1, prioritaire' if score >= 80 else 'tier-1, à qualifier' if score >= 70 else 'tier-2, surveillance'}.
@@ -3493,7 +3493,7 @@ async def pitch_pdf(req: Request, siren: str):
 
 <div class="footer">
   <div>
-    <strong>EdRCF Pitch Ready</strong> · Document confidentiel · Anne Dupont · siren {siren}<br>
+    <strong>Origin Pitch Ready</strong> · Document confidentiel · Anne Dupont · siren {siren}<br>
     Sources : <span class="source-tag">silver.inpi_comptes</span> <span class="source-tag">recherche-entreprises.api.gouv.fr</span> <span class="source-tag">bodacc-datadila</span> <span class="source-tag">silver.opensanctions</span> <span class="source-tag">Google News</span>
   </div>
   <div style="text-align:right">Généré le {__import__('datetime').datetime.now().strftime('%d/%m/%Y %H:%M')}</div>

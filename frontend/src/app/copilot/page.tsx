@@ -265,7 +265,7 @@ export default function CopilotPage() {
           <div className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-purple-400" />
             <span className="text-sm font-semibold tracking-tight">
-              {activeConv?.title ?? "DEMOEMA Copilot"}
+              {activeConv?.title ?? "Origin Copilot"}
             </span>
           </div>
           <div className="flex items-center gap-3">
@@ -275,7 +275,7 @@ export default function CopilotPage() {
             >
               Data Explorer
             </a>
-            <span className="text-[11px] text-zinc-500">Anne Dupont · EdRCF</span>
+            <span className="text-[11px] text-zinc-500">Anne Dupont · Origin</span>
           </div>
         </header>
 
@@ -347,7 +347,7 @@ function EmptyState({ onPromptClick }: { onPromptClick: (p: string) => void }) {
       </h1>
       <p className="mt-2 max-w-md text-sm text-zinc-400">
         Pose une question sur tes cibles M&A. Réponses ancrées sur les 13 tables gold
-        + presse temps réel — DeepSeek + datalake DEMOEMA.
+        + presse temps réel — DeepSeek + datalake Origin.
       </p>
 
       <div className="mt-8 grid w-full grid-cols-1 gap-2 sm:grid-cols-2">

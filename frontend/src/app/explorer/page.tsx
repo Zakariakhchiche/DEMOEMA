@@ -145,7 +145,7 @@ function ExplorerInner() {
               <Sparkles className="h-3 w-3" />
               Copilot Chat
             </a>
-            <span className="text-[11px] text-zinc-500">Anne Dupont · EdRCF</span>
+            <span className="text-[11px] text-zinc-500">Anne Dupont · Origin</span>
           </div>
         </header>
 

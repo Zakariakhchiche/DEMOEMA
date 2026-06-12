@@ -19,7 +19,7 @@ export default function MobileHeader() {
           <Zap size={16} className="text-white" />
         </div>
         <span className="text-white font-black text-sm tracking-tighter uppercase leading-none">
-          EdRCF 6.0
+          Origin
         </span>
       </div>
       <button

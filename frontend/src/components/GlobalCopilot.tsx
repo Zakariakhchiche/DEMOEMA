@@ -264,7 +264,7 @@ export default function GlobalCopilot() {
       } catch {
         setMessages(prev => prev.map(m =>
           m.id === assistantId
-            ? { ...m, content: "ERREUR DE CONNEXION: Impossible de joindre le serveur EDRCF." }
+            ? { ...m, content: "ERREUR DE CONNEXION: Impossible de joindre le serveur Origin." }
             : m
         ));
       }
@@ -315,7 +315,7 @@ export default function GlobalCopilot() {
                   <Sparkles size={16} />
                 </div>
                 <div className="min-w-0">
-                   <h3 className="text-xs font-black text-white uppercase tracking-widest leading-none mb-0.5 truncate">Copilot EDRCF</h3>
+                   <h3 className="text-xs font-black text-white uppercase tracking-widest leading-none mb-0.5 truncate">Copilot Origin</h3>
                    <div className="flex items-center gap-1.5">
                       <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
                       <span className="text-[7px] font-black text-emerald-500/60 uppercase tracking-widest">Actif</span>
@@ -361,7 +361,7 @@ export default function GlobalCopilot() {
                        <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center mb-4">
                          <Target size={28} className="text-indigo-400" />
                        </div>
-                       <p className="text-xs font-black text-white uppercase tracking-[0.15em] mb-1.5">Intelligence EDRCF</p>
+                       <p className="text-xs font-black text-white uppercase tracking-[0.15em] mb-1.5">Intelligence Origin</p>
                        <p className="text-[10px] text-gray-500 leading-relaxed mb-6 max-w-[260px]">
                           Posez une question sur les cibles, les signaux, le pipeline ou le reseau.
                        </p>

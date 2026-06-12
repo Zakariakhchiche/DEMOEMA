@@ -11,7 +11,7 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error("[EdRCF] Unhandled error:", error);
+    console.error("[Origin] Unhandled error:", error);
   }, [error]);
 
   return (

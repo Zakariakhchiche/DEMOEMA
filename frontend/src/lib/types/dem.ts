@@ -1,5 +1,5 @@
 /**
- * Types DEMOEMA — Cible M&A, Dirigeant, Signaux, Conversation chat AI.
+ * Types Origin — Cible M&A, Dirigeant, Signaux, Conversation chat AI.
  * Issus de gold.entreprises_master + gold.dirigeants_master + gold.signaux_ma_feed.
  */
 
