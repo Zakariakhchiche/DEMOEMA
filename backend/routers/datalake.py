@@ -2604,6 +2604,13 @@ async def scoring_detail(req: Request, siren: str):
             "has_high_leverage": bool(data.get("has_high_leverage")),
             "has_revenue_decline": bool(data.get("has_revenue_decline")),
         },
+        # OSINT maturité digitale (empreinte web). null si la cible n'a pas été
+        # scannée (couverture partielle). score 0-100, présence site, domaine.
+        "digital": {
+            "presence_score": data.get("digital_presence_score"),
+            "has_website": bool(data.get("has_website")),
+            "primary_domain": data.get("primary_domain"),
+        },
         # Contexte (filtres / affichage)
         "context": {
             "code_ape": data.get("code_ape"),
@@ -3392,6 +3399,7 @@ async def pitch_pdf(req: Request, siren: str):
     {('Attention : société CESSÉE le ' + (date_fermeture or '')) if is_cesse else ''}
     {('Compliance : ' + str(n_sanctions) + ' red flag(s) OpenSanctions à expliquer en DD.') if n_sanctions else 'Compliance OK (OpenSanctions UE/US/UK/UN, ICIJ, PEP).'}
     {f' Patrimoine : <strong>asset-rich</strong> — {_fmt_eur((scoring or {}).get("financials", {}).get("immo_corporelles"))} d&apos;immobilisations corporelles (&gt;30 % de l&apos;actif), candidat cession-bail.' if scoring and (scoring.get("financials") or {}).get("asset_rich") else ''}
+    {f' Maturité digitale {((scoring or {}).get("digital") or {}).get("presence_score")}/100{f" ({(scoring.get("digital") or {}).get("primary_domain")})" if (scoring.get("digital") or {}).get("primary_domain") else ""}.' if scoring and ((scoring.get("digital") or {}).get("presence_score")) is not None else ''}
   </p>
 </div>
 

@@ -110,6 +110,13 @@ scored AS (
         (ce.siren IS NOT NULL) AS has_cession_recent,
         0::int AS n_contentieux_recent,
 
+        -- OSINT maturité digitale (empreinte web, jamais branchée au scoring) :
+        -- score 0-100 + présence d'un site + domaine principal. NULL si la cible
+        -- n'a pas été scannée (couverture ~2,3 % aujourd'hui).
+        osc.digital_presence_score,
+        (osc.primary_domain IS NOT NULL AND osc.primary_domain <> '') AS has_website,
+        osc.primary_domain,
+
         -- Ratios financiers — passthrough pour la fiche
         es.ebitda_margin, es.ebit_margin, es.net_margin, es.ebitda_on_assets,
         es.debt_to_ebitda, es.debt_to_equity, es.debt_ratio, es.equity_ratio,
@@ -230,6 +237,7 @@ scored AS (
     LEFT JOIN _cession_idx ce ON ce.siren = p.siren
     LEFT JOIN silver.entreprises_signals es ON es.siren = p.siren
     LEFT JOIN _liasse_phase2 lp ON lp.siren = p.siren
+    LEFT JOIN silver.osint_companies_enriched osc ON osc.siren = p.siren
 ),
 scored_with_composite AS (
     SELECT
@@ -289,6 +297,7 @@ SELECT
     r.dso_days, r.revenue_volatility, r.revenue_growth_yoy,
     r.roa, r.bfr_jours, r.intensite_capitalistique,
     r.interest_coverage, r.dpo_jours, r.gross_margin,
+    r.digital_presence_score, r.has_website, r.primary_domain,
     r.financial_health_tier, r.has_negative_equity, r.has_negative_ebitda,
     r.has_high_leverage, r.has_revenue_decline,
     NOW() AS materialized_at
@@ -319,6 +328,7 @@ SELECT
     s.dso_days, s.revenue_volatility, s.revenue_growth_yoy,
     s.roa, s.bfr_jours, s.intensite_capitalistique,
     s.interest_coverage, s.dpo_jours, s.gross_margin,
+    s.digital_presence_score, s.has_website, s.primary_domain,
     s.financial_health_tier, s.has_negative_equity, s.has_negative_ebitda,
     s.has_high_leverage, s.has_revenue_decline,
     NOW() AS materialized_at
