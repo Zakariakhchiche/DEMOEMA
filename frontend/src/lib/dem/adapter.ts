@@ -425,6 +425,10 @@ export function rowToPerson(r: Record<string, unknown>, idx = 0): Person {
   const sirens = Array.isArray(r.sirens_mandats) ? (r.sirens_mandats as string[]) : [];
   const denos = Array.isArray(r.denominations) ? (r.denominations as string[]) : [];
   const dn = str(r.date_naissance);
+  // Patrimoine SCI : on l'expose en `event` (ligne mise en avant sur la card)
+  // car le compte n_sci seul ("SCI 1") sous-estime un patrimoine d'1 SCI à 1,5 Md€.
+  const capitalSci = num(r.total_capital_sci);
+  const sciEvent = capitalSci && capitalSci > 0 ? `Patrimoine SCI ${fmtEur(capitalSci)}` : null;
   return {
     id: `p_${idx}_${nom}`,
     nom: `${prenom} ${nom}`.trim(),
@@ -433,7 +437,7 @@ export function rowToPerson(r: Record<string, unknown>, idx = 0): Person {
     mandats: num(r.n_mandats_actifs) ?? num(r.n_mandats_total) ?? sirens.length,
     sci: num(r.n_sci) ?? 0,
     entreprises: denos.slice(0, 4),
-    event: null,
+    event: sciEvent,
     dept: str(r.dept) || "",
     nom_raw: nom || undefined,
     prenom_raw: prenom || undefined,
