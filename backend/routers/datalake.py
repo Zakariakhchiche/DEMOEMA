@@ -4838,11 +4838,14 @@ async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_r
         # holdings/SNC (NAF 64/68) au CA quasi-nul squattent le top avec un
         # proxy_ebitda explosé (ex: ALCATEL CA 1,1Md€ / proxy 26Md€).
         if sort == "ebitda_margin" or adv.get("min_ebitda_margin") is not None:
-            # marge strictement < 100 % (margin == 1.0 = artefact proxy_ebitda=CA)
-            where.append("(sm.ebitda_margin IS NOT NULL AND sm.ebitda_margin > 0 AND sm.ebitda_margin < 1.0)")
-            where.append("(sm.proxy_ebitda IS NULL OR t.ca_latest IS NULL OR t.ca_latest <= 0 OR sm.proxy_ebitda < t.ca_latest)")
-            # plancher CA : un tri 'meilleure marge' vise de vraies sociétés, pas
-            # des coquilles à 7 800 € de CA — sauf si l'utilisateur fixe son min_ca.
+            # Tri/filtre marge EBITDA = sur EBITDA RÉEL (comptable) uniquement. Le
+            # proxy_ebitda vaut ~CA pour les holdings → marge ~100 % artefactuelle
+            # qui squattait le top. On exige ebitda_is_real + marge plausible.
+            where.append("(sm.ebitda_is_real = true AND sm.ebitda_margin IS NOT NULL AND sm.ebitda_margin > 0 AND sm.ebitda_margin < 1.0)")
+            # tri pur 'meilleure marge' (sans seuil explicite) : plafond réaliste 60 %
+            if sort == "ebitda_margin" and adv.get("min_ebitda_margin") is None:
+                where.append("(sm.ebitda_margin < 0.6)")
+            # plancher CA : viser de vraies sociétés, pas des coquilles — sauf min_ca explicite.
             if adv.get("min_ca") is None:
                 where.append("(t.ca_latest IS NOT NULL AND t.ca_latest >= 1000000)")
     # Sourcing distressed M&A — sociétés en procédure collective (cibles à reprendre).
