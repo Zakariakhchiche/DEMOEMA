@@ -482,9 +482,11 @@ export async function fetchPersons(
   // (filter= structuré côté backend) : âge mini, plafond mandats pour exclure les
   // concentrateurs (maxMandats), nb SCI mini — dérivés de la question.
   // Plafond mandats par défaut = 80 (au-dessus = concentrateur, pas un dirigeant cible).
-  const maxMandats = opts.maxMandats ?? 80;
+  const maxMandats = opts.maxMandats ?? 50;
   const buildFilter = (ageCol: string) => {
-    const clauses = [`n_mandats_actifs.gte.2`, `n_mandats_actifs.lte.${maxMandats}`];
+    // mandats 2..50 (exclut concentrateurs/nominees) + âge ≤ 100 (exclut age_2026=125
+    // = data corrompue) ; bornes basses d'âge dérivées de la question.
+    const clauses = [`n_mandats_actifs.gte.2`, `n_mandats_actifs.lte.${maxMandats}`, `${ageCol}.lte.100`];
     if (opts.minAge) clauses.push(`${ageCol}.gte.${opts.minAge}`);
     if (opts.minSci) clauses.push(`n_sci.gte.${opts.minSci}`);
     return clauses.join(",");

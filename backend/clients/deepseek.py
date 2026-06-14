@@ -1148,9 +1148,14 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
         elif name == "search_dirigeants_60plus":
             min_mandats = args.get("min_mandats", 3)
             min_age = max(int(args.get("min_age", 60) or 60), 60)
+            # Bornes anti-bruit : âge ≤ 100 (exclut les age_2026=125 = data corrompue/
+            # date_naissance nulle) ; mandats ≤ 50 (au-delà = concentrateur/nominee/CAC,
+            # pas un dirigeant-propriétaire cible M&A — cf. THIBAUD 6858 mandats).
+            max_mandats = min(int(args.get("max_mandats", 50) or 50), 50)
             limit = min(args.get("limit", 10), 50)
             params = {"limit": limit, "order": "-n_mandats_actifs",
-                      "filter": f"age_2026.gte.{min_age},n_mandats_actifs.gte.{min_mandats}"}
+                      "filter": (f"age_2026.gte.{min_age},age_2026.lte.100,"
+                                 f"n_mandats_actifs.gte.{min_mandats},n_mandats_actifs.lte.{max_mandats}")}
             async with httpx.AsyncClient(timeout=10) as client:
                 r = await client.get(f"{datalake_base}/api/datalake/silver/inpi_dirigeants", params=params)
                 if r.status_code == 200:
