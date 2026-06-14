@@ -69,7 +69,7 @@ WHERE type_de_personne = 'INDIVIDU'
 GROUP BY siren, individu_nom, individu_prenoms, individu_date_naissance
 """
 
-WIPE_PERSONS = "MATCH (p:Person) CALL (p) { DETACH DELETE p } IN TRANSACTIONS OF 10000"
+WIPE_PERSONS = "MATCH (p:Person) CALL (p) { DETACH DELETE p } IN TRANSACTIONS OF 10000 ROWS"
 
 MERGE_PERSON_EDGE = """
 UNWIND $rows AS row
@@ -89,28 +89,32 @@ def main() -> None:
     driver.verify_connectivity()
 
     # ─── 0. Pass A : charge TOUTES les sociétés (univers complet, additif) ───
-    print("[1/3] load ALL companies…", flush=True)
-    nco = 0
-    cbatch: list[dict] = []
-    with psycopg.connect(settings.database_url) as conn:
-        with conn.cursor(name="loader_companies") as cur:
-            cur.itersize = 20000
-            cur.execute(COMPANY_SQL)
-            for siren, deno, forme, cap, ape, dimm, cp in cur:
-                cbatch.append({"siren": siren, "denomination": deno, "forme_juridique": forme,
-                               "capital": float(cap or 0), "code_ape": ape,
-                               "date_immat": dimm, "code_postal": cp})
-                if len(cbatch) >= BATCH:
+    import os
+    if os.environ.get("SKIP_COMPANIES"):
+        print("[1/3] load ALL companies… SKIPPED (SKIP_COMPANIES set)", flush=True)
+    else:
+        print("[1/3] load ALL companies…", flush=True)
+        nco = 0
+        cbatch: list[dict] = []
+        with psycopg.connect(settings.database_url) as conn:
+            with conn.cursor(name="loader_companies") as cur:
+                cur.itersize = 20000
+                cur.execute(COMPANY_SQL)
+                for siren, deno, forme, cap, ape, dimm, cp in cur:
+                    cbatch.append({"siren": siren, "denomination": deno, "forme_juridique": forme,
+                                   "capital": float(cap or 0), "code_ape": ape,
+                                   "date_immat": dimm, "code_postal": cp})
+                    if len(cbatch) >= BATCH:
+                        with driver.session() as s:
+                            s.run(MERGE_COMPANY, rows=cbatch).consume()
+                        nco += len(cbatch); cbatch = []
+                        if nco % 1000000 == 0:
+                            print(f"  ... {nco} sociétés ({int(time.time()-t0)}s)", flush=True)
+                if cbatch:
                     with driver.session() as s:
                         s.run(MERGE_COMPANY, rows=cbatch).consume()
-                    nco += len(cbatch); cbatch = []
-                    if nco % 1000000 == 0:
-                        print(f"  ... {nco} sociétés ({int(time.time()-t0)}s)", flush=True)
-            if cbatch:
-                with driver.session() as s:
-                    s.run(MERGE_COMPANY, rows=cbatch).consume()
-                nco += len(cbatch)
-    print(f"  companies loaded: {nco} ({int(time.time()-t0)}s)", flush=True)
+                    nco += len(cbatch)
+        print(f"  companies loaded: {nco} ({int(time.time()-t0)}s)", flush=True)
 
     # ─── 1. Wipe Person (+ arêtes) en transactions batch ───
     print("[2/3] wipe Person nodes…", flush=True)
