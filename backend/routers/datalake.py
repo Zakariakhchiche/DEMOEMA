@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from typing import Any
 
 import asyncpg
@@ -211,16 +212,28 @@ async def query_table(
             fcol, fop, fval = bits[0].strip(), bits[1].strip().lower(), bits[2].strip()
             if fcol not in allowed_cols or fop not in op_map or not fval:
                 continue
-            val: Any = fval
-            try:
-                val = int(fval)
-            except ValueError:
+            # Typage robuste (asyncpg infère le type du param depuis la colonne) :
+            #  - date YYYY-MM-DD → param texte + cast ::date explicite en SQL
+            #  - eq → param TEXTE (colonnes siren bpchar / dept / labels — un int
+            #    casserait `siren = $N` car siren est char(9), pas numérique)
+            #  - gte/lte/gt/lt → numérique (âge, mandats, capital), sinon texte
+            if re.match(r"^\d{4}-\d{2}-\d{2}$", fval):
+                params.append(fval)
+                where_parts.append(f"{fcol} {op_map[fop]} ${len(params)}::date")
+            elif fop == "eq":
+                params.append(fval)
+                where_parts.append(f"{fcol}::text = ${len(params)}")
+            else:
+                val: Any = fval
                 try:
-                    val = float(fval)
+                    val = int(fval)
                 except ValueError:
-                    val = fval
-            params.append(val)
-            where_parts.append(f"{fcol} {op_map[fop]} ${len(params)}")
+                    try:
+                        val = float(fval)
+                    except ValueError:
+                        val = fval
+                params.append(val)
+                where_parts.append(f"{fcol} {op_map[fop]} ${len(params)}")
 
     where_sql = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
 

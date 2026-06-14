@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from datetime import datetime, timedelta
 from typing import AsyncIterator, Union
 
 import httpx
@@ -1111,18 +1112,22 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
             params: dict = {"limit": args.get("limit", 10)}
             # Filtres composables (audit QA 2026-05-01: les params dept/type_avis/days
             # étaient déclarés dans la signature LLM mais ignorés côté impl → faux positifs).
+            # Noms de colonnes RÉELS de silver.bodacc_annonces : siren, departement,
+            # familleavis_lib (libellé famille : 'Ventes et cessions', 'Procédures
+            # collectives', 'Créations'…), date_parution. (Avant : dept/type_avis/
+            # date_publication = colonnes inexistantes → filtres silencieusement ignorés.)
             filters = []
             if args.get("siren"):
                 filters.append(f"siren.eq.{args['siren']}")
             if args.get("dept"):
-                # zfill pour normaliser "1" → "01" car colonne BODACC stocke à 2 digits
-                filters.append(f"dept.eq.{str(args['dept']).zfill(2)}")
+                filters.append(f"departement.eq.{str(args['dept']).zfill(2)}")
             if args.get("type_avis"):
-                filters.append(f"type_avis.eq.{args['type_avis']}")
+                filters.append(f"familleavis_lib.eq.{args['type_avis']}")
             if args.get("days"):
                 try:
                     n_days = int(args["days"])
-                    filters.append(f"date_publication.gte.now()-interval'{n_days}days'")
+                    cutoff = (datetime.now() - timedelta(days=n_days)).strftime("%Y-%m-%d")
+                    filters.append(f"date_parution.gte.{cutoff}")
                 except (TypeError, ValueError):
                     pass
             if filters:
