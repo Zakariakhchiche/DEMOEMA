@@ -447,7 +447,7 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
     // cartes entreprise. Sinon "donne-moi les sociétés avec le meilleur EBITDA"
     // ne sortait aucune carte.
     const COMPANY_NOUN = /(soci[ée]t[ée]s?|entreprises?|cibles?|bo[îi]tes?|holdings?)/i;
-    const FIN_CRITERIA = /(ebitda|marge|rentab|endett|\bdette|ratio|\broa\b|asset[-\s]?rich|immobili|patrimoine|transmission|cession|capital social|chiffre d.affaires|\bca\b|millions?|milliards?|md€|top\s*\d|meilleur|plus\s+(gros|grand|rentable|élev|de\s+\d)|sans red flag|d[ée]tresse|difficult)/i;
+    const FIN_CRITERIA = /(ebitda|marge|rentab|endett|\bdette|ratio|\broa\b|asset[-\s]?rich|immobili|patrimoine|transmission|cession|capital social|chiffre d.affaires|\bca\b|millions?|milliards?|md€|top\s*\d|meilleur|plus\s+(gros|grand|rentable|élev|de\s+\d)|sans red flag|d[ée]tresse|difficult|redress|sauvegarde|plan de cession|[àa] reprendre|proc[ée]dure collective|liquidation|distress|reprise)/i;
     const isCompanyListIntent = COMPANY_NOUN.test(text) || FIN_CRITERIA.test(text);
 
     const isSourcingIntent = !isComplianceOrNetwork && (
@@ -461,6 +461,7 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
       limit: number; q?: string; dept?: string; naf?: string; minCa?: number;
       minEbitdaMargin?: number; maxDebtEbitda?: number; minAgeDirigeant?: number;
       isAssetRich?: boolean; isDistressed?: boolean;
+      distress?: "plan_cession" | "reprise" | "active";
       sort?: NonNullable<Parameters<typeof fetchTargets>[0]>["sort"];
     } = { limit: 6 };
     const low = text.toLowerCase();
@@ -491,6 +492,13 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
       if (/transmission|c[ée]der|cession|retraite|senior|7\d\s*ans|6[5-9]\s*ans/.test(low)) { queryParams.sort = "transmission"; queryParams.minAgeDirigeant = 65; }
       if (/asset[-\s]?rich|immobili|cession-?bail/.test(low)) queryParams.isAssetRich = true;
       if (/d[ée]tresse|difficult|distress|surendett/.test(low)) queryParams.isDistressed = true;
+      // Sourcing distressed M&A — procédure collective (cibles à reprendre / plan de cession)
+      if (/plan de cession|[àa] la barre|barre du tribunal|redress|sauvegarde|[àa] reprendre|proc[ée]dure collective|en redressement|turnaround/.test(low)) {
+        if (/plan de cession|[àa] la barre|barre du tribunal/.test(low)) queryParams.distress = "plan_cession";
+        else if (/redress|sauvegarde|[àa] reprendre|reprise|turnaround/.test(low)) queryParams.distress = "reprise";
+        else queryParams.distress = "active";
+        queryParams.sort = "ca_dernier";
+      }
       if (/peu endett|faible (dette|endett)|sans dette|d[ée]sendett/.test(low)) queryParams.maxDebtEbitda = 3;
       // Secteur texte si NAF non mappé
       const sectorMatch = text.match(SOURCING_KEYWORDS);

@@ -47,7 +47,7 @@ export function TargetCard({ target, density = "comfortable", selected, onSelect
           type="button"
           // Bug v6/1.7 — axe critical 'button-name' : checkbox sans texte
           // discernable. aria-label décrit la cible pour les lecteurs d'écran.
-          aria-label={selected ? `Désélectionner ${target.name}` : `Sélectionner ${target.name}`}
+          aria-label={selected ? `Désélectionner ${target.denomination}` : `Sélectionner ${target.denomination}`}
           aria-pressed={selected}
           onClick={(e) => { e.stopPropagation(); onSelect?.(); }}
           style={{
@@ -81,6 +81,26 @@ export function TargetCard({ target, density = "comfortable", selected, onSelect
               <Icon name="warning" size={10} /> {target.red_flags[0].type === "icij" ? "ICIJ" : "Risque"}
             </span>
           )}
+          {target.procedure_nature && (() => {
+            const n = target.procedure_nature.toLowerCase();
+            const isPlan = /plan de cession|plan.*cession/.test(n);
+            const isReprise = /redress|sauvegarde|plan/.test(n) && !/liquidation/.test(n);
+            const isTerminal = /liquidation|insuffisance/.test(n);
+            const [label, col, bg] = isPlan
+              ? ["🟢 Plan de cession", "var(--accent-emerald,#34d399)", "rgba(52,211,153,0.12)"]
+              : isReprise
+              ? ["🟢 Reprise (redressement)", "var(--accent-emerald,#34d399)", "rgba(52,211,153,0.10)"]
+              : isTerminal
+              ? ["🔴 Liquidation", "var(--accent-rose,#fb7185)", "rgba(251,113,133,0.10)"]
+              : ["⚠️ Procédure collective", "var(--accent-amber,#fbbf24)", "rgba(251,191,36,0.10)"];
+            return (
+              <span title={target.procedure_nature} style={{
+                display: "inline-flex", alignItems: "center", padding: "2px 7px", borderRadius: 999,
+                background: bg as string, border: `1px solid ${col}`, color: col as string,
+                fontSize: 10.5, fontWeight: 600,
+              }}>{label}</span>
+            );
+          })()}
         </div>
 
         {!compact && target.axes && (

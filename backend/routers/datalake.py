@@ -4677,6 +4677,7 @@ async def cibles_search(
     min_age_dirigeant: int | None = None,     # ex 65 = dirigeant ≥ 65 ans
     is_distressed: bool | None = None,        # détresse financière
     has_website: bool | None = None,          # présence web OSINT
+    distress: str | None = Query(None, pattern="^(plan_cession|reprise|active)$"),  # sourcing distressed M&A (procédure collective)
     sort: str = Query("score_ma", pattern="^(score_ma|ca_dernier|date_creation|ebitda|ebitda_margin|roa|transmission|attractivity|scale|structure|age_dirigeant|capital_social)$"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -4692,7 +4693,7 @@ async def cibles_search(
     cache_key = (
         f"cibles:{q}|{dept}|{naf}|{min_score}|{is_pro_ma}|"
         f"{is_asset_rich}|{has_red_flags}|{min_ca}|{max_ca}|{min_ebitda_margin}|"
-        f"{max_debt_ebitda}|{min_age_dirigeant}|{is_distressed}|{has_website}|"
+        f"{max_debt_ebitda}|{min_age_dirigeant}|{is_distressed}|{has_website}|{distress}|"
         f"{sort}|{limit}|{offset}"
     )
     cached = _gen_cache_get(cache_key, 60.0)
@@ -4701,7 +4702,7 @@ async def cibles_search(
 
     adv = dict(min_ca=min_ca, max_ca=max_ca, min_ebitda_margin=min_ebitda_margin,
                max_debt_ebitda=max_debt_ebitda, min_age_dirigeant=min_age_dirigeant,
-               is_distressed=is_distressed, has_website=has_website)
+               is_distressed=is_distressed, has_website=has_website, distress=distress)
 
     pool = _pool(req)
 
@@ -4832,6 +4833,20 @@ async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_r
                          "AND COALESCE(sm.has_negative_ebitda,false)=false AND COALESCE(sm.has_revenue_decline,false)=false)")
         if adv.get("has_website") is True:
             where.append("COALESCE(sm.has_website,false) = true")
+    # Sourcing distressed M&A — sociétés en procédure collective (cibles à reprendre).
+    # S'appuie sur les colonnes procédure d'entreprises_master (last_procedure_nature,
+    # has_procedure_collective_active) issues de silver.cession_events.
+    _distress = (adv or {}).get("distress")
+    if _distress == "plan_cession":
+        where.append("(t.last_procedure_nature ILIKE '%plan de cession%' OR t.last_procedure_nature ILIKE '%plan%cession%')")
+    elif _distress == "reprise":
+        where.append("(COALESCE(t.has_procedure_collective_active,false) = true "
+                     "AND (t.last_procedure_nature ILIKE '%redressement%' OR t.last_procedure_nature ILIKE '%sauvegarde%' "
+                     "OR t.last_procedure_nature ILIKE '%plan%') "
+                     "AND t.last_procedure_nature NOT ILIKE '%liquidation%' "
+                     "AND t.last_procedure_nature NOT ILIKE '%cl%ture%')")
+    elif _distress == "active":
+        where.append("COALESCE(t.has_procedure_collective_active,false) = true")
 
     # Mapping order_col v3 (sm.* nécessite has_scoring, sinon retombe sur score)
     _sm_sorts = {
