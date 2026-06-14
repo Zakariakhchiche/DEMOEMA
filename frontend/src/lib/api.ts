@@ -435,6 +435,10 @@ export interface CopilotStreamEvent {
   source?: string;
   targets_updated?: boolean;
   targets_count?: number;
+  // Lever #1 — params réels utilisés par le LLM pour search_cibles. Le frontend
+  // rend les cards via fetchTargets(search_cibles_params) au lieu de regex-guess.
+  search_cibles_params?: Record<string, string | number | boolean>;
+  n_cibles?: number;
   // Validation anti-hallucination (backend/clients/llm_validator.py) :
   // émis comme event final avant le `done`, liste les chiffres non-traceables
   // dans les tool results. Frontend affiche un bandeau ⚠️ si unverified non vide.

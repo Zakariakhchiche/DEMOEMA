@@ -529,6 +529,10 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
     // (cf backend/clients/llm_validator.py). On le capture dans la closure
     // pour l'attacher à l'AiMessageData et l'afficher en bandeau ⚠️.
     let capturedValidation: AiMessageData["validation"];
+    // Lever #1 — params RÉELS de search_cibles émis par le backend pendant le
+    // stream. Si le LLM a appelé search_cibles, on rend les cards avec CES
+    // filtres (ce que le LLM a vraiment cherché) plutôt que le regex-guess local.
+    let capturedSearchParams: Record<string, string | number | boolean> | undefined;
     const [textStreamPromise, cibleSearchPromise, personSearchPromise] = [
       (async () => {
         let acc = "";
@@ -546,6 +550,9 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
             }
             if (ev.validation) {
               capturedValidation = ev.validation;
+            }
+            if (ev.search_cibles_params && (ev.n_cibles ?? 0) > 0) {
+              capturedSearchParams = ev.search_cibles_params;
             }
             if (ev.done) break;
           }
@@ -567,12 +574,41 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
       isDirigeants ? fetchPersons(4) : Promise.resolve([]),
     ];
 
-    const [streamedText, cibles, persons, focusEntrepriseCards] = await Promise.all([
+    const [streamedText, ciblesRegex, persons, focusEntrepriseCards] = await Promise.all([
       textStreamPromise,
       cibleSearchPromise,
       personSearchPromise,
       focusEntrepriseSearchPromise,
     ]);
+
+    // Lever #1 — si le LLM a réellement appelé search_cibles, on re-fetch avec
+    // SES filtres (snake_case backend → camelCase fetchTargets) et on préfère
+    // ces cards : elles correspondent exactement à ce que le LLM a interrogé,
+    // au lieu du regex-guess local qui pouvait diverger de la réponse texte.
+    let cibles = ciblesRegex;
+    if (capturedSearchParams && !isDirigeants) {
+      const p = capturedSearchParams;
+      const num = (v: unknown) => (typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" && !isNaN(Number(v)) ? Number(v) : undefined);
+      const str = (v: unknown) => (typeof v === "string" && v.trim() !== "" ? v : undefined);
+      const llmOpts = {
+        limit: Math.max(num(p.limit) ?? 6, 6),
+        q: str(p.q),
+        dept: str(p.dept),
+        naf: str(p.naf),
+        minScore: num(p.min_score),
+        minCa: num(p.min_ca),
+        maxCa: num(p.max_ca),
+        minEbitdaMargin: num(p.min_ebitda_margin),
+        maxDebtEbitda: num(p.max_debt_ebitda),
+        minAgeDirigeant: num(p.min_age_dirigeant),
+        isAssetRich: p.is_asset_rich === true || p.is_asset_rich === "true",
+        isDistressed: p.is_distressed === true || p.is_distressed === "true",
+        distress: (["plan_cession", "reprise", "active"].includes(String(p.distress)) ? p.distress : undefined) as "plan_cession" | "reprise" | "active" | undefined,
+        sort: str(p.sort) as NonNullable<Parameters<typeof fetchTargets>[0]>["sort"],
+      };
+      const llmCibles = await fetchTargets(llmOpts).catch(() => [] as Target[]);
+      if (llmCibles.length > 0) cibles = llmCibles;
+    }
 
     let response: AiMessageData;
     if (isCompare && cibles.length >= 2) {

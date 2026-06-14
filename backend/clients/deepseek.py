@@ -188,6 +188,7 @@ COPILOT_TOOLS = [
                     "min_age_dirigeant": {"type": "integer", "description": "Âge dirigeant min ex: 65 (transmission)"},
                     "is_asset_rich": {"type": "boolean", "description": "Cibles asset-rich (holding patrimoniale/immobilier)"},
                     "is_distressed": {"type": "boolean", "description": "Sociétés en détresse financière"},
+                    "distress": {"type": "string", "description": "Filtre procédure collective M&A (source BODACC) : 'plan_cession' = société à reprendre via plan de cession (à la barre du tribunal) ; 'reprise' = opportunité de reprise (redressement/sauvegarde en cours) ; 'active' = toute procédure collective active. Utiliser pour 'sociétés à reprendre', 'plan de cession', 'à la barre', 'en redressement'."},
                     "has_website": {"type": "boolean", "description": "Présence web (maturité digitale)"},
                     "has_red_flags": {"type": "boolean", "description": "Avec (true) ou sans (false) red flag compliance"},
                     "sort": {"type": "string", "description": "Tri: score_ma|ca_dernier|ebitda|ebitda_margin|roa|transmission|attractivity|scale|structure|age_dirigeant|capital_social (default score_ma)"},
@@ -669,7 +670,7 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
             _allowed = {"q", "dept", "naf", "min_score", "min_ca", "max_ca",
                         "min_ebitda_margin", "max_debt_ebitda", "min_age_dirigeant",
                         "is_pro_ma", "is_asset_rich", "is_distressed", "has_website",
-                        "has_red_flags", "sort", "limit"}
+                        "has_red_flags", "distress", "sort", "limit"}
             params = {k: v for k, v in args.items() if v is not None and k in _allowed}
             params["limit"] = max(1, min(int(params.get("limit", 10)), 30))
             async with httpx.AsyncClient(timeout=15) as client:
@@ -697,6 +698,15 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
                             out["digital_presence_score"] = c.get("digital_presence_score")
                         if c.get("primary_domain"):
                             out["primary_domain"] = c.get("primary_domain")
+                        # signal détresse / procédure collective (M&A distressed)
+                        _proc = c.get("last_procedure_nature") or c.get("procedure_nature")
+                        if _proc:
+                            out["procedure_nature"] = _proc
+                            out["procedure_active"] = bool(
+                                c.get("has_procedure_collective_active")
+                                if c.get("has_procedure_collective_active") is not None
+                                else c.get("procedure_active")
+                            )
                         return out
                     return {"n_cibles": len(cibles), "filtres_appliques": params,
                             "cibles": [_pick(c) for c in cibles]}
@@ -1500,6 +1510,20 @@ async def copilot_ai_query_stream_with_tools(
                             "tool_call_id": tc["id"],
                             "content": result_str,
                         })
+                    # Lever #1 — émet les params RÉELS de search_cibles : le frontend
+                    # rend les cards via fetchTargets(params) avec ce que le LLM a
+                    # vraiment cherché, au lieu de re-deviner par regex sur la query.
+                    # Lever #4 — télémétrie 0-résultat (recherche trop restrictive).
+                    for _tc in tool_calls:
+                        _fn, _fa, _res = flat[_tc["id"]]
+                        if _fn == "search_cibles" and not _res.get("error"):
+                            _n = _res.get("n_cibles", 0)
+                            yield {
+                                "search_cibles_params": _res.get("filtres_appliques") or {},
+                                "n_cibles": _n,
+                            }
+                            if _n == 0:
+                                print(f"[copilot] search_cibles 0 résultat — filtres={_res.get('filtres_appliques')}")
                     continue  # re-LLM avec les tool results
 
                 # Pas de tool_calls → réponse finale
