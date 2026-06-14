@@ -364,7 +364,7 @@ export function rowToTarget(r: Record<string, unknown>): Target {
     : undefined;
   const score = num(r.score_ma) ?? num(r.pro_ma_score) ?? num(r.score) ?? 0;
   const naf = str(r.naf) || str(r.code_ape) || "";
-  const ville = str(r.ville) || str(r.libelle_commune) || "";
+  const ville = str(r.ville) || str(r.libelle_commune) || str(r.adresse_commune) || "";
   const dept = str(r.dept) || str(r.siege_dept) || str(r.code_dept) || "";
   const dirigName = str(r.top_dirigeant_full_name) || str(r.top_dirigeant_nom) || "—";
 
@@ -445,7 +445,7 @@ export async function fetchTargets(opts: {
   limit?: number; minScore?: number; q?: string; dept?: string; naf?: string;
   minCa?: number; maxCa?: number; minEbitdaMargin?: number; maxDebtEbitda?: number;
   minAgeDirigeant?: number; isAssetRich?: boolean; isDistressed?: boolean;
-  distress?: "plan_cession" | "reprise" | "active";
+  distress?: "plan_cession" | "reprise" | "active" | "liquidation";
   sort?: NonNullable<Parameters<typeof datalakeApi.searchCibles>[0]>["sort"];
 } = {}): Promise<Target[]> {
   try {

@@ -12,7 +12,7 @@ import { UserMessage, AiMessage } from "./ChatBubbles";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { formatSiren } from "@/lib/dem/format";
 import { SUGGESTIONS_INITIAL } from "@/lib/dem/data";
-import { fetchTargets, fetchPersons, extractDirigeantsFromText, extractFocusPersonFromQuery, extractFocusEntrepriseFromQuery, searchEntrepriseByName } from "@/lib/dem/adapter";
+import { fetchTargets, fetchPersons, rowToPerson, extractDirigeantsFromText, extractFocusPersonFromQuery, extractFocusEntrepriseFromQuery, searchEntrepriseByName } from "@/lib/dem/adapter";
 import { streamCopilot } from "@/lib/api";
 import type { ChatMsg, AiMessageData, Target, Density, Person } from "@/lib/dem/types";
 
@@ -461,7 +461,7 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
       limit: number; q?: string; dept?: string; naf?: string; minCa?: number;
       minEbitdaMargin?: number; maxDebtEbitda?: number; minAgeDirigeant?: number;
       isAssetRich?: boolean; isDistressed?: boolean;
-      distress?: "plan_cession" | "reprise" | "active";
+      distress?: "plan_cession" | "reprise" | "active" | "liquidation";
       sort?: NonNullable<Parameters<typeof fetchTargets>[0]>["sort"];
     } = { limit: 6 };
     const low = text.toLowerCase();
@@ -492,9 +492,10 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
       if (/transmission|c[ée]der|cession|retraite|senior|7\d\s*ans|6[5-9]\s*ans/.test(low)) { queryParams.sort = "transmission"; queryParams.minAgeDirigeant = 65; }
       if (/asset[-\s]?rich|immobili|cession-?bail/.test(low)) queryParams.isAssetRich = true;
       if (/d[ée]tresse|difficult|distress|surendett/.test(low)) queryParams.isDistressed = true;
-      // Sourcing distressed M&A — procédure collective (cibles à reprendre / plan de cession)
-      if (/plan de cession|[àa] la barre|barre du tribunal|redress|sauvegarde|[àa] reprendre|proc[ée]dure collective|en redressement|turnaround/.test(low)) {
-        if (/plan de cession|[àa] la barre|barre du tribunal/.test(low)) queryParams.distress = "plan_cession";
+      // Sourcing distressed M&A — procédure collective (cibles à reprendre / plan de cession / liquidation)
+      if (/plan de cession|[àa] la barre|barre du tribunal|redress|sauvegarde|[àa] reprendre|proc[ée]dure collective|en redressement|turnaround|liquidation|liquidée?|d[ée]p[ôo]t de bilan|faillite|cessation de paiement/.test(low)) {
+        if (/liquidation|liquid[ée]e?|d[ée]p[ôo]t de bilan|faillite/.test(low)) queryParams.distress = "liquidation";
+        else if (/plan de cession|[àa] la barre|barre du tribunal/.test(low)) queryParams.distress = "plan_cession";
         else if (/redress|sauvegarde|[àa] reprendre|reprise|turnaround/.test(low)) queryParams.distress = "reprise";
         else queryParams.distress = "active";
         queryParams.sort = "ca_dernier";
@@ -533,6 +534,10 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
     // stream. Si le LLM a appelé search_cibles, on rend les cards avec CES
     // filtres (ce que le LLM a vraiment cherché) plutôt que le regex-guess local.
     let capturedSearchParams: Record<string, string | number | boolean> | undefined;
+    // Lever #1 persons — dirigeants réels (filtrés âge/mandats/SCI) renvoyés par
+    // le LLM via search_dirigeants_60plus / search_sci_patrimoine. Préférés au
+    // top générique non filtré de fetchPersons.
+    let capturedDirigeants: Person[] | undefined;
     const [textStreamPromise, cibleSearchPromise, personSearchPromise] = [
       (async () => {
         let acc = "";
@@ -553,6 +558,9 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
             }
             if (ev.search_cibles_params && (ev.n_cibles ?? 0) > 0) {
               capturedSearchParams = ev.search_cibles_params;
+            }
+            if (ev.dirigeants_result && ev.dirigeants_result.length > 0) {
+              capturedDirigeants = ev.dirigeants_result.map((r, i) => rowToPerson(r, i));
             }
             if (ev.done) break;
           }
@@ -603,7 +611,7 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
         minAgeDirigeant: num(p.min_age_dirigeant),
         isAssetRich: p.is_asset_rich === true || p.is_asset_rich === "true",
         isDistressed: p.is_distressed === true || p.is_distressed === "true",
-        distress: (["plan_cession", "reprise", "active"].includes(String(p.distress)) ? p.distress : undefined) as "plan_cession" | "reprise" | "active" | undefined,
+        distress: (["plan_cession", "reprise", "active", "liquidation"].includes(String(p.distress)) ? p.distress : undefined) as "plan_cession" | "reprise" | "active" | "liquidation" | undefined,
         sort: str(p.sort) as NonNullable<Parameters<typeof fetchTargets>[0]>["sort"],
       };
       const llmCibles = await fetchTargets(llmOpts).catch(() => [] as Target[]);
@@ -667,8 +675,12 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
       // cités par le LLM dans sa réponse — quand il liste "Serge LUFTMAN 83
       // ans, Yves DELIEUVIN 76 ans", ce sont eux qui s'affichent en cards.
       // Fallback sur le top-N existant si le LLM n'a pas enuméré.
+      // Priorité aux dirigeants RÉELS trouvés par le LLM (filtrés âge/mandats/SCI,
+      // remplis) ; sinon noms extraits du texte ; sinon top-N générique.
       const extracted = extractDirigeantsFromText(streamedText);
-      const personsForCards = extracted.length > 0 ? extracted.slice(0, 8) : persons;
+      const personsForCards = (capturedDirigeants && capturedDirigeants.length > 0)
+        ? capturedDirigeants.slice(0, 8)
+        : extracted.length > 0 ? extracted.slice(0, 8) : persons;
       response = {
         role: "ai", kind: "persons", header: "Dirigeants",
         content: streamedText || "Croisement INPI dirigeants × patrimoine SCI :",

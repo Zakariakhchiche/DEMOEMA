@@ -188,7 +188,7 @@ COPILOT_TOOLS = [
                     "min_age_dirigeant": {"type": "integer", "description": "Âge dirigeant min ex: 65 (transmission)"},
                     "is_asset_rich": {"type": "boolean", "description": "Cibles asset-rich (holding patrimoniale/immobilier)"},
                     "is_distressed": {"type": "boolean", "description": "Sociétés en détresse financière"},
-                    "distress": {"type": "string", "description": "Filtre procédure collective M&A (source BODACC) : 'plan_cession' = société à reprendre via plan de cession (à la barre du tribunal) ; 'reprise' = opportunité de reprise (redressement/sauvegarde en cours) ; 'active' = toute procédure collective active. Utiliser pour 'sociétés à reprendre', 'plan de cession', 'à la barre', 'en redressement'."},
+                    "distress": {"type": "string", "description": "Filtre procédure collective M&A (source BODACC) : 'plan_cession' = société à reprendre via plan de cession (à la barre du tribunal) ; 'reprise' = opportunité de reprise (redressement/sauvegarde en cours) ; 'liquidation' = société en liquidation judiciaire (terminal) ; 'active' = toute procédure collective active. Utiliser pour 'sociétés à reprendre', 'plan de cession', 'à la barre', 'en redressement', 'en liquidation', 'faillite'."},
                     "has_website": {"type": "boolean", "description": "Présence web (maturité digitale)"},
                     "has_red_flags": {"type": "boolean", "description": "Avec (true) ou sans (false) red flag compliance"},
                     "sort": {"type": "string", "description": "Tri: score_ma|ca_dernier|ebitda|ebitda_margin|roa|transmission|attractivity|scale|structure|age_dirigeant|capital_social (default score_ma)"},
@@ -456,6 +456,7 @@ COPILOT_TOOLS = [
                 "type": "object",
                 "properties": {
                     "min_mandats": {"type": "integer", "description": "Mandats actifs minimum (default 3)"},
+                    "min_age": {"type": "integer", "description": "Âge minimum du dirigeant (default 60). Ex: 65 pour 'plus de 65 ans'."},
                     "limit": {"type": "integer", "description": "Default 10, max 50"},
                 },
             },
@@ -1141,9 +1142,10 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
         # ====== Sourcing avancé ======
         elif name == "search_dirigeants_60plus":
             min_mandats = args.get("min_mandats", 3)
+            min_age = max(int(args.get("min_age", 60) or 60), 60)
             limit = min(args.get("limit", 10), 50)
             params = {"limit": limit, "order": "-n_mandats_actifs",
-                      "filter": f"age_2026.gte.60,n_mandats_actifs.gte.{min_mandats}"}
+                      "filter": f"age_2026.gte.{min_age},n_mandats_actifs.gte.{min_mandats}"}
             async with httpx.AsyncClient(timeout=10) as client:
                 r = await client.get(f"{datalake_base}/api/datalake/silver/inpi_dirigeants", params=params)
                 if r.status_code == 200:
@@ -1524,6 +1526,15 @@ async def copilot_ai_query_stream_with_tools(
                             }
                             if _n == 0:
                                 print(f"[copilot] search_cibles 0 résultat — filtres={_res.get('filtres_appliques')}")
+                        # Lever #1 persons — émet les dirigeants RÉELS trouvés par le
+                        # LLM (search_dirigeants_60plus / search_sci_patrimoine) avec
+                        # leurs filtres (âge, mandats, capital SCI) → le frontend rend
+                        # des PersonCards remplies (nom/âge/mandats/SCI) au lieu de
+                        # re-fetcher le top générique non filtré.
+                        elif _fn in ("search_dirigeants_60plus", "search_sci_patrimoine") and not _res.get("error"):
+                            _drows = _res.get("dirigeants") or _res.get("dirigeants_top_patrimoine") or []
+                            if _drows:
+                                yield {"dirigeants_result": _drows[:12], "dirigeants_source": _fn}
                     continue  # re-LLM avec les tool results
 
                 # Pas de tool_calls → réponse finale

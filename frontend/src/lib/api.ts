@@ -119,7 +119,7 @@ export const datalakeApi = {
     minAgeDirigeant?: number;
     isDistressed?: boolean;
     hasWebsite?: boolean;
-    distress?: "plan_cession" | "reprise" | "active";
+    distress?: "plan_cession" | "reprise" | "active" | "liquidation";
     sort?: "score_ma" | "ca_dernier" | "date_creation" | "ebitda" | "ebitda_margin" | "roa" | "transmission" | "attractivity" | "scale" | "structure" | "age_dirigeant" | "capital_social";
     limit?: number;
   } = {}) => {
@@ -439,6 +439,11 @@ export interface CopilotStreamEvent {
   // rend les cards via fetchTargets(search_cibles_params) au lieu de regex-guess.
   search_cibles_params?: Record<string, string | number | boolean>;
   n_cibles?: number;
+  // Lever #1 persons — dirigeants réels trouvés par le LLM (search_dirigeants_60plus
+  // / search_sci_patrimoine), filtrés (âge/mandats/SCI). Le frontend rend des
+  // PersonCards remplies depuis ces lignes plutôt que le top générique.
+  dirigeants_result?: Record<string, unknown>[];
+  dirigeants_source?: string;
   // Validation anti-hallucination (backend/clients/llm_validator.py) :
   // émis comme event final avant le `done`, liste les chiffres non-traceables
   // dans les tool results. Frontend affiche un bandeau ⚠️ si unverified non vide.
