@@ -4677,7 +4677,7 @@ async def cibles_search(
     min_age_dirigeant: int | None = None,     # ex 65 = dirigeant ≥ 65 ans
     is_distressed: bool | None = None,        # détresse financière
     has_website: bool | None = None,          # présence web OSINT
-    distress: str | None = Query(None, pattern="^(plan_cession|reprise|active)$"),  # sourcing distressed M&A (procédure collective)
+    distress: str | None = Query(None, pattern="^(plan_cession|reprise|active|liquidation)$"),  # sourcing distressed M&A (procédure collective)
     sort: str = Query("score_ma", pattern="^(score_ma|ca_dernier|date_creation|ebitda|ebitda_margin|roa|transmission|attractivity|scale|structure|age_dirigeant|capital_social)$"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -4833,6 +4833,13 @@ async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_r
                          "AND COALESCE(sm.has_negative_ebitda,false)=false AND COALESCE(sm.has_revenue_decline,false)=false)")
         if adv.get("has_website") is True:
             where.append("COALESCE(sm.has_website,false) = true")
+        # Garde-fou cohérence : quand on TRIE ou FILTRE par marge EBITDA, on exclut
+        # les artefacts proxy où EBITDA > CA (impossible) ou marge > 100 %. Sinon les
+        # holdings/SNC (NAF 64/68) au CA quasi-nul squattent le top avec un
+        # proxy_ebitda explosé (ex: ALCATEL CA 1,1Md€ / proxy 26Md€).
+        if sort == "ebitda_margin" or adv.get("min_ebitda_margin") is not None:
+            where.append("(sm.ebitda_margin IS NOT NULL AND sm.ebitda_margin > 0 AND sm.ebitda_margin <= 1.0)")
+            where.append("(sm.proxy_ebitda IS NULL OR t.ca_latest IS NULL OR t.ca_latest <= 0 OR sm.proxy_ebitda <= t.ca_latest)")
     # Sourcing distressed M&A — sociétés en procédure collective (cibles à reprendre).
     # S'appuie sur les colonnes procédure d'entreprises_master (last_procedure_nature,
     # has_procedure_collective_active) issues de silver.cession_events.
@@ -4847,6 +4854,8 @@ async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_r
                      "AND t.last_procedure_nature NOT ILIKE '%cl%ture%')")
     elif _distress == "active":
         where.append("COALESCE(t.has_procedure_collective_active,false) = true")
+    elif _distress == "liquidation":
+        where.append("t.last_procedure_nature ILIKE '%liquidation%'")
 
     # Mapping order_col v3 (sm.* nécessite has_scoring, sinon retombe sur score)
     _sm_sorts = {
