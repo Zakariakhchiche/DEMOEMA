@@ -17,45 +17,35 @@ key_columns:
   - type_cession
 
 business_logic: |
-  FROM bronze.bodacc_annonces_raw WHERE type = cession/vente/dissolution/procedure :
-    familleavis IN ('procol','cession') OR
-    typeavis_lib ILIKE '%cession%' OR typeavis_lib ILIKE '%vente%fonds%' OR
-    typeavis_lib ILIKE '%dissolution%' OR typeavis_lib ILIKE '%transfert%actions%'
+  ⚠️ VALEURS RÉELLES (introspect bronze.bodacc_annonces_raw 2026-06-14) :
+    familleavis_lib contient des LIBELLÉS FR ('Ventes et cessions',
+    'Procédures collectives', 'Procédures de conciliation',
+    'Procédures de rétablissement professionnel'), PAS 'procol'/'cession'.
+    type_avis = 'annonce'/'rectificatif'/'annulation' (jamais '%cession%').
+    L'ancien hotfix filtrait sur des valeurs inexistantes → 0 ligne.
 
-  Projection avec classification:
-  - annonce_id = COALESCE(payload->>'id', payload->>E'\\ufeffid')
-  - date_parution = (NULLIF(payload->>'dateparution',''))::date
-  - siren = extraire depuis registre (voir silver.bodacc_annonces pour pattern)
-  - tribunal, departement, code_dept, ville
-  - type_cession (CASE):
-    * WHEN typeavis_lib ILIKE '%vente%fonds%' → 'vente_fonds_commerce'
-    * WHEN typeavis_lib ILIKE '%cession%action%' OR 'cession%parts%' → 'cession_titres'
-    * WHEN familleavis='procol' → 'procedure_collective'
-    * WHEN typeavis_lib ILIKE '%dissolution%' → 'dissolution'
-    * WHEN typeavis_lib ILIKE '%transfert%' → 'transfert'
-    * ELSE 'cession_autre'
+  Filtre = familleavis_lib IN (les 4 libellés ci-dessus).
 
-  Extraits depuis listepersonnes (JSON-as-string):
-  - denomination
-  - forme_juridique
-  - numero_immatriculation
+  - annonce_id : colonne b.annonce_id
+  - date_parution : colonne b.date_publication
+  - siren : extrait du registre (pattern silver.bodacc_annonces) :
+    regexp_replace(split_part(payload->>'registre', ',', -1), '[^0-9]','','g')
+    → NULL si pas 9 chiffres. ~92% de couverture.
+  - type_cession (CASE sur familleavis_lib) :
+    'Ventes et cessions' → 'vente_cession' ;
+    'Procédures collectives' → 'procedure_collective' ;
+    'Procédures de conciliation' → 'conciliation' ;
+    'Procédures de rétablissement professionnel' → 'retablissement'.
 
-  Extraits depuis jugement (si procol):
-  - jugement_type
-  - jugement_date
+  Enrichissement via gold.entreprises_master (411k, indexé — PAS
+  inpi_formalites_entreprises 27M qui fait exploser le temps de build) :
+  - denomination_inpi, forme_juridique_inpi, code_ape_inpi, cp_inpi
 
-  Enrichissement via JOIN sur inpi_formalites_entreprises:
-  - denomination_inpi, forme_juridique_inpi, capital_inpi, code_ape_inpi
-  - cp_inpi = e.adresse_code_postal
-
-  Signal actionnable:
-  - is_recent = (date_parution >= now() - interval '90 days')
+  Signal actionnable : is_recent = (date_parution >= now() - interval '90 days').
 
 transformations: |
-  LEFT JOIN inpi_formalites_entreprises e ON e.siren = extracted_siren
-
-  Filtrer WHERE type_cession != 'cession_autre' (garder seulement les types clairs)
-  OU garder tous et laisser le consommateur filtrer.
+  LEFT JOIN gold.entreprises_master em ON em.siren = siren_extrait
+  WHERE type_cession <> 'cession_autre'.
 
 indexes:
   - annonce_id

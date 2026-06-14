@@ -680,7 +680,7 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
                   {[
                     { l: "CA dernier", v: fmtEur(ca), sub: exercices.length ? `Exercice ${String(exercices[exercices.length - 1] || "").slice(0, 4)}` : "", color: "var(--accent-emerald)" },
-                    { l: "EBITDA / résultat net", v: fmtEur(ebitda), sub: margePct != null ? `Marge ${margePct}%` : "", color: "var(--accent-blue)" },
+                    { l: target.ebitda_is_real === false ? "EBITDA (estimé)" : "EBITDA / résultat net", v: fmtEur(ebitda), sub: target.ebitda_is_real === false ? "proxy — pas de comptes déposés" : (margePct != null ? `Marge ${margePct}%` : ""), color: "var(--accent-blue)" },
                     {
                       l: "Effectif",
                       v: effectif != null && Number(effectif) > 0

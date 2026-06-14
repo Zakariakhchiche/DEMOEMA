@@ -2621,6 +2621,9 @@ async def scoring_detail(req: Request, siren: str):
             "capitaux_propres_latest": float(data["capitaux_propres_latest"]) if data.get("capitaux_propres_latest") else None,
             "resultat_net_latest": float(data["resultat_net_latest"]) if data.get("resultat_net_latest") else None,
             "proxy_ebitda": float(data["proxy_ebitda"]) if data.get("proxy_ebitda") else None,
+            # Véracité : true = EBITDA réel (comptes déposés : résultat expl. + dotations),
+            # false = proxy estimé (résultat net + 5% capital). None si colonne absente.
+            "ebitda_is_real": (bool(data["ebitda_is_real"]) if data.get("ebitda_is_real") is not None else None),
             # proxy_margin = (resultat_net + 5% capital) / ca_latest. Sur les
             # holdings avec gros capital social (Equans : 2,2 Md€) et faible
             # CA opérationnel, le 5% capital dépasse le CA → marge >100% qui
@@ -4687,7 +4690,7 @@ async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_r
             "sm.interest_coverage, sm.gross_margin, sm.intensite_capitalistique, "
             "sm.financial_health_tier, sm.has_negative_equity, sm.has_high_leverage, "
             "sm.has_negative_ebitda, sm.has_revenue_decline, sm.digital_presence_score, "
-            "sm.has_website, sm.primary_domain"
+            "sm.has_website, sm.primary_domain, sm.ebitda_is_real"
         )
 
     # Statut "actif" v3 = insee_etat_administratif != 'F' (F = Fermé/Radié)
@@ -4802,7 +4805,7 @@ async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_r
             "debt_ratio", "dso_days", "roa", "bfr_jours", "interest_coverage", "gross_margin",
             "intensite_capitalistique", "financial_health_tier", "has_negative_equity",
             "has_high_leverage", "has_negative_ebitda", "has_revenue_decline",
-            "digital_presence_score", "has_website", "primary_domain",
+            "digital_presence_score", "has_website", "primary_domain", "ebitda_is_real",
         ):
             if k in r and r[k] is not None:
                 v[k] = float(r[k]) if k in _float_keys else r[k]
