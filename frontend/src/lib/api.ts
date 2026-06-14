@@ -119,6 +119,7 @@ export const datalakeApi = {
     minAgeDirigeant?: number;
     isDistressed?: boolean;
     hasWebsite?: boolean;
+    distress?: "plan_cession" | "reprise" | "active";
     sort?: "score_ma" | "ca_dernier" | "date_creation" | "ebitda" | "ebitda_margin" | "roa" | "transmission" | "attractivity" | "scale" | "structure" | "age_dirigeant" | "capital_social";
     limit?: number;
   } = {}) => {
@@ -138,6 +139,7 @@ export const datalakeApi = {
     if (opts.minAgeDirigeant != null) p.set("min_age_dirigeant", String(opts.minAgeDirigeant));
     if (opts.isDistressed != null) p.set("is_distressed", String(opts.isDistressed));
     if (opts.hasWebsite) p.set("has_website", "true");
+    if (opts.distress) p.set("distress", opts.distress);
     if (opts.sort) p.set("sort", opts.sort);
     p.set("limit", String(opts.limit ?? 20));
     const raw = await jget<{ cibles: Record<string, unknown>[]; has_more: boolean }>(

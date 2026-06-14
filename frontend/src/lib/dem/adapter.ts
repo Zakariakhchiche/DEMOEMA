@@ -379,6 +379,8 @@ export function rowToTarget(r: Record<string, unknown>): Target {
     ebitda,
     ebitda_str: ebitda != null ? fmtEur(ebitda) : "—",
     ebitda_is_real: ebitdaIsReal,
+    procedure_nature: str(r.last_procedure_nature) || undefined,
+    procedure_active: r.has_procedure_collective_active === true,
     effectif: num(r.effectif_exact) ?? num(r.effectif_moyen),
     dept,
     ville: ville || "—",
@@ -443,6 +445,7 @@ export async function fetchTargets(opts: {
   limit?: number; minScore?: number; q?: string; dept?: string; naf?: string;
   minCa?: number; maxCa?: number; minEbitdaMargin?: number; maxDebtEbitda?: number;
   minAgeDirigeant?: number; isAssetRich?: boolean; isDistressed?: boolean;
+  distress?: "plan_cession" | "reprise" | "active";
   sort?: NonNullable<Parameters<typeof datalakeApi.searchCibles>[0]>["sort"];
 } = {}): Promise<Target[]> {
   try {
@@ -459,6 +462,7 @@ export async function fetchTargets(opts: {
       minAgeDirigeant: opts.minAgeDirigeant,
       isAssetRich: opts.isAssetRich,
       isDistressed: opts.isDistressed,
+      distress: opts.distress,
       sort: opts.sort ?? "score_ma",
     });
     return r.cibles.map((c) => rowToTarget(c as Record<string, unknown>));

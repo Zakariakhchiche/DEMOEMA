@@ -28,6 +28,8 @@ export interface Target {
   ebitda: number | null;
   ebitda_str: string;
   ebitda_is_real?: boolean;
+  procedure_nature?: string;
+  procedure_active?: boolean;
   effectif: number | null;
   dept: string;
   ville: string;
