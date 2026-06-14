@@ -26,16 +26,17 @@ from ingestion.neo4j_sync import (
     NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, _person_uid,
 )
 
-# Dernier statut connu par (personne, siren) : DISTINCT ON trié par date d'effet
+# Statut par (personne, siren) : bool_or (actif si AU MOINS un dépôt le marque
+# actif) — hash aggregate rapide, pas de tri sur tableau (le DISTINCT ON trié
+# sur individu_prenoms[] était trop lent sur 13M lignes).
 SQL = """
-SELECT DISTINCT ON (individu_nom, individu_prenoms, individu_date_naissance, siren)
-       siren, individu_nom, individu_prenoms, individu_date_naissance, actif
+SELECT siren, individu_nom, individu_prenoms, individu_date_naissance,
+       bool_or(actif) AS actif
 FROM bronze.inpi_formalites_personnes
 WHERE type_de_personne = 'INDIVIDU'
   AND individu_nom IS NOT NULL
   AND siren IS NOT NULL
-ORDER BY individu_nom, individu_prenoms, individu_date_naissance, siren,
-         individu_date_effet_role DESC NULLS LAST
+GROUP BY siren, individu_nom, individu_prenoms, individu_date_naissance
 """
 
 CYPHER = """
