@@ -87,13 +87,14 @@ export const datalakeApi = {
   queryTable: (
     schema: string,
     table: string,
-    opts: { limit?: number; offset?: number; q?: string; orderBy?: string } = {}
+    opts: { limit?: number; offset?: number; q?: string; orderBy?: string; filter?: string } = {}
   ) => {
     const p = new URLSearchParams();
     if (opts.limit) p.set("limit", String(opts.limit));
     if (opts.offset) p.set("offset", String(opts.offset));
     if (opts.q) p.set("q", opts.q);
     if (opts.orderBy) p.set("order_by", opts.orderBy);
+    if (opts.filter) p.set("filter", opts.filter);
     return jget<{
       table: string;
       columns: string[];

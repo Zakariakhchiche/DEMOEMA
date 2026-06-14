@@ -170,6 +170,7 @@ async def query_table(
     offset: int = Query(0, ge=0),
     q: str | None = Query(None, description="Recherche textuelle (cols whitelisted)"),
     order_by: str | None = Query(None, description="Colonne tri ASC/DESC"),
+    filter: str | None = Query(None, description="Filtres col.op.value séparés par virgule (op: eq/gte/lte/gt/lt). Ex: age_2026.gte.65,n_mandats_actifs.lte.50"),
 ):
     full = f"{schema}.{table}"
     meta = GOLD_TABLES_WHITELIST.get(full)
@@ -196,6 +197,30 @@ async def query_table(
                     [f"unaccent({c}::text) ILIKE unaccent(${len(params)})" for c in search_cols]
                 )
                 where_parts.append(f"({cond})")
+
+    # Filtres structurés col.op.value (utilisés par les tools LLM dirigeants/SCI :
+    # age_2026.gte.65, n_mandats_actifs.gte.3, total_capital_sci.gte.500000).
+    # Colonnes whitelistées (preview_cols + pk), opérateurs bornés → pas d'injection.
+    if filter:
+        allowed_cols = set(meta["preview_cols"]) | {meta["pk"]}
+        op_map = {"eq": "=", "gte": ">=", "lte": "<=", "gt": ">", "lt": "<"}
+        for clause in filter.split(","):
+            bits = clause.split(".")
+            if len(bits) != 3:
+                continue
+            fcol, fop, fval = bits[0].strip(), bits[1].strip().lower(), bits[2].strip()
+            if fcol not in allowed_cols or fop not in op_map or not fval:
+                continue
+            val: Any = fval
+            try:
+                val = int(fval)
+            except ValueError:
+                try:
+                    val = float(fval)
+                except ValueError:
+                    val = fval
+            params.append(val)
+            where_parts.append(f"{fcol} {op_map[fop]} ${len(params)}")
 
     where_sql = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
 
