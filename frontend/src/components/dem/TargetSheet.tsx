@@ -346,7 +346,11 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
   const forme = formeRaw ? formeJuridiqueLabel(formeRaw) : "";
   const annee = fiche.annee_creation ? String(fiche.annee_creation) : target.creation;
   const ca = fiche.ca_dernier ?? target.ca;
-  const ebitda = fiche.ebitda_dernier ?? target.ebitda;
+  // Véracité EBITDA : flag du target (cartes searchCibles) ou, à défaut (fiche
+  // ouverte via /siren), du scoring_detail fraîchement fetché.
+  const fin = scoring?.financials as { proxy_ebitda?: number | null; ebitda_is_real?: boolean } | undefined;
+  const ebitdaIsReal: boolean | undefined = target.ebitda_is_real ?? fin?.ebitda_is_real;
+  const ebitda = fiche.ebitda_dernier ?? target.ebitda ?? (fin?.proxy_ebitda ?? null);
   const margePct = fiche.marge_pct as number | null;
   const effectif = fiche.effectif_exact ?? target.effectif;
   const capital = fiche.capital_social;
@@ -680,7 +684,7 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
                   {[
                     { l: "CA dernier", v: fmtEur(ca), sub: exercices.length ? `Exercice ${String(exercices[exercices.length - 1] || "").slice(0, 4)}` : "", color: "var(--accent-emerald)" },
-                    { l: target.ebitda_is_real === false ? "EBITDA (estimé)" : "EBITDA / résultat net", v: fmtEur(ebitda), sub: target.ebitda_is_real === false ? "proxy — pas de comptes déposés" : (margePct != null ? `Marge ${margePct}%` : ""), color: "var(--accent-blue)" },
+                    { l: ebitdaIsReal === false ? "EBITDA (estimé)" : "EBITDA / résultat net", v: fmtEur(ebitda), sub: ebitdaIsReal === false ? "proxy — pas de comptes déposés" : (margePct != null ? `Marge ${margePct}%` : ""), color: "var(--accent-blue)" },
                     {
                       l: "Effectif",
                       v: effectif != null && Number(effectif) > 0
