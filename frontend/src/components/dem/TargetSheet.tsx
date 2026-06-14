@@ -360,6 +360,11 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
   const adresse = fiche.adresse as string | undefined;
   const caHistory = (fiche.ca_history as number[] | undefined) ?? [];
   const exercices = (fiche.exercices as string[] | undefined) ?? [];
+  // Périmètre du CA réel affiché (consolidé groupe vs social entité) + l'autre
+  // périmètre réel, pour le badge. Les deux sont des CA déposés à l'INPI.
+  const caScope = fiche.ca_scope as string | undefined;
+  const caAlt = fiche.ca_alt as number | null | undefined;
+  const caAltScope = fiche.ca_alt_scope as string | undefined;
   const tranche = fiche.tranche_effectifs as string | undefined;
   const categorie = fiche.categorie_entreprise as string | undefined;
   const etat = fiche.etat_administratif as string | undefined;
@@ -683,7 +688,16 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
                 )}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
                   {[
-                    { l: "CA dernier", v: fmtEur(ca), sub: exercices.length ? `Exercice ${String(exercices[exercices.length - 1] || "").slice(0, 4)}` : "", color: "var(--accent-emerald)" },
+                    {
+                      l: "CA dernier",
+                      v: fmtEur(ca),
+                      sub: [
+                        exercices.length ? `Exercice ${String(exercices[exercices.length - 1] || "").slice(0, 4)}` : "",
+                        caAlt != null && caAltScope ? `${caAltScope} ${fmtEur(caAlt)}` : "",
+                      ].filter(Boolean).join(" · "),
+                      color: "var(--accent-emerald)",
+                      badge: caScope,
+                    },
                     { l: ebitdaIsReal === false ? "EBITDA (estimé)" : "EBITDA / résultat net", v: fmtEur(ebitda), sub: ebitdaIsReal === false ? "proxy — pas de comptes déposés" : (margePct != null ? `Marge ${margePct}%` : ""), color: "var(--accent-blue)" },
                     {
                       l: "Effectif",
@@ -696,18 +710,32 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
                       color: "var(--text-secondary)",
                     },
                     { l: "Capital social", v: fmtEur(capital), sub: capital ? "" : "non publié", color: "var(--accent-purple)" },
-                  ].map((k, i) => (
+                  ].map((k, i) => {
+                    const badge = (k as { badge?: string }).badge;
+                    return (
                     <div key={i} className="dem-glass" style={{ borderRadius: 12, padding: "14px 16px" }}>
                       <div style={{
                         fontSize: 10.5, color: "var(--text-tertiary)",
                         textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600,
-                      }}>{k.l}</div>
+                        display: "flex", alignItems: "center", gap: 6,
+                      }}>
+                        {k.l}
+                        {badge && (
+                          <span title="Périmètre des comptes déposés à l'INPI (les deux sont réels)" style={{
+                            fontSize: 9, padding: "1px 6px", borderRadius: 999, textTransform: "none",
+                            letterSpacing: 0, fontWeight: 600,
+                            background: "rgba(52,211,153,0.12)", color: "var(--accent-emerald, #34d399)",
+                            border: "1px solid rgba(52,211,153,0.30)",
+                          }}>{badge}</span>
+                        )}
+                      </div>
                       <div className="dem-mono tab-num" style={{
                         fontSize: 22, fontWeight: 700, color: "var(--text-primary)", marginTop: 4,
                       }}>{k.v}</div>
                       {k.sub && <div style={{ fontSize: 11, color: k.color, marginTop: 2 }}>{k.sub}</div>}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 {caHistory.length >= 2 && (

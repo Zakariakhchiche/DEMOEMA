@@ -46,6 +46,27 @@ async def _safe(coro, timeout_s: float = 4.0, default=None):
         return default
 
 
+def _apply_ca_scope(fiche: dict, deps, headline_ca) -> None:
+    """Renseigne fiche['ca_scope'] (consolidé/social) du CA affiché + ca_alt
+    (l'autre périmètre réel). `deps` = lignes (type_bilan, ca) du dernier
+    exercice. Les deux périmètres sont des CA réels déposés à l'INPI."""
+    rows = [r for r in (deps or []) if r["ca"] is not None]
+    if not rows:
+        return
+
+    def label(tb):
+        return "consolidé" if tb == "K" else "social"
+
+    hl = headline_ca if headline_ca is not None else rows[0]["ca"]
+    chosen = min(rows, key=lambda r: abs(r["ca"] - hl))
+    fiche["ca_scope"] = label(chosen["type_bilan"])
+    others = [r for r in rows if r["type_bilan"] != chosen["type_bilan"]]
+    if others:
+        alt = others[0]
+        fiche["ca_alt"] = alt["ca"]
+        fiche["ca_alt_scope"] = label(alt["type_bilan"])
+
+
 def _serialize(row: asyncpg.Record) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for k, v in row.items():
@@ -443,6 +464,17 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
             fiche["ca_history"] = [r["ca"] for r in (ca_hist or [])]
             fiche["exercices"] = [r["date_cloture"].isoformat() for r in (ca_hist or [])]
 
+            # Périmètre du CA affiché (consolidé 'K' vs social 'C') + valeur de
+            # l'autre périmètre, pour le badge fiche. Les 2 sont des CA réels INPI.
+            _deps = await _safe(pool.fetch(
+                """SELECT type_bilan, ca_net::float8 AS ca FROM silver.inpi_comptes
+                   WHERE siren = $1 AND ca_net IS NOT NULL
+                     AND date_cloture = (SELECT max(date_cloture) FROM silver.inpi_comptes
+                                         WHERE siren = $1 AND ca_net IS NOT NULL)""",
+                siren,
+            ), default=[])
+            _apply_ca_scope(fiche, _deps, fiche.get("ca_latest"))
+
             # Counts agrégés (n_dirigeants/n_bodacc/n_sanctions) — gold a
             # n_bodacc_annonces_24m mais pas le total ni les dirigeants/sanctions.
             # Sans ces 3 compteurs, les cards "DIRIGEANTS / BODACC / RED FLAGS"
@@ -575,6 +607,17 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
                ORDER BY date_cloture""",
             siren, compte.get("ca_net"),
         ), default=[])
+
+        # 2b. Périmètre CA (consolidé vs social) — badge fiche
+        _scope: dict = {}
+        _deps = await _safe(pool.fetch(
+            """SELECT type_bilan, ca_net::float8 AS ca FROM silver.inpi_comptes
+               WHERE siren = $1 AND ca_net IS NOT NULL
+                 AND date_cloture = (SELECT max(date_cloture) FROM silver.inpi_comptes
+                                     WHERE siren = $1 AND ca_net IS NOT NULL)""",
+            siren,
+        ), default=[])
+        _apply_ca_scope(_scope, _deps, compte.get("ca_net"))
 
         # 3. Localisation bodacc (rapide, indexé siren)
         loc = await _safe(pool.fetchrow(
@@ -722,6 +765,9 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
             "date_fermeture": gouv["date_fermeture"] if gouv else None,
             "ca_history": ca_history,
             "exercices": exercices,
+            "ca_scope": _scope.get("ca_scope"),
+            "ca_alt": _scope.get("ca_alt"),
+            "ca_alt_scope": _scope.get("ca_alt_scope"),
             "n_dirigeants": n_dirigeants or 0,
             "n_bodacc": n_bodacc or 0,
             "n_sanctions": n_sanctions or 0,
