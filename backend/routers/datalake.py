@@ -57,13 +57,13 @@ def _apply_ca_scope(fiche: dict, deps, headline_ca) -> None:
     def label(tb):
         return "consolidé" if tb == "K" else "social"
 
-    hl = headline_ca if headline_ca is not None else rows[0]["ca"]
-    chosen = min(rows, key=lambda r: abs(r["ca"] - hl))
+    hl = float(headline_ca) if headline_ca is not None else float(rows[0]["ca"])
+    chosen = min(rows, key=lambda r: abs(float(r["ca"]) - hl))
     fiche["ca_scope"] = label(chosen["type_bilan"])
     others = [r for r in rows if r["type_bilan"] != chosen["type_bilan"]]
     if others:
         alt = others[0]
-        fiche["ca_alt"] = alt["ca"]
+        fiche["ca_alt"] = float(alt["ca"])
         fiche["ca_alt_scope"] = label(alt["type_bilan"])
 
 
