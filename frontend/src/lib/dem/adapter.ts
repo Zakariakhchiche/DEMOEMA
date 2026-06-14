@@ -472,20 +472,29 @@ export async function fetchTargets(opts: {
   }
 }
 
-export async function fetchPersons(limit = 4): Promise<Person[]> {
+export async function fetchPersons(
+  limit = 4,
+  opts: { minAge?: number; maxMandats?: number; minSci?: number; sort?: string } = {}
+): Promise<Person[]> {
   // PIVOT v3 PRO : gold.dirigeants_master au lieu de silver.inpi_dirigeants raw.
-  // L'ancien orderBy n_mandats_actifs DESC retournait toujours THIBAUD/ERIC/BASTIEN/
-  // VINCENT (avocats / CAC concentrateurs avec 6000+ mandats), pas des cibles M&A.
-  // Maintenant : filtrer par pro_ma_score (signaux dirigeant pertinents) + bornes
-  // raisonnables sur n_mandats (2-50) pour exclure les concentrateurs.
+  // L'ancien orderBy retournait toujours THIBAUD/ERIC/BASTIEN (avocats / CAC
+  // concentrateurs avec 6000+ mandats), pas des cibles M&A. Maintenant on filtre
+  // (filter= structuré côté backend) : âge mini, plafond mandats pour exclure les
+  // concentrateurs (maxMandats), nb SCI mini — dérivés de la question.
+  // Plafond mandats par défaut = 80 (au-dessus = concentrateur, pas un dirigeant cible).
+  const maxMandats = opts.maxMandats ?? 80;
+  const buildFilter = (ageCol: string) => {
+    const clauses = [`n_mandats_actifs.gte.2`, `n_mandats_actifs.lte.${maxMandats}`];
+    if (opts.minAge) clauses.push(`${ageCol}.gte.${opts.minAge}`);
+    if (opts.minSci) clauses.push(`n_sci.gte.${opts.minSci}`);
+    return clauses.join(",");
+  };
   try {
     // Tentative 1 : gold.dirigeants_master (best signal)
     const r = await datalakeApi.queryTable("gold", "dirigeants_master", {
       limit,
-      orderBy: "-pro_ma_score",
-      // Note : queryTable n'accepte pas WHERE générique pour l'instant.
-      // Le pro_ma_score DESC + dirigeants_master qui est filtré par
-      // is_multi_mandat reste un meilleur signal que silver brut.
+      orderBy: opts.sort ?? "-pro_ma_score",
+      filter: buildFilter("age_2026"),
     });
     if (r.rows.length > 0) {
       return r.rows.map((row, i) => rowToPerson(row, i));

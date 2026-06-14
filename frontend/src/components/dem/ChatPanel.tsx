@@ -579,7 +579,15 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
         : isSourcingIntent
         ? fetchTargets(queryParams).catch(() => [] as Target[])
         : Promise.resolve([] as Target[]),
-      isDirigeants ? fetchPersons(4) : Promise.resolve([]),
+      isDirigeants ? fetchPersons(8, {
+        // âge mini dérivé de la question ("plus de 65 ans", "senior", "à céder")
+        minAge: (() => {
+          const m = low.match(/(\d{2})\s*ans|plus de (\d{2})|de (\d{2})\s*ans|(\d{2})\s*\+/);
+          const v = m ? parseInt(m[1] || m[2] || m[3] || m[4], 10) : (/senior|retraite|[àa] c[ée]der|transmission/.test(low) ? 60 : undefined);
+          return v && v >= 50 && v <= 99 ? v : undefined;
+        })(),
+        minSci: /\bsci\b|patrimoine|patrimonial/.test(low) ? 1 : undefined,
+      }) : Promise.resolve([]),
     ];
 
     const [streamedText, ciblesRegex, persons, focusEntrepriseCards] = await Promise.all([
