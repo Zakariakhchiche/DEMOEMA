@@ -12,7 +12,7 @@ import { UserMessage, AiMessage } from "./ChatBubbles";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { formatSiren } from "@/lib/dem/format";
 import { SUGGESTIONS_INITIAL } from "@/lib/dem/data";
-import { fetchTargets, fetchPersons, rowToPerson, extractDirigeantsFromText, extractFocusPersonFromQuery, extractFocusEntrepriseFromQuery, searchEntrepriseByName } from "@/lib/dem/adapter";
+import { fetchTargets, fetchPersons, fetchSciDirigeants, rowToPerson, extractDirigeantsFromText, extractFocusPersonFromQuery, extractFocusEntrepriseFromQuery, searchEntrepriseByName } from "@/lib/dem/adapter";
 import { streamCopilot } from "@/lib/api";
 import type { ChatMsg, AiMessageData, Target, Density, Person } from "@/lib/dem/types";
 
@@ -396,6 +396,8 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
     }
     const isSiren = isNumericLength && luhnValid;
     const isDirigeants = /dirigeant|holding|patrimoine/i.test(text);
+    // Question centrée SCI / patrimoine → fetch déterministe trié par capital SCI.
+    const isSciQuery = /\bsci\b|patrimoine|patrimonial|asset[-\s]?rich|fortune/i.test(text);
     const isDD = /\bdd\b|compliance|due diligence/i.test(lower);
     // Compliance/network query : red flag, sanctions, offshore, lobbying, réseau,
     // entourage, associé(s), co-mandataires. Réponse LLM porte sur 1 personne
@@ -579,15 +581,19 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
         : isSourcingIntent
         ? fetchTargets(queryParams).catch(() => [] as Target[])
         : Promise.resolve([] as Target[]),
-      isDirigeants ? fetchPersons(8, {
-        // âge mini dérivé de la question ("plus de 65 ans", "senior", "à céder")
-        minAge: (() => {
-          const m = low.match(/(\d{2})\s*ans|plus de (\d{2})|de (\d{2})\s*ans|(\d{2})\s*\+/);
-          const v = m ? parseInt(m[1] || m[2] || m[3] || m[4], 10) : (/senior|retraite|[àa] c[ée]der|transmission/.test(low) ? 60 : undefined);
-          return v && v >= 50 && v <= 99 ? v : undefined;
-        })(),
-        minSci: /\bsci\b|patrimoine|patrimonial/.test(low) ? 1 : undefined,
-      }) : Promise.resolve([]),
+      !isDirigeants
+        ? Promise.resolve([])
+        : isSciQuery
+        // SCI/patrimoine → source déterministe triée par capital SCI réel.
+        ? fetchSciDirigeants(8)
+        : fetchPersons(8, {
+            // âge mini dérivé de la question ("plus de 65 ans", "senior", "à céder")
+            minAge: (() => {
+              const m = low.match(/(\d{2})\s*ans|plus de (\d{2})|de (\d{2})\s*ans|(\d{2})\s*\+/);
+              const v = m ? parseInt(m[1] || m[2] || m[3] || m[4], 10) : (/senior|retraite|[àa] c[ée]der|transmission/.test(low) ? 60 : undefined);
+              return v && v >= 50 && v <= 99 ? v : undefined;
+            })(),
+          }),
     ];
 
     const [streamedText, ciblesRegex, persons, focusEntrepriseCards] = await Promise.all([
@@ -686,8 +692,14 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
       // Priorité aux dirigeants RÉELS trouvés par le LLM (filtrés âge/mandats/SCI,
       // remplis) ; sinon noms extraits du texte ; sinon top-N générique.
       const extracted = extractDirigeantsFromText(streamedText);
+      // Priorité : dirigeants RÉELS du LLM > (pour SCI) fetch déterministe trié
+      // par capital > noms extraits du texte > top-N générique. Pour les requêtes
+      // SCI, `persons` (fetchSciDirigeants) bat l'extraction texte (qui sortait
+      // des noms génériques SCI=1 sans rapport avec "plus gros patrimoine").
       const personsForCards = (capturedDirigeants && capturedDirigeants.length > 0)
         ? capturedDirigeants.slice(0, 8)
+        : (isSciQuery && persons.length > 0)
+        ? persons.slice(0, 8)
         : extracted.length > 0 ? extracted.slice(0, 8) : persons;
       response = {
         role: "ai", kind: "persons", header: "Dirigeants",
