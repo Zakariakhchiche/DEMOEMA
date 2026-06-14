@@ -368,6 +368,7 @@ async def generate_silver_sql(
     feedback: str | None = None,
     apply_immediately: bool = False,
     max_retries: int = 2,
+    _depth: int = 0,
 ) -> dict:
     """Generate silver SQL via LLM with retry-on-apply-failure.
 
@@ -412,6 +413,8 @@ async def generate_silver_sql(
                     "valid": True, "validation_msg": "hand_authored", "applied": False,
                     "retries": 0, "source": "hand_authored"}
         applied = _apply_sql(silver_name, raw_sql, version_uid)
+        if applied.get("applied"):
+            await _rebuild_downstreams(applied, _depth)
         return {"silver_name": silver_name, "sql": raw_sql, "version_uid": version_uid,
                 "valid": True, "validation_msg": "hand_authored",
                 "applied": applied["applied"], "error": applied.get("error"),
@@ -471,6 +474,7 @@ async def generate_silver_sql(
                     )
                     applied = _apply_sql(silver_name, cached_sql, cached_uid)
                     if applied["applied"]:
+                        await _rebuild_downstreams(applied, _depth)
                         return {
                             "silver_name": silver_name,
                             "sql": cached_sql,
@@ -616,6 +620,8 @@ async def generate_silver_sql(
         applied = _apply_sql(silver_name, sql, version_uid)
         result["applied"] = applied["applied"]
         result.update({f"apply_{k}": v for k, v in applied.items() if k != "applied"})
+        if applied.get("applied"):
+            await _rebuild_downstreams(applied, _depth)
 
         # Retry-with-feedback : si apply a échoué avec une erreur SQL
         # corrigeable (column inexistant, syntax error, etc.), on regénère le
@@ -885,6 +891,25 @@ def _apply_sql(silver_name: str, sql: str, version_uid: str) -> dict:
         log.exception("[silver_codegen] apply failed for %s", silver_name)
         return {"applied": False, "error": f"{type(e).__name__}: {e}",
                 "downstream_dropped": downstream}
+
+
+async def _rebuild_downstreams(applied: dict, depth: int = 0) -> None:
+    """Après un apply qui a DROP CASCADE des silvers downstream, les reconstruit
+    IMMÉDIATEMENT (au lieu d'attendre le prochain tick du maintainer) — ferme la
+    fenêtre où une MV downstream (ex silver.sanctions, dépendante de amf_signals/
+    cnil_sanctions/dgccrf_sanctions) reste absente après rebuild d'un upstream.
+    Les deps silver forment un DAG → récursion bornée ; cap de profondeur en
+    garde-fou. Best-effort : un échec est loggué, pas propagé."""
+    if depth > 4:
+        log.warning("[silver_codegen] _rebuild_downstreams: depth cap atteint, stop")
+        return
+    for ds in (applied.get("downstream_dropped") or []):
+        try:
+            r = await generate_silver_sql(ds, apply_immediately=True, _depth=depth + 1)
+            log.info("[silver_codegen] downstream %s reconstruit après cascade (applied=%s)",
+                     ds, r.get("applied"))
+        except Exception as e:  # noqa: BLE001
+            log.warning("[silver_codegen] échec rebuild downstream %s : %s", ds, e)
 
 
 def list_silver_specs() -> list[str]:
