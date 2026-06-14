@@ -26,8 +26,19 @@ def _slug(s: str) -> str:
 
 
 def person_uid(nom, prenoms, dn):
-    parts = [_slug(nom), _slug((prenoms or [""])[0]), dn or ""]
-    return hashlib.sha1("|".join(parts).encode()).hexdigest()[:40]
+    # ⚠️ DOIT rester identique à ingestion.neo4j_sync._person_uid : hash sur la
+    # TUPLE TRIÉE de TOUS les prénoms (pas prenoms[0]). Sinon le bulk loader et
+    # le sync quotidien produisent des uid différents → double schéma d'identité
+    # Person dans le graphe (incident 2026-06-14 : flag actif/sanctions/lobbying
+    # non matchables sur le gros du graphe).
+    if isinstance(prenoms, str):
+        prenoms_list = [prenoms]
+    else:
+        prenoms_list = list(prenoms or [])
+    canonical_prenoms = "|".join(sorted(_slug(p) for p in prenoms_list if p))
+    return hashlib.sha1(
+        f"{_slug(nom)}|{canonical_prenoms}|{dn or ''}".encode()
+    ).hexdigest()[:40]
 
 
 def ensure_schema(driver):
