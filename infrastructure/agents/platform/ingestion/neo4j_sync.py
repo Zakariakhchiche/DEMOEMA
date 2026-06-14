@@ -119,18 +119,29 @@ SET r.role = row.role, r.actif = row.actif, r.individu_role = row.individu_role
 # Permet de filtrer le graphe par compliance (ex: "show all Companies in RJ
 # in the 75 dept"). Cron quotidien après le rebuild.
 COMPLIANCE_COMPANY_QUERY = """
-SELECT siren,
-       has_procedure_collective_active,
-       to_char(last_procedure_date, 'YYYY-MM-DD') AS last_procedure_date,
-       last_procedure_nature,
-       COALESCE(has_late_filing, FALSE) AS has_late_filing,
-       COALESCE(has_dirigeant_senior, FALSE) AS has_dirigeant_senior,
-       COALESCE(has_pro_ma, FALSE) AS has_pro_ma,
-       COALESCE(pro_ma_score, 0) AS pro_ma_score
-FROM gold.entreprises_master
-WHERE has_procedure_collective_active IS NOT NULL
-   OR has_late_filing IS NOT NULL
-   OR has_dirigeant_senior IS NOT NULL
+WITH proc AS (
+  SELECT siren,
+         max(date_parution) AS last_procedure_date,
+         (array_agg(type_cession ORDER BY date_parution DESC))[1] AS last_procedure_nature,
+         bool_or(date_parution >= now()::date - interval '36 months') AS has_procedure_collective_active
+  FROM silver.cession_events
+  WHERE siren IS NOT NULL
+    AND type_cession IN ('procedure_collective', 'conciliation', 'retablissement')
+  GROUP BY siren
+)
+SELECT em.siren,
+       COALESCE(p.has_procedure_collective_active, FALSE) AS has_procedure_collective_active,
+       to_char(p.last_procedure_date, 'YYYY-MM-DD') AS last_procedure_date,
+       p.last_procedure_nature,
+       COALESCE(em.has_late_filing, FALSE) AS has_late_filing,
+       COALESCE(em.has_dirigeant_senior, FALSE) AS has_dirigeant_senior,
+       COALESCE(em.has_pro_ma, FALSE) AS has_pro_ma,
+       COALESCE(em.pro_ma_score, 0) AS pro_ma_score
+FROM gold.entreprises_master em
+LEFT JOIN proc p ON p.siren = em.siren
+WHERE p.siren IS NOT NULL
+   OR em.has_late_filing IS NOT NULL
+   OR em.has_dirigeant_senior IS NOT NULL
 """
 
 MERGE_COMPANY_COMPLIANCE = """
