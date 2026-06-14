@@ -29,8 +29,12 @@ business_logic: |
   - 'decp'  : données essentielles consolidées (depuis bronze.decp_marches_raw)
               — plus fiable, contient siren + montant explicites
 
-  Pour BOAMP, extraction siren via regex sur payload XML (titulaire mentionné
-  en clair). DECP a le siren en champ structuré.
+  ⚠️ CLÉS RÉELLES (introspect 2026-06-14) : DECP a le SIRET dans
+  'titulaire_id_1' (14 chiffres → siren = 9 premiers), PAS
+  'titulaire_id_titulaire'/'siret_titulaire' (inexistants → ancien hotfix 0 ligne).
+  acheteur = 'acheteur_nom', date = 'datenotification', cpv = 'codecpv'.
+  BOAMP : acheteur = 'nomacheteur', date = 'dateparution' (titulaire = objet
+  JSON → regex siren peu fiable, DECP suffit : 17,6k marchés, 10k sociétés).
 
   Champs unifiés :
   - siren_titulaire : siren entreprise gagnante
@@ -46,48 +50,46 @@ business_logic: |
   - top_acheteurs_par_siren = top 5 acheteurs (concentration risk)
 
 transformations: |
-  WITH boamp AS (
-    SELECT (payload->>'id') || '|boamp' AS marche_uid,
-           'boamp' AS source_type,
-           -- Extract siren via regex sur payload TITULAIRE/raw
-           (regexp_match(coalesce(payload->>'titulaire', '') || ' ' ||
-                        coalesce(payload->>'raw', ''),
-                        '\b(\d{9})\b'))[1] AS siren_titulaire,
-           payload->>'acheteur' AS acheteur_public,
-           coalesce((payload->>'date_attribution')::date,
-                    (payload->>'date_publication')::date,
-                    ingested_at::date) AS date_notification,
-           NULLIF(payload->>'montant', '')::numeric AS montant_eur,
-           payload->>'cpv' AS cpv_code,
-           payload AS raw_payload
-    FROM bronze.boamp_avis_raw
-  ),
-  decp AS (
+  WITH decp AS (
     SELECT (payload->>'id') || '|decp' AS marche_uid,
            'decp' AS source_type,
-           coalesce(
-             payload->>'titulaire_id_titulaire',
-             payload->>'siret_titulaire'::text
-           ) AS siren_titulaire_raw,
-           coalesce(payload->>'acheteur_nom', payload->>'acheteur_id') AS acheteur_public,
-           NULLIF(payload->>'datenotification', '')::date AS date_notification,
+           CASE WHEN payload->>'titulaire_id_1' ~ '^[0-9]{14}$' THEN left(payload->>'titulaire_id_1', 9)
+                WHEN payload->>'titulaire_id_1' ~ '^[0-9]{9}$'  THEN payload->>'titulaire_id_1'
+                ELSE NULL END AS siren_titulaire,
+           coalesce(NULLIF(payload->>'acheteur_nom',''), payload->>'acheteur_id') AS acheteur_public,
+           CASE WHEN payload->>'datenotification' ~ '^\d{4}-\d{2}-\d{2}'
+                THEN (left(payload->>'datenotification',10))::date ELSE NULL END AS date_notification,
            NULLIF(payload->>'montant', '')::numeric AS montant_eur,
            payload->>'codecpv' AS cpv_code,
            payload AS raw_payload
     FROM bronze.decp_marches_raw
   ),
-  decp_clean AS (
+  boamp AS (
+    SELECT (payload->>'id') || '|boamp' AS marche_uid,
+           'boamp' AS source_type,
+           (regexp_match(payload->>'titulaire', '([0-9]{14}|[0-9]{9})'))[1] AS siret_raw,
+           NULLIF(payload->>'nomacheteur','') AS acheteur_public,
+           CASE WHEN payload->>'dateparution' ~ '^\d{4}-\d{2}-\d{2}'
+                THEN (left(payload->>'dateparution',10))::date ELSE NULL END AS date_notification,
+           NULL::numeric AS montant_eur,
+           payload->>'descripteur_code' AS cpv_code,
+           payload AS raw_payload
+    FROM bronze.boamp_avis_raw
+  ),
+  boamp_clean AS (
     SELECT marche_uid, source_type,
-           -- siret 14 chars → siren 9 premiers chars
-           CASE WHEN siren_titulaire_raw ~ '^\d{14}$' THEN left(siren_titulaire_raw, 9)
-                WHEN siren_titulaire_raw ~ '^\d{9}$' THEN siren_titulaire_raw
-                ELSE NULL END AS siren_titulaire,
+           CASE WHEN length(siret_raw)=14 THEN left(siret_raw,9)
+                WHEN length(siret_raw)=9  THEN siret_raw ELSE NULL END AS siren_titulaire,
            acheteur_public, date_notification, montant_eur, cpv_code, raw_payload
-    FROM decp
+    FROM boamp
   )
-  SELECT * FROM boamp WHERE siren_titulaire IS NOT NULL
+  SELECT marche_uid, source_type, siren_titulaire, acheteur_public,
+         date_notification, montant_eur, cpv_code, raw_payload
+  FROM decp WHERE siren_titulaire IS NOT NULL
   UNION ALL
-  SELECT * FROM decp_clean WHERE siren_titulaire IS NOT NULL;
+  SELECT marche_uid, source_type, siren_titulaire, acheteur_public,
+         date_notification, montant_eur, cpv_code, raw_payload
+  FROM boamp_clean WHERE siren_titulaire IS NOT NULL;
 
 indexes:
   - "siren_titulaire"

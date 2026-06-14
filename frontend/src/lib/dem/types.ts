@@ -27,6 +27,7 @@ export interface Target {
   ca_str: string;
   ebitda: number | null;
   ebitda_str: string;
+  ebitda_is_real?: boolean;
   effectif: number | null;
   dept: string;
   ville: string;

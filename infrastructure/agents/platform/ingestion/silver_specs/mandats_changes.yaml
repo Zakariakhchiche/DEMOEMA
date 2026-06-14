@@ -22,80 +22,63 @@ key_columns:
   - role_apres
 
 business_logic: |
-  ⚠️ ATTENTION COLONNES silver.inpi_dirigeants (introspect — strict) :
-    nom, prenom (SINGULIER), date_naissance (varchar 10),
-    sirens_mandats (bpchar[]), denominations (text[]).
-  ⚠️ PAS DE COLONNE person_uid sur silver.inpi_dirigeants → CALCULER via
-    md5(coalesce(nom,'')||'|'||coalesce(prenom,'')||'|'||coalesce(date_naissance,''))
+  ⚠️ CLÉS PAYLOAD RÉELLES (introspect bronze.inpi_formalites_historique 2026-06-14) :
+    Le payload est le RNE INPI converti — les clés sont 'codeEvenement'
+    (ex 34M/35M = "Modification relative aux dirigeants"), 'libelleEvenement',
+    'dateEffet', 'dateIntegration'. PAS de 'type_evenement'/'libelle'/'date_creation'
+    (ancien hotfix : filtrait sur des clés inexistantes → 0 ligne).
 
-  Itère bronze.inpi_formalites_historique pour identifier les événements
-  affectant les mandats :
+  ⚠️ COLONNES bronze.inpi_formalites_personnes : individu_nom, individu_prenoms
+    (text[]), individu_date_naissance, individu_role, formality_id.
 
-  type_evenement (depuis le payload formalite) :
-  - 'nomination'         : nouvelle entrée d'un dirigeant
-  - 'demission'          : démission volontaire
-  - 'revocation'         : révocation
-  - 'cooptation'         : nomination provisoire en remplacement
-  - 'fin_mandat'         : terme du mandat
-  - 'changement_role'    : changement de fonction (président → DG par ex.)
-  - 'autre'              : default
+  Signal mandat = formalités dont libelleEvenement ILIKE '%dirigeant%'
+  (codes 34M "Modification relative aux dirigeants d'une société",
+  35M "... d'une SA", etc.). ~285k événements sur 9,5 M formalités.
 
-  person_uid récupéré via JOIN sur silver.inpi_dirigeants
-  (nom + prenoms + date_naissance match).
+  type_evenement = 'changement_dirigeant' (le libellé RNE ne distingue pas
+  nomination/démission ; la nuance vient de role_avant/role_apres via lag()
+  sur individu_role joint depuis inpi_formalites_personnes).
 
-  date_evenement = formalite.date_creation (date de dépôt INPI)
+  date_evenement = payload->>'dateEffet' (sinon date_integration).
 
   Cas d'usage scoring :
   - n_changes_recent_par_siren = count WHERE siren = X AND
     date_evenement > now() - interval '12 months'
   - is_rotation_dirigeants = (n_changes_recent >= 3 dans 90 jours)
-  - has_demission_recent = EXISTS WHERE type_evenement = 'demission' AND
-    date_evenement > now() - interval '6 months'
 
 transformations: |
   WITH formalites AS (
-    SELECT formalite_id,
-           siren,
-           coalesce(payload->>'date_creation', ingested_at::text)::date AS date_evenement,
-           payload->>'type_evenement' AS type_raw,
-           payload AS raw_payload
-    FROM bronze.inpi_formalites_historique
-    WHERE payload->>'type_evenement' IS NOT NULL
-       OR payload->>'libelle' ILIKE '%nomination%'
-       OR payload->>'libelle' ILIKE '%démission%'
-       OR payload->>'libelle' ILIKE '%cooptation%'
-       OR payload->>'libelle' ILIKE '%révocation%'
-  ),
-  classified AS (
-    SELECT f.*,
-           CASE
-             WHEN f.type_raw ILIKE '%nomination%' THEN 'nomination'
-             WHEN f.type_raw ILIKE '%démission%' OR f.type_raw ILIKE '%demission%' THEN 'demission'
-             WHEN f.type_raw ILIKE '%révocation%' OR f.type_raw ILIKE '%revocation%' THEN 'revocation'
-             WHEN f.type_raw ILIKE '%cooptation%' THEN 'cooptation'
-             WHEN f.type_raw ILIKE '%fin de mandat%' OR f.type_raw ILIKE '%terme%' THEN 'fin_mandat'
-             WHEN f.type_raw ILIKE '%changement%' THEN 'changement_role'
-             ELSE 'autre'
-           END AS type_evenement
-    FROM formalites f
+    SELECT h.formality_id,
+           h.siren,
+           CASE WHEN h.payload->>'dateEffet' ~ '^\d{4}-\d{2}-\d{2}'
+                THEN (left(h.payload->>'dateEffet', 10))::date
+                ELSE h.date_integration::date END AS date_evenement,
+           h.payload->>'libelleEvenement' AS libelle,
+           h.payload->>'codeEvenement'    AS code_evenement,
+           h.payload AS raw_payload
+    FROM bronze.inpi_formalites_historique h
+    WHERE h.payload->>'libelleEvenement' ILIKE '%dirigeant%'
   ),
   with_person AS (
-    SELECT c.*,
-           p.nom, p.prenom, p.date_naissance,
-           md5(coalesce(p.nom,'')||'|'||coalesce(p.prenom,'')||'|'||coalesce(p.date_naissance::text,'')) AS person_uid,
-           p.role AS role_apres,
-           lag(p.role) OVER (PARTITION BY c.siren, p.nom, p.prenom
-                             ORDER BY c.date_evenement) AS role_avant
-    FROM classified c
+    SELECT f.*,
+           'changement_dirigeant'::text AS type_evenement,
+           p.individu_nom AS nom, p.individu_prenoms[1] AS prenom,
+           p.individu_date_naissance AS date_naissance,
+           md5(coalesce(p.individu_nom,'')||'|'||coalesce(p.individu_prenoms[1],'')||'|'||coalesce(p.individu_date_naissance::text,'')) AS person_uid,
+           p.individu_role AS role_apres,
+           lag(p.individu_role) OVER (PARTITION BY f.siren, p.individu_nom, p.individu_prenoms[1]
+                             ORDER BY f.date_evenement) AS role_avant
+    FROM formalites f
     LEFT JOIN bronze.inpi_formalites_personnes p
-      ON p.formalite_id = c.formalite_id
+      ON p.formality_id = f.formality_id
   )
   SELECT
-    md5(siren || '|' || coalesce(person_uid, '') || '|' || type_evenement || '|' || date_evenement::text) AS change_uid,
+    md5(coalesce(siren,'') || '|' || coalesce(person_uid, '') || '|' || type_evenement || '|' || coalesce(date_evenement::text,'')) AS change_uid,
     siren,
     person_uid,
     type_evenement,
     date_evenement,
+    code_evenement,
     role_avant,
     role_apres,
     raw_payload

@@ -356,6 +356,12 @@ export function rowToTarget(r: Record<string, unknown>): Target {
   // proxy_ebitda (gold.scoring_ma) : EBITDA estimé exposé par /cibles — évite le
   // "—" sur les cartes quand ebitda_dernier comptable n'est pas dispo.
   const ebitda = num(r.ebitda_dernier) ?? num(r.proxy_ebitda) ?? num(r.resultat_net);
+  // Véracité EBITDA : réel si comptable (ebitda_dernier) ou flag gold ebitda_is_real=true ;
+  // estimé (proxy résultat_net + 5% capital) si false ; inconnu sinon.
+  const ebitdaIsReal: boolean | undefined =
+    r.ebitda_dernier != null ? true
+    : typeof r.ebitda_is_real === "boolean" ? (r.ebitda_is_real as boolean)
+    : undefined;
   const score = num(r.score_ma) ?? num(r.pro_ma_score) ?? num(r.score) ?? 0;
   const naf = str(r.naf) || str(r.code_ape) || "";
   const ville = str(r.ville) || str(r.libelle_commune) || "";
@@ -372,6 +378,7 @@ export function rowToTarget(r: Record<string, unknown>): Target {
     ca_str: ca ? fmtEur(ca) : "—",
     ebitda,
     ebitda_str: ebitda != null ? fmtEur(ebitda) : "—",
+    ebitda_is_real: ebitdaIsReal,
     effectif: num(r.effectif_exact) ?? num(r.effectif_moyen),
     dept,
     ville: ville || "—",

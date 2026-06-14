@@ -19,15 +19,15 @@ FROM (
 CREATE INDEX ON _sanctions_idx (siren);
 
 CREATE TEMP TABLE _cnil_idx AS
-SELECT DISTINCT (payload->>'siren')::char(9) AS siren
+SELECT DISTINCT siren::char(9) AS siren
 FROM silver.cnil_sanctions
-WHERE payload->>'siren' IS NOT NULL;
+WHERE siren IS NOT NULL;
 CREATE INDEX ON _cnil_idx (siren);
 
 CREATE TEMP TABLE _dgccrf_idx AS
-SELECT DISTINCT (payload->>'siren')::char(9) AS siren
+SELECT DISTINCT siren::char(9) AS siren
 FROM silver.dgccrf_sanctions
-WHERE payload->>'siren' IS NOT NULL;
+WHERE siren IS NOT NULL;
 CREATE INDEX ON _dgccrf_idx (siren);
 
 CREATE TEMP TABLE _bodacc_proc_idx AS
@@ -270,6 +270,9 @@ SELECT
     r.forme_juridique, r.capital_social, r.age_entreprise, r.effectif_salarie,
     r.ca_latest, r.capitaux_propres_latest, r.resultat_net_latest,
     COALESCE(r.ebitda_reel, r.proxy_ebitda) AS proxy_ebitda, r.proxy_margin, r.sector_multiple,
+    -- Véracité : true = EBITDA réel issu des comptes (résultat expl. + dotations) ;
+    -- false = proxy estimé (résultat net + capital×0,05) faute de comptes déposés.
+    (r.ebitda_reel IS NOT NULL) AS ebitda_is_real,
     r.is_sector_premium, r.is_geo_premium, r.is_stable, r.is_multi_etab, r.is_clean_legal_form,
     r.age_dirigeant_max, r.has_dirigeant_senior,
     r.n_dirigeants, r.n_mandats_dirigeant_max, r.has_pro_ma,
@@ -311,6 +314,7 @@ SELECT
     s.forme_juridique, s.capital_social, s.age_entreprise, s.effectif_salarie,
     s.ca_latest, s.capitaux_propres_latest, s.resultat_net_latest,
     COALESCE(s.ebitda_reel, s.proxy_ebitda) AS proxy_ebitda, s.proxy_margin, s.sector_multiple,
+    (s.ebitda_reel IS NOT NULL) AS ebitda_is_real,
     s.is_sector_premium, s.is_geo_premium, s.is_stable, s.is_multi_etab, s.is_clean_legal_form,
     s.age_dirigeant_max, s.has_dirigeant_senior,
     s.n_dirigeants, s.n_mandats_dirigeant_max, s.has_pro_ma,
