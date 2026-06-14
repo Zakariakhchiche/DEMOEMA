@@ -524,3 +524,24 @@ export async function fetchPersons(
     return [];
   }
 }
+
+/**
+ * Top dirigeants par patrimoine SCI réel — silver.dirigeant_sci_patrimoine
+ * (3.5M), trié par capital SCI cumulé décroissant. Source déterministe pour les
+ * questions "plus gros patrimoine SCI / asset-rich" : remplit le compte SCI
+ * (n_sci) là où gold.dirigeants_master ne l'a pas. Évite les noms génériques
+ * extraits du texte LLM (GINA CALLOUET, SCI=1) qui ne reflètent pas la question.
+ */
+export async function fetchSciDirigeants(limit = 8): Promise<Person[]> {
+  try {
+    const r = await datalakeApi.queryTable("silver", "dirigeant_sci_patrimoine", {
+      limit,
+      orderBy: "-total_capital_sci",
+      filter: "n_sci.gte.2",
+    });
+    return r.rows.map((row, i) => rowToPerson(row, i));
+  } catch (e) {
+    console.error("[dem] fetchSciDirigeants failed:", e);
+    return [];
+  }
+}
