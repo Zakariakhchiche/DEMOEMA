@@ -411,13 +411,34 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
 
             # CA history (5 derniers exercices) — manque dans gold, requis par le
             # graphe d'évolution finance côté frontend.
+            # Cohérence comptes sociaux vs consolidés : les groupes (ex BIGBEN)
+            # déposent 2 bilans/an (type_bilan 'K' consolidé + 'C' social) avec
+            # des CA très différents. Sans départage, DISTINCT ON alternait entre
+            # les deux selon les années → variations absurdes (292M→9M→288M). On
+            # fixe le type sur celui du DERNIER bilan déposé et on garde ce même
+            # type sur tout l'historique (fallback autre type si absent une année).
+            # lt = type de bilan du dépôt dont le CA correspond au headline
+            # (ca_latest gold) sur le dernier exercice → l'historique suit ce
+            # même type, garantissant la cohérence avec le "CA dernier" affiché.
             ca_hist = await _safe(pool.fetch(
-                """SELECT date_cloture, ca_net::float8 AS ca
+                """WITH lt AS (
+                       SELECT type_bilan FROM silver.inpi_comptes
+                       WHERE siren = $1 AND ca_net IS NOT NULL
+                       ORDER BY date_cloture DESC,
+                                abs(ca_net - COALESCE($2::float8, ca_net)) ASC,
+                                (type_bilan = 'K') DESC, depot_id DESC
+                       LIMIT 1
+                   )
+                   SELECT date_cloture, ca_net::float8 AS ca
                    FROM (SELECT DISTINCT ON (date_cloture) date_cloture, ca_net
                          FROM silver.inpi_comptes
-                         WHERE siren = $1 ORDER BY date_cloture DESC LIMIT 5) h
-                   WHERE ca_net IS NOT NULL ORDER BY date_cloture""",
-                siren,
+                         WHERE siren = $1 AND ca_net IS NOT NULL
+                         ORDER BY date_cloture DESC,
+                                  (type_bilan = (SELECT type_bilan FROM lt)) DESC,
+                                  depot_id DESC
+                         LIMIT 5) h
+                   ORDER BY date_cloture""",
+                siren, fiche.get("ca_latest"),
             ), default=[])
             fiche["ca_history"] = [r["ca"] for r in (ca_hist or [])]
             fiche["exercices"] = [r["date_cloture"].isoformat() for r in (ca_hist or [])]
@@ -531,14 +552,28 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
                 "emprunts_dettes": None, "date_cloture": None,
             }
 
-        # 2. CA history (5 derniers exercices)
+        # 2. CA history (5 derniers exercices) — même type de bilan (social vs
+        # consolidé) sur toute la série, fixé sur le dernier dépôt (cf. groupes
+        # type BIGBEN qui déposent les 2 → sinon variations absurdes).
         history = await _safe(pool.fetch(
-            """SELECT date_cloture, ca_net::float8 AS ca
+            """WITH lt AS (
+                   SELECT type_bilan FROM silver.inpi_comptes
+                   WHERE siren = $1 AND ca_net IS NOT NULL
+                   ORDER BY date_cloture DESC,
+                            abs(ca_net - COALESCE($2::float8, ca_net)) ASC,
+                            (type_bilan = 'K') DESC, depot_id DESC
+                   LIMIT 1
+               )
+               SELECT date_cloture, ca_net::float8 AS ca
                FROM (SELECT DISTINCT ON (date_cloture) date_cloture, ca_net
                      FROM silver.inpi_comptes
-                     WHERE siren = $1 ORDER BY date_cloture DESC LIMIT 5) h
-               WHERE ca_net IS NOT NULL ORDER BY date_cloture""",
-            siren,
+                     WHERE siren = $1 AND ca_net IS NOT NULL
+                     ORDER BY date_cloture DESC,
+                              (type_bilan = (SELECT type_bilan FROM lt)) DESC,
+                              depot_id DESC
+                     LIMIT 5) h
+               ORDER BY date_cloture""",
+            siren, compte.get("ca_net"),
         ), default=[])
 
         # 3. Localisation bodacc (rapide, indexé siren)
