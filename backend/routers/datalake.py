@@ -4838,8 +4838,13 @@ async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_r
         # holdings/SNC (NAF 64/68) au CA quasi-nul squattent le top avec un
         # proxy_ebitda explosé (ex: ALCATEL CA 1,1Md€ / proxy 26Md€).
         if sort == "ebitda_margin" or adv.get("min_ebitda_margin") is not None:
-            where.append("(sm.ebitda_margin IS NOT NULL AND sm.ebitda_margin > 0 AND sm.ebitda_margin <= 1.0)")
-            where.append("(sm.proxy_ebitda IS NULL OR t.ca_latest IS NULL OR t.ca_latest <= 0 OR sm.proxy_ebitda <= t.ca_latest)")
+            # marge strictement < 100 % (margin == 1.0 = artefact proxy_ebitda=CA)
+            where.append("(sm.ebitda_margin IS NOT NULL AND sm.ebitda_margin > 0 AND sm.ebitda_margin < 1.0)")
+            where.append("(sm.proxy_ebitda IS NULL OR t.ca_latest IS NULL OR t.ca_latest <= 0 OR sm.proxy_ebitda < t.ca_latest)")
+            # plancher CA : un tri 'meilleure marge' vise de vraies sociétés, pas
+            # des coquilles à 7 800 € de CA — sauf si l'utilisateur fixe son min_ca.
+            if adv.get("min_ca") is None:
+                where.append("(t.ca_latest IS NOT NULL AND t.ca_latest >= 1000000)")
     # Sourcing distressed M&A — sociétés en procédure collective (cibles à reprendre).
     # S'appuie sur les colonnes procédure d'entreprises_master (last_procedure_nature,
     # has_procedure_collective_active) issues de silver.cession_events.
