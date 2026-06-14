@@ -1185,27 +1185,40 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
             search_name = args.get("name", "")
             if not search_name:
                 return {"error": "name requis"}
+            # silver.icij_offshore_match n'est pas matérialisée (données en
+            # bronze.icij_offshore_raw seulement). On interroge silver.opensanctions
+            # qui CONSOLIDE les fuites ICIJ (Panama/Paradise/Offshore Leaks) + PEP.
             async with httpx.AsyncClient(timeout=10) as client:
                 r = await client.get(
-                    f"{datalake_base}/api/datalake/silver/icij_offshore_match",
-                    params={"q": search_name, "limit": 10},
+                    f"{datalake_base}/api/datalake/silver/opensanctions",
+                    params={"q": search_name, "limit": 20},
                 )
-                if r.status_code == 200:
-                    rows = r.json().get("rows", [])
-                    return {"offshore_match": len(rows) > 0, "n_matches": len(rows), "details": rows[:5]}
-                return {"error": f"HTTP {r.status_code} (silver.icij_offshore_match peut etre absent)"}
+                if r.status_code != 200:
+                    return {"error": f"HTTP {r.status_code}"}
+                rows = r.json().get("rows", [])
+                def _is_offshore(row):
+                    blob = f"{row.get('topics')} {row.get('caption')} {row.get('sanctions_programs')}".lower()
+                    return any(k in blob for k in ("offshore", "icij", "panama", "paradise", "leak", "secrecy"))
+                offshore = [r2 for r2 in rows if _is_offshore(r2)]
+                return {
+                    "offshore_match": len(offshore) > 0,
+                    "n_matches": len(offshore),
+                    "details": offshore[:5],
+                    "n_other_opensanctions": len(rows) - len(offshore),
+                    "source": "silver.opensanctions (consolide ICIJ offshore leaks + PEP/sanctions)",
+                }
 
         elif name == "check_lobbying":
             siren = args.get("siren", "")
             search_name = args.get("name", "")
-            params = {"limit": 5}
-            if siren:
-                params["search"] = siren
-            elif search_name:
-                params["q"] = search_name
+            # Table = silver.hatvp_lobbying (search_cols incluent siren + denomination).
+            # query_table n'a pas de param `search` → on passe par `q` (ILIKE search_cols).
+            params = {"limit": 5, "q": siren or search_name}
+            if not params["q"]:
+                return {"error": "siren ou name requis"}
             async with httpx.AsyncClient(timeout=10) as client:
                 r = await client.get(
-                    f"{datalake_base}/api/datalake/silver/hatvp_conflits_interets",
+                    f"{datalake_base}/api/datalake/silver/hatvp_lobbying",
                     params=params,
                 )
                 if r.status_code == 200:
@@ -1227,28 +1240,23 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
 
         # ====== Marché & éco ======
         elif name == "search_marches_publics":
-            siren = args.get("siren", "")
-            search = args.get("search", "")
-            params = {"limit": args.get("limit", 10)}
-            if siren:
-                params["search"] = siren
-            elif search:
-                params["q"] = search
-            async with httpx.AsyncClient(timeout=10) as client:
-                r = await client.get(f"{datalake_base}/api/datalake/silver/marches_publics_unifies", params=params)
-                if r.status_code == 200:
-                    rows = r.json().get("rows", [])
-                    return {"n": len(rows), "marches": rows[:10]}
-                return {"error": f"HTTP {r.status_code}"}
+            # silver.marches_publics_unifies n'est pas matérialisée (données brutes
+            # en bronze.decp_marches_raw, pipeline silver pas encore construit).
+            # On le signale clairement plutôt que de renvoyer un 404 opaque.
+            return {
+                "degraded": True,
+                "n": 0,
+                "marches": [],
+                "error": "Données marchés publics non disponibles (silver.marches_publics_unifies non matérialisée — DECP brut en bronze, pipeline à venir).",
+            }
 
         elif name == "get_lei_code":
             siren = args.get("siren", "")
             search_name = args.get("name", "")
-            params = {"limit": 3}
-            if siren:
-                params["search"] = siren
-            elif search_name:
-                params["q"] = search_name
+            # gleif_lei search_cols = ['lei'] uniquement → q ne matche que par code LEI.
+            params = {"limit": 3, "q": siren or search_name}
+            if not params["q"]:
+                return {"error": "siren, name ou code LEI requis"}
             async with httpx.AsyncClient(timeout=10) as client:
                 r = await client.get(f"{datalake_base}/api/datalake/silver/gleif_lei", params=params)
                 if r.status_code == 200:
@@ -1258,16 +1266,28 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
 
         elif name == "search_dvf_zones":
             cp = args.get("code_postal", "")
-            min_valeur = args.get("min_valeur", 500000)
-            limit = args.get("limit", 10)
-            params = {"limit": limit, "order": "-valeur_fonciere"}
+            min_valeur = float(args.get("min_valeur", 500000) or 0)
+            limit = args.get("limit", 50)
+            # code_postal est dans search_cols → `q` (pas `search`, ignoré par query_table).
+            # On sur-échantillonne (limit 50) car le tri se fait côté client après cast.
+            params = {"limit": max(int(limit), 50)}
             if cp:
-                params["search"] = cp
+                params["q"] = cp
+            def _val(t):
+                # valeur_fonciere peut être une string ('123456.00') → cast robuste.
+                v = t.get("valeur_fonciere")
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return 0.0
             async with httpx.AsyncClient(timeout=10) as client:
                 r = await client.get(f"{datalake_base}/api/datalake/silver/dvf_transactions", params=params)
                 if r.status_code == 200:
                     rows = r.json().get("rows", [])
-                    filtered = [t for t in rows if (t.get("valeur_fonciere") or 0) >= min_valeur][:10]
+                    filtered = sorted(
+                        [t for t in rows if _val(t) >= min_valeur],
+                        key=_val, reverse=True,
+                    )[:10]
                     return {"n": len(filtered), "transactions": filtered}
                 return {"error": f"HTTP {r.status_code}"}
 
