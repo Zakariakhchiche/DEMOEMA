@@ -4819,7 +4819,7 @@ async def dirigeants_enriched(
                d.denominations[1:3] AS top_denominations,
                COALESCE(array_length(d.denominations, 1), 0) AS n_denominations,
                (d.roles)[1] AS role_principal,
-               dm.pro_ma_score,
+               dm.pro_ma_score, dm.person_uid,
                EXISTS (SELECT 1 FROM silver.hatvp_lobbying_persons h
                        WHERE h.siren = ANY(d.sirens_mandats)) AS is_lobbyist,
                EXISTS (SELECT 1 FROM gold.compliance_red_flags c
@@ -4834,16 +4834,10 @@ async def dirigeants_enriched(
         FROM base d
         LEFT JOIN gold.dirigeants_master dm
                ON dm.nom = d.nom AND dm.prenom = d.prenom
-              AND COALESCE(dm.date_naissance, '') = COALESCE(d.date_naissance, '')
-        -- Coordonnées de contact (outreach direct) — LATERAL LIMIT 1 pour ne pas
-        -- dupliquer la ligne quand plusieurs contacts partagent le même nom/prénom.
-        LEFT JOIN LATERAL (
-            SELECT pc.top_email, pc.top_phone
-            FROM gold.persons_contacts_master pc
-            WHERE lower(pc.nom) = lower(d.nom) AND lower(pc.prenom) = lower(d.prenom)
-              AND (pc.top_email IS NOT NULL OR pc.top_phone IS NOT NULL)
-            LIMIT 1
-        ) pc ON true
+              AND dm.date_naissance IS NOT DISTINCT FROM d.date_naissance
+        -- Contact (outreach) : jointure par person_uid (PK de persons_contacts_master,
+        -- récupéré via dm) → lookup instantané vs seq scan sur lower(nom).
+        LEFT JOIN gold.persons_contacts_master pc ON pc.person_uid = dm.person_uid
         -- Jugements (procédures collectives) + cessions (vente) sur ses sociétés.
         LEFT JOIN LATERAL (
             SELECT count(*) FILTER (WHERE ce.type_cession IN ('procedure_collective', 'conciliation', 'retablissement')) AS n_jugements,
