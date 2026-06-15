@@ -395,9 +395,11 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
       return;
     }
     const isSiren = isNumericLength && luhnValid;
-    const isDirigeants = /dirigeant|holding|patrimoine/i.test(text);
     // Question centrée SCI / patrimoine → fetch déterministe trié par capital SCI.
     const isSciQuery = /\bsci\b|patrimoine|patrimonial|asset[-\s]?rich|fortune/i.test(text);
+    // Inclut 'patrimonial(es)' + 'sci' pour router les questions SCI vers le path
+    // dirigeants/personnes (sinon "qui possède le plus de SCI patrimoniales" → 0 carte).
+    const isDirigeants = /dirigeant|holding|patrimoine|patrimonial|\bsci\b/i.test(text) || isSciQuery;
     const isDD = /\bdd\b|compliance|due diligence/i.test(lower);
     // Compliance/network query : red flag, sanctions, offshore, lobbying, réseau,
     // entourage, associé(s), co-mandataires. Réponse LLM porte sur 1 personne
@@ -452,7 +454,16 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
     const FIN_CRITERIA = /(ebitda|marge|rentab|endett|\bdette|ratio|\broa\b|asset[-\s]?rich|immobili|patrimoine|transmission|cession|capital social|chiffre d.affaires|\bca\b|millions?|milliards?|md€|top\s*\d|meilleur|plus\s+(gros|grand|rentable|élev|de\s+\d)|sans red flag|d[ée]tresse|difficult|redress|sauvegarde|plan de cession|[àa] reprendre|proc[ée]dure collective|liquidation|distress|reprise)/i;
     const isCompanyListIntent = COMPANY_NOUN.test(text) || FIN_CRITERIA.test(text);
 
-    const isSourcingIntent = !isComplianceOrNetwork && (
+    // Question DÉFINITIONNELLE / explicative (pas un sourcing) : "qu'est-ce qu'un
+    // LBO", "explique la différence entre EBITDA et résultat net", "comment
+    // valoriser une PME". Ces questions contiennent des mots financiers (ebitda…)
+    // qui déclenchaient à tort des cartes de sourcing → réponse texte pure.
+    // On ne suppress PAS si la query nomme un SIREN ou demande explicitement de
+    // trouver/lister (sourcing formulé en question).
+    const isDefinitional = !isSiren && !/(trouve|liste|montre|donne|cherche|source)/i.test(text) &&
+      /\b(qu'?est[- ]ce|c'?est quoi|d[ée]finition|d[ée]finis|explique|expliquer|diff[ée]rence entre|comment (valoriser|calculer|fonctionne|marche|estimer|interpr[ée]ter)|pourquoi|que signifie|signifie quoi|c'?est quoi)\b/i.test(text);
+
+    const isSourcingIntent = !isComplianceOrNetwork && !isDefinitional && (
       isSiren || isCompare || isCompanyLookup ||
       SOURCING_KEYWORDS.test(text) || HAS_DEPT.test(text) || isCompanyListIntent
     );
@@ -581,7 +592,7 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
         : isSourcingIntent
         ? fetchTargets(queryParams).catch(() => [] as Target[])
         : Promise.resolve([] as Target[]),
-      !isDirigeants
+      (!isDirigeants || isDefinitional)
         ? Promise.resolve([])
         : isSciQuery
         // SCI/patrimoine → source déterministe triée par capital SCI réel.
@@ -682,7 +693,7 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
         cards: focusEntrepriseCards.slice(0, 3),
         followups: ["Fiche complète", "Dirigeants", "DD Compliance", "Réseau"],
       };
-    } else if (isDirigeants) {
+    } else if (isDirigeants && !isDefinitional) {
       // Bug v6/cards : avant, on remontait toujours le top-4 pro_ma_score depuis
       // gold.dirigeants_master (Esteve/Moczulski/Geny/Chertok), indépendamment
       // de la query user (60+/Var/holding). Maintenant on extrait les noms
