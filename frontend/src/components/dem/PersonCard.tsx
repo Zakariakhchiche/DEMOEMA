@@ -103,6 +103,20 @@ export function PersonCard({ person, onOpen }: Props) {
               color: "var(--accent-rose,#fb7185)", fontSize: 10.5, fontWeight: 700,
             }}>🚫 Interdiction de gérer</span>
           )}
+          {person.is_serial_seller && (
+            <span title="A déjà cédé ≥ 2 sociétés (BODACC) — vendeur récurrent, signal pré-cession" style={{
+              display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 999,
+              background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.40)",
+              color: "var(--accent-blue,#60a5fa)", fontSize: 10.5, fontWeight: 600,
+            }}>🔁 Vendeur en série</span>
+          )}
+          {person.is_pep_or_sanctioned && (
+            <span title="Personne politiquement exposée ou sanctionnée (OpenSanctions — à vérifier, match sur le nom)" style={{
+              display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 999,
+              background: "rgba(251,191,36,0.10)", border: "1px solid rgba(251,191,36,0.35)",
+              color: "var(--accent-amber,#fbbf24)", fontSize: 10.5, fontWeight: 600,
+            }}>⚠️ PEP / sanction</span>
+          )}
         </div>
         <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-secondary)", display: "flex", gap: 14, flexWrap: "wrap" }}>
           {/* Stats : 0 = placeholder (cas focus person extrait du query / LLM
@@ -136,6 +150,25 @@ export function PersonCard({ person, onOpen }: Props) {
             ⚖️ {person.n_jugements} procédure{(person.n_jugements ?? 0) > 1 ? "s" : ""} collective{(person.n_jugements ?? 0) > 1 ? "s" : ""}
             {person.last_jugement ? ` · ${person.last_jugement}` : ""}
             {person.last_jugement_date ? ` (${String(person.last_jugement_date).slice(0, 4)})` : ""}
+          </div>
+        )}
+        {(person.top_email || person.top_phone || person.has_linkedin || (person.n_co_mandataires ?? 0) > 0) && (
+          <div style={{ marginTop: 5, fontSize: 11.5, color: "var(--text-secondary)", display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+            {person.top_email && (
+              <a href={`mailto:${person.top_email}`} onClick={(e) => e.stopPropagation()} title="Contacter par email"
+                 style={{ color: "var(--accent-cyan)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                ✉️ {person.top_email}
+              </a>
+            )}
+            {person.top_phone && <span style={{ color: "var(--text-secondary)" }}>📞 {person.top_phone}</span>}
+            {person.has_linkedin && (
+              <span style={{ color: "var(--accent-cyan)" }} title={`${person.n_social ?? 0} profil(s) social/aux détecté(s)`}>🔗 LinkedIn</span>
+            )}
+            {(person.n_co_mandataires ?? 0) > 0 && (
+              <span style={{ color: "var(--text-muted)" }} title="Co-mandataires (réseau d'affaires partagé)">
+                🕸️ {person.n_co_mandataires} co-mandataire{(person.n_co_mandataires ?? 0) > 1 ? "s" : ""}
+              </span>
+            )}
           </div>
         )}
         {person.event && (
