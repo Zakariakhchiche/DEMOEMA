@@ -602,7 +602,9 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
               return v && v >= 50 && v <= 99 ? v : undefined;
             })(),
             minSci: isSciQuery ? 1 : undefined,
-            sort: isSciQuery ? "sci" : (/transmission|c[ée]der|retraite|senior|succession/.test(low) ? "age" : "mandats"),
+            // tri par mandats (le filtre minAge gate l'âge ; trier par âge ferait
+            // remonter des centenaires = données obsolètes).
+            sort: isSciQuery ? "sci" : "mandats",
             limit: 8,
           }),
     ];
