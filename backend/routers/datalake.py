@@ -4758,6 +4758,92 @@ async def cibles_search(
     return result
 
 
+@router.get("/dirigeants_enriched")
+async def dirigeants_enriched(
+    req: Request,
+    min_age: int | None = Query(None, ge=0, le=120),
+    min_mandats: int = Query(2, ge=0),
+    max_mandats: int = Query(50, ge=1),
+    min_sci: int | None = Query(None, ge=0),
+    sort: str = Query("mandats", pattern="^(mandats|sci|score|age)$"),
+    limit: int = Query(8, ge=1, le=30),
+):
+    """Cartes dirigeants ENRICHIES pour le chat — une seule requête sur
+    silver.inpi_dirigeants (dénominations, SCI, mandats, âge) + score réel
+    (gold.dirigeants_master) + flags compliance via EXISTS :
+      - is_lobbyist : un de ses mandats est une société inscrite HATVP
+      - has_societe_sanctionnee : un de ses mandats a un red flag compliance
+    + signal transmission (âge ≥ 65) et nombre de mandats clôturés (cessions).
+    """
+    pool = _pool(req)
+    cache_key = f"dirig_enr:{min_age}|{min_mandats}|{max_mandats}|{min_sci}|{sort}|{limit}"
+    cached = _gen_cache_get(cache_key, 120.0)
+    if cached is not None:
+        return cached
+
+    where = ["d.nom IS NOT NULL", "d.n_mandats_actifs >= $1", "d.n_mandats_actifs <= $2",
+             "COALESCE(d.age_2026, 0) <= 100"]
+    params: list[Any] = [min_mandats, max_mandats]
+    if min_age is not None:
+        params.append(min_age)
+        where.append(f"d.age_2026 >= ${len(params)}")
+    if min_sci is not None:
+        params.append(min_sci)
+        where.append(f"COALESCE(d.n_sci, 0) >= ${len(params)}")
+    order = {
+        "mandats": "d.n_mandats_actifs DESC NULLS LAST",
+        "sci": "d.total_capital_sci DESC NULLS LAST",
+        "score": "dm.pro_ma_score DESC NULLS LAST",
+        "age": "d.age_2026 DESC NULLS LAST",
+    }[sort]
+    # Pour le tri SCI, exclure les capitaux SCI aberrants (cf. audit qualité :
+    # ~89 valeurs > 100M€ = erreurs déclaration INPI montant_capital).
+    if sort == "sci":
+        where.append("COALESCE(d.total_capital_sci, 0) BETWEEN 1 AND 100000000")
+
+    sql = f"""
+        SELECT d.nom, d.prenom, d.date_naissance, d.age_2026,
+               d.n_mandats_actifs, d.n_mandats_total, d.n_sci, d.total_capital_sci,
+               d.denominations[1:3] AS top_denominations,
+               COALESCE(array_length(d.denominations, 1), 0) AS n_denominations,
+               (d.roles)[1] AS role_principal,
+               dm.pro_ma_score,
+               EXISTS (SELECT 1 FROM silver.hatvp_lobbying_persons h
+                       WHERE h.siren = ANY(d.sirens_mandats)) AS is_lobbyist,
+               EXISTS (SELECT 1 FROM gold.compliance_red_flags c
+                       WHERE c.siren = ANY(d.sirens_mandats)
+                         AND (c.has_sanction OR c.has_offshore_link
+                              OR c.has_cnil_sanction OR c.has_dgccrf_sanction)) AS has_societe_sanctionnee
+        FROM silver.inpi_dirigeants d
+        LEFT JOIN gold.dirigeants_master dm
+               ON dm.nom = d.nom AND dm.prenom = d.prenom
+              AND COALESCE(dm.date_naissance, '') = COALESCE(d.date_naissance, '')
+        WHERE {' AND '.join(where)}
+        ORDER BY {order}
+        LIMIT {int(limit)}
+    """
+    try:
+        rows = await pool.fetch(sql, *params)
+    except Exception as e:
+        print(f"[dirigeants_enriched] erreur: {type(e).__name__}: {e}")
+        return {"dirigeants": []}
+    out = []
+    for r in rows:
+        d = dict(r)
+        # cessions = mandats clôturés (total - actifs) → signal de sortie/transmission
+        nt = d.get("n_mandats_total") or 0
+        na = d.get("n_mandats_actifs") or 0
+        d["n_mandats_cedes"] = max(0, int(nt) - int(na))
+        age = d.get("age_2026") or 0
+        d["is_transmission"] = bool(age >= 65 and na >= 2)
+        if d.get("total_capital_sci") is not None:
+            d["total_capital_sci"] = float(d["total_capital_sci"])
+        out.append(d)
+    result = {"n": len(out), "dirigeants": out}
+    _gen_cache_set(cache_key, result)
+    return result
+
+
 async def _cibles_with_routing(pool, sort: str, limit: int, offset: int):
     """Helper bug v6/1.11 — appelé par /dashboard et /pipeline qui n'ont pas
     besoin des filtres q/dept/naf/etc, juste du top N par score_ma.
