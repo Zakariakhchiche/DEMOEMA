@@ -104,7 +104,7 @@ export function PersonCard({ person, onOpen }: Props) {
             les vraies stats au clic. */}
           <span><span style={{ color: "var(--text-muted)" }}>Mandats</span> <span className="dem-mono">{mandatsDisplay > 0 ? mandatsDisplay : "—"}</span></span>
           <span><span style={{ color: "var(--text-muted)" }}>SCI</span> <span className="dem-mono">{sciDisplay > 0 ? sciDisplay : "—"}</span></span>
-          {person.role && (
+          {person.role && !/^\d+$/.test(person.role) && (
             <span><span style={{ color: "var(--text-muted)" }}>Rôle</span> <span style={{ color: "var(--text-secondary)" }}>{person.role}</span></span>
           )}
           {(person.ceded ?? 0) > 0 && (
