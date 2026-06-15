@@ -4829,9 +4829,15 @@ async def dirigeants_enriched(
         LEFT JOIN gold.dirigeants_master dm
                ON dm.nom = d.nom AND dm.prenom = d.prenom
               AND COALESCE(dm.date_naissance, '') = COALESCE(d.date_naissance, '')
-        -- Coordonnées de contact (outreach direct)
-        LEFT JOIN gold.persons_contacts_master pc
-               ON lower(pc.nom) = lower(d.nom) AND lower(pc.prenom) = lower(d.prenom)
+        -- Coordonnées de contact (outreach direct) — LATERAL LIMIT 1 pour ne pas
+        -- dupliquer la ligne quand plusieurs contacts partagent le même nom/prénom.
+        LEFT JOIN LATERAL (
+            SELECT pc.top_email, pc.top_phone
+            FROM gold.persons_contacts_master pc
+            WHERE lower(pc.nom) = lower(d.nom) AND lower(pc.prenom) = lower(d.prenom)
+              AND (pc.top_email IS NOT NULL OR pc.top_phone IS NOT NULL)
+            LIMIT 1
+        ) pc ON true
         -- Jugements (procédures collectives) + cessions (vente) sur ses sociétés.
         LEFT JOIN LATERAL (
             SELECT count(*) FILTER (WHERE ce.type_cession IN ('procedure_collective', 'conciliation', 'retablissement')) AS n_jugements,
@@ -4851,12 +4857,15 @@ async def dirigeants_enriched(
             FROM silver.osint_persons_enriched o
             WHERE o.siren_main = ANY(d.sirens_mandats) AND lower(o.nom) = lower(d.nom)
         ) os ON true
-        -- Réseau : nb de co-mandataires (autres dirigeants partageant une société)
+        -- Réseau : nb de co-mandataires (autres dirigeants partageant une société).
+        -- Borné à 300 (LIMIT) pour la perf : au-delà on affiche "300+".
         LEFT JOIN LATERAL (
-            SELECT count(*) AS n_co_mandataires
-            FROM silver.inpi_dirigeants o
-            WHERE o.sirens_mandats && d.sirens_mandats
-              AND (o.nom, o.prenom) IS DISTINCT FROM (d.nom, d.prenom)
+            SELECT count(*) AS n_co_mandataires FROM (
+                SELECT 1 FROM silver.inpi_dirigeants o
+                WHERE o.sirens_mandats && d.sirens_mandats
+                  AND (o.nom, o.prenom) IS DISTINCT FROM (d.nom, d.prenom)
+                LIMIT 300
+            ) _co
         ) net ON true
         WHERE {' AND '.join(where)}
         ORDER BY {order}
