@@ -536,6 +536,52 @@ export async function fetchPersons(
  * (n_sci) là où gold.dirigeants_master ne l'a pas. Évite les noms génériques
  * extraits du texte LLM (GINA CALLOUET, SCI=1) qui ne reflètent pas la question.
  */
+/**
+ * Cartes dirigeants ENRICHIES (endpoint /dirigeants_enriched) : sociétés dirigées,
+ * score réel, SCI/patrimoine, flags compliance (lobbyiste, société sanctionnée),
+ * signal transmission (âge ≥ 65) et mandats cédés. Une seule requête.
+ */
+export async function fetchDirigeantsEnriched(opts: {
+  minAge?: number; minSci?: number; sort?: "mandats" | "sci" | "score" | "age"; limit?: number;
+} = {}): Promise<Person[]> {
+  try {
+    const r = await datalakeApi.dirigeantsEnriched({
+      minAge: opts.minAge, minSci: opts.minSci,
+      sort: opts.sort ?? "mandats", limit: opts.limit ?? 8,
+    });
+    return r.dirigeants.map((row, i) => {
+      const cap = num(row.total_capital_sci);
+      const nom = str(row.nom), prenom = str(row.prenom);
+      const companies = Array.isArray(row.top_denominations) ? (row.top_denominations as string[]) : [];
+      return {
+        id: `de_${i}_${nom}`,
+        nom: `${prenom} ${nom}`.trim(),
+        age: num(row.age_2026),
+        score: num(row.pro_ma_score) ?? 50,
+        mandats: num(row.n_mandats_actifs) ?? 0,
+        sci: num(row.n_sci) ?? 0,
+        entreprises: companies,
+        event: cap && cap > 0 ? `Patrimoine SCI ${fmtEur(cap)}` : null,
+        dept: "",
+        nom_raw: nom || undefined,
+        prenom_raw: prenom || undefined,
+        date_naissance: str(row.date_naissance) || null,
+        companies,
+        n_companies: num(row.n_denominations) ?? companies.length,
+        role: str(row.role_principal) || null,
+        ceded: num(row.n_mandats_cedes) ?? 0,
+        capital_sci: cap,
+        is_lobbyist: row.is_lobbyist === true,
+        has_sanctioned_company: row.has_societe_sanctionnee === true,
+        is_transmission: row.is_transmission === true,
+      } as Person;
+    });
+  } catch (e) {
+    console.error("[dem] fetchDirigeantsEnriched failed:", e);
+    return [];
+  }
+}
+
 export async function fetchSciDirigeants(limit = 8): Promise<Person[]> {
   try {
     const r = await datalakeApi.queryTable("silver", "dirigeant_sci_patrimoine", {

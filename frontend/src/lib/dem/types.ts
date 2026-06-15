@@ -68,6 +68,15 @@ export interface Person {
   nom_raw?: string;
   prenom_raw?: string;
   date_naissance?: string | null;
+  // Enrichissements carte dirigeant (endpoint /dirigeants_enriched)
+  companies?: string[];        // dénominations des sociétés dirigées (top 3)
+  n_companies?: number;        // nombre total de sociétés dirigées
+  role?: string | null;        // rôle principal (Président, Gérant…)
+  ceded?: number;              // mandats clôturés = signal de cession/sortie
+  capital_sci?: number | null; // patrimoine SCI cumulé (€)
+  is_lobbyist?: boolean;       // inscrit HATVP (une société dirigée fait du lobbying)
+  has_sanctioned_company?: boolean; // une société dirigée a un red flag compliance
+  is_transmission?: boolean;   // âge ≥ 65 + multi-mandats = cession probable
 }
 
 export interface Conversation {

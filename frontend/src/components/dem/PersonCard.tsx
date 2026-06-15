@@ -75,6 +75,27 @@ export function PersonCard({ person, onOpen }: Props) {
             {ageDisplay ? `${ageDisplay} ans` : "—"}{person.dept ? ` · dept ${person.dept}` : ""}
           </span>
           <ScoreBadge value={person.score} size="sm" />
+          {person.is_transmission && (
+            <span title="Âge ≥ 65 + multi-mandats : cession probable" style={{
+              display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 999,
+              background: "rgba(52,211,153,0.12)", border: "1px solid var(--accent-emerald,#34d399)",
+              color: "var(--accent-emerald,#34d399)", fontSize: 10.5, fontWeight: 600,
+            }}>🎯 Transmission</span>
+          )}
+          {person.is_lobbyist && (
+            <span title="Dirige une société inscrite au registre HATVP (lobbying)" style={{
+              display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 999,
+              background: "rgba(251,191,36,0.10)", border: "1px solid rgba(251,191,36,0.35)",
+              color: "var(--accent-amber,#fbbf24)", fontSize: 10.5, fontWeight: 600,
+            }}>⚠️ Lobbyiste</span>
+          )}
+          {person.has_sanctioned_company && (
+            <span title="Une de ses sociétés a un red flag compliance (sanction / offshore)" style={{
+              display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 999,
+              background: "rgba(251,113,133,0.10)", border: "1px solid rgba(251,113,133,0.35)",
+              color: "var(--accent-rose,#fb7185)", fontSize: 10.5, fontWeight: 600,
+            }}>🔴 Société sanctionnée</span>
+          )}
         </div>
         <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-secondary)", display: "flex", gap: 14, flexWrap: "wrap" }}>
           {/* Stats : 0 = placeholder (cas focus person extrait du query / LLM
@@ -83,13 +104,26 @@ export function PersonCard({ person, onOpen }: Props) {
             les vraies stats au clic. */}
           <span><span style={{ color: "var(--text-muted)" }}>Mandats</span> <span className="dem-mono">{mandatsDisplay > 0 ? mandatsDisplay : "—"}</span></span>
           <span><span style={{ color: "var(--text-muted)" }}>SCI</span> <span className="dem-mono">{sciDisplay > 0 ? sciDisplay : "—"}</span></span>
-          {person.entreprises.length > 0 && (
-            <span>
-              <span style={{ color: "var(--text-muted)" }}>Entreprises </span>
-              <span style={{ color: "var(--text-secondary)" }}>{person.entreprises.join(", ")}</span>
+          {person.role && (
+            <span><span style={{ color: "var(--text-muted)" }}>Rôle</span> <span style={{ color: "var(--text-secondary)" }}>{person.role}</span></span>
+          )}
+          {(person.ceded ?? 0) > 0 && (
+            <span title="Mandats clôturés = sorties/cessions passées" style={{ color: "var(--accent-cyan)" }}>
+              {person.ceded} cédé{(person.ceded ?? 0) > 1 ? "s" : ""}
             </span>
           )}
         </div>
+        {person.companies && person.companies.length > 0 && (
+          <div style={{ marginTop: 5, fontSize: 11.5, color: "var(--text-secondary)", display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap" }}>
+            <span style={{ color: "var(--text-muted)" }}>
+              Dirige {person.n_companies ?? person.companies.length} société{(person.n_companies ?? person.companies.length) > 1 ? "s" : ""} ·
+            </span>
+            <span style={{ color: "var(--text-secondary)" }}>
+              {person.companies.slice(0, 3).join(", ")}
+              {(person.n_companies ?? 0) > 3 ? `, +${(person.n_companies ?? 0) - 3}` : ""}
+            </span>
+          </div>
+        )}
         {person.event && (
           <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--accent-cyan)", display: "inline-flex", alignItems: "center", gap: 5 }}>
             <Icon name="sparkles" size={10} color="var(--accent-cyan)" /> {person.event}

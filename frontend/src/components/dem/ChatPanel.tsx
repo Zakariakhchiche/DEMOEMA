@@ -12,7 +12,7 @@ import { UserMessage, AiMessage } from "./ChatBubbles";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { formatSiren } from "@/lib/dem/format";
 import { SUGGESTIONS_INITIAL } from "@/lib/dem/data";
-import { fetchTargets, fetchPersons, fetchSciDirigeants, rowToPerson, extractDirigeantsFromText, extractFocusPersonFromQuery, extractFocusEntrepriseFromQuery, searchEntrepriseByName } from "@/lib/dem/adapter";
+import { fetchTargets, fetchDirigeantsEnriched, rowToPerson, extractDirigeantsFromText, extractFocusPersonFromQuery, extractFocusEntrepriseFromQuery, searchEntrepriseByName } from "@/lib/dem/adapter";
 import { streamCopilot } from "@/lib/api";
 import type { ChatMsg, AiMessageData, Target, Density, Person } from "@/lib/dem/types";
 
@@ -594,16 +594,16 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
         : Promise.resolve([] as Target[]),
       (!isDirigeants || isDefinitional)
         ? Promise.resolve([])
-        : isSciQuery
-        // SCI/patrimoine → source déterministe triée par capital SCI réel.
-        ? fetchSciDirigeants(8)
-        : fetchPersons(8, {
-            // âge mini dérivé de la question ("plus de 65 ans", "senior", "à céder")
+        // Cartes dirigeants ENRICHIES (sociétés, score réel, compliance, transmission).
+        : fetchDirigeantsEnriched({
             minAge: (() => {
               const m = low.match(/(\d{2})\s*ans|plus de (\d{2})|de (\d{2})\s*ans|(\d{2})\s*\+/);
               const v = m ? parseInt(m[1] || m[2] || m[3] || m[4], 10) : (/senior|retraite|[àa] c[ée]der|transmission/.test(low) ? 60 : undefined);
               return v && v >= 50 && v <= 99 ? v : undefined;
             })(),
+            minSci: isSciQuery ? 1 : undefined,
+            sort: isSciQuery ? "sci" : (/transmission|c[ée]der|retraite|senior|succession/.test(low) ? "age" : "mandats"),
+            limit: 8,
           }),
     ];
 

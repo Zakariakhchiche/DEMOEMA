@@ -105,6 +105,22 @@ export const datalakeApi = {
     }>(`/api/datalake/${schema}/${table}?${p.toString()}`);
   },
 
+  dirigeantsEnriched: (opts: {
+    minAge?: number; minMandats?: number; maxMandats?: number; minSci?: number;
+    sort?: "mandats" | "sci" | "score" | "age"; limit?: number;
+  } = {}) => {
+    const p = new URLSearchParams();
+    if (opts.minAge != null) p.set("min_age", String(opts.minAge));
+    if (opts.minMandats != null) p.set("min_mandats", String(opts.minMandats));
+    if (opts.maxMandats != null) p.set("max_mandats", String(opts.maxMandats));
+    if (opts.minSci != null) p.set("min_sci", String(opts.minSci));
+    if (opts.sort) p.set("sort", opts.sort);
+    if (opts.limit != null) p.set("limit", String(opts.limit));
+    return jget<{ n: number; dirigeants: Record<string, unknown>[] }>(
+      `/api/datalake/dirigeants_enriched?${p.toString()}`
+    );
+  },
+
   searchCibles: async (opts: {
     q?: string;
     dept?: string;
