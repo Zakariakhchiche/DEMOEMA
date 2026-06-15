@@ -602,8 +602,9 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
               return v && v >= 50 && v <= 99 ? v : undefined;
             })(),
             minSci: isSciQuery ? 1 : undefined,
-            // tri par mandats (le filtre minAge gate l'âge ; trier par âge ferait
-            // remonter des centenaires = données obsolètes).
+            // SCI : on n'exige pas 2 mandats actifs (les détenteurs de SCI patrimoniales
+            // ont souvent peu de mandats société). Sinon tri par mandats (minAge gate l'âge).
+            minMandats: isSciQuery ? 0 : undefined,
             sort: isSciQuery ? "sci" : "mandats",
             limit: 8,
           }),
@@ -705,15 +706,15 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
       // Priorité aux dirigeants RÉELS trouvés par le LLM (filtrés âge/mandats/SCI,
       // remplis) ; sinon noms extraits du texte ; sinon top-N générique.
       const extracted = extractDirigeantsFromText(streamedText);
-      // Priorité : dirigeants RÉELS du LLM > (pour SCI) fetch déterministe trié
-      // par capital > noms extraits du texte > top-N générique. Pour les requêtes
-      // SCI, `persons` (fetchSciDirigeants) bat l'extraction texte (qui sortait
-      // des noms génériques SCI=1 sans rapport avec "plus gros patrimoine").
-      const personsForCards = (capturedDirigeants && capturedDirigeants.length > 0)
-        ? capturedDirigeants.slice(0, 8)
-        : (isSciQuery && persons.length > 0)
+      // Priorité aux cartes ENRICHIES (fetchDirigeantsEnriched = `persons` : sociétés,
+      // compliance, transmission, score réel, filtrées par la question). Sinon
+      // dirigeants du LLM, sinon noms extraits du texte. (Avant : captured/extracted
+      // gagnaient → cartes sans les enrichissements.)
+      const personsForCards = persons.length > 0
         ? persons.slice(0, 8)
-        : extracted.length > 0 ? extracted.slice(0, 8) : persons;
+        : (capturedDirigeants && capturedDirigeants.length > 0)
+        ? capturedDirigeants.slice(0, 8)
+        : extracted.slice(0, 8);
       response = {
         role: "ai", kind: "persons", header: "Dirigeants",
         content: streamedText || "Croisement INPI dirigeants × patrimoine SCI :",
