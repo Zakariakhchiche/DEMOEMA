@@ -4871,10 +4871,14 @@ async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_r
                          "AND COALESCE(sm.has_negative_ebitda,false)=false AND COALESCE(sm.has_revenue_decline,false)=false)")
         if adv.get("has_website") is True:
             where.append("COALESCE(sm.has_website,false) = true")
-        # Garde-fou cohérence : quand on TRIE ou FILTRE par marge EBITDA, on exclut
-        # les artefacts proxy où EBITDA > CA (impossible) ou marge > 100 %. Sinon les
-        # holdings/SNC (NAF 64/68) au CA quasi-nul squattent le top avec un
-        # proxy_ebitda explosé (ex: ALCATEL CA 1,1Md€ / proxy 26Md€).
+        # Garde-fou cohérence : pour TOUT tri/filtre de profitabilité (ebitda,
+        # ebitda_margin, roa) on exclut les artefacts proxy où EBITDA > CA
+        # (impossible) — sinon ALCATEL (CA 1,1Md€ / proxy 26Md€) ou GRDF squattent
+        # le top du tri 'meilleur EBITDA'.
+        _profit_sort = sort in ("ebitda", "ebitda_margin", "roa")
+        if _profit_sort or adv.get("min_ebitda_margin") is not None:
+            where.append("(sm.proxy_ebitda IS NULL OR t.ca_latest IS NULL OR t.ca_latest <= 0 OR sm.proxy_ebitda <= t.ca_latest)")
+        # Tri/filtre par MARGE EBITDA = sur EBITDA réel + marge plausible.
         if sort == "ebitda_margin" or adv.get("min_ebitda_margin") is not None:
             # Tri/filtre marge EBITDA = sur EBITDA RÉEL (comptable) uniquement. Le
             # proxy_ebitda vaut ~CA pour les holdings → marge ~100 % artefactuelle
