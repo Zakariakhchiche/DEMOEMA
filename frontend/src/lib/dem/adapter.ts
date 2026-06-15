@@ -542,11 +542,11 @@ export async function fetchPersons(
  * signal transmission (âge ≥ 65) et mandats cédés. Une seule requête.
  */
 export async function fetchDirigeantsEnriched(opts: {
-  minAge?: number; minSci?: number; sort?: "mandats" | "sci" | "score" | "age"; limit?: number;
+  minAge?: number; minSci?: number; minMandats?: number; sort?: "mandats" | "sci" | "score" | "age"; limit?: number;
 } = {}): Promise<Person[]> {
   try {
     const r = await datalakeApi.dirigeantsEnriched({
-      minAge: opts.minAge, minSci: opts.minSci,
+      minAge: opts.minAge, minSci: opts.minSci, minMandats: opts.minMandats,
       sort: opts.sort ?? "mandats", limit: opts.limit ?? 8,
     });
     return r.dirigeants.map((row, i) => {
