@@ -1171,8 +1171,12 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
         elif name == "search_sci_patrimoine":
             min_capital = args.get("min_capital", 500000)
             limit = min(args.get("limit", 10), 50)
+            # Plafond 100M€ : ~89 dirigeants (0,0025%) ont un total_capital_sci
+            # aberrant (jusqu'à 1,5 Md€ pour une SCI locale) = erreurs de déclaration
+            # INPI (montant_capital). p99,9 réel = ~9M€. On les exclut du classement
+            # "plus gros patrimoine" pour ne pas remonter du bruit source.
             params = {"limit": limit, "order": "-total_capital_sci",
-                      "filter": f"total_capital_sci.gte.{min_capital}"}
+                      "filter": f"total_capital_sci.gte.{min_capital},total_capital_sci.lte.100000000"}
             async with httpx.AsyncClient(timeout=10) as client:
                 r = await client.get(f"{datalake_base}/api/datalake/silver/dirigeant_sci_patrimoine", params=params)
                 if r.status_code == 200:
