@@ -574,6 +574,10 @@ export async function fetchDirigeantsEnriched(opts: {
         is_lobbyist: row.is_lobbyist === true,
         has_sanctioned_company: row.has_societe_sanctionnee === true,
         is_transmission: row.is_transmission === true,
+        n_jugements: num(row.n_jugements) ?? 0,
+        last_jugement: str(row.last_jugement_nature) || null,
+        last_jugement_date: str(row.last_jugement_date) || null,
+        has_interdiction_gerer: row.has_interdiction_gerer === true,
       } as Person;
     });
   } catch (e) {

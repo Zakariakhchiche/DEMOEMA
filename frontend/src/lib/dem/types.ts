@@ -77,6 +77,11 @@ export interface Person {
   is_lobbyist?: boolean;       // inscrit HATVP (une société dirigée fait du lobbying)
   has_sanctioned_company?: boolean; // une société dirigée a un red flag compliance
   is_transmission?: boolean;   // âge ≥ 65 + multi-mandats = cession probable
+  // Jugements (procédures collectives) sur les sociétés du dirigeant
+  n_jugements?: number;        // nb de procédures collectives sur ses sociétés
+  last_jugement?: string | null;   // nature de la dernière procédure
+  last_jugement_date?: string | null;
+  has_interdiction_gerer?: boolean; // interdiction de gérer / faillite personnelle (red flag fort)
 }
 
 export interface Conversation {

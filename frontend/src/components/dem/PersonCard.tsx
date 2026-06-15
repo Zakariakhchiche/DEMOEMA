@@ -96,6 +96,13 @@ export function PersonCard({ person, onOpen }: Props) {
               color: "var(--accent-rose,#fb7185)", fontSize: 10.5, fontWeight: 600,
             }}>🔴 Société sanctionnée</span>
           )}
+          {person.has_interdiction_gerer && (
+            <span title="Jugement d'interdiction de gérer / faillite personnelle sur une de ses sociétés" style={{
+              display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 999,
+              background: "rgba(251,113,133,0.16)", border: "1px solid var(--accent-rose,#fb7185)",
+              color: "var(--accent-rose,#fb7185)", fontSize: 10.5, fontWeight: 700,
+            }}>🚫 Interdiction de gérer</span>
+          )}
         </div>
         <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-secondary)", display: "flex", gap: 14, flexWrap: "wrap" }}>
           {/* Stats : 0 = placeholder (cas focus person extrait du query / LLM
@@ -122,6 +129,13 @@ export function PersonCard({ person, onOpen }: Props) {
               {person.companies.slice(0, 3).join(", ")}
               {(person.n_companies ?? 0) > 3 ? `, +${(person.n_companies ?? 0) - 3}` : ""}
             </span>
+          </div>
+        )}
+        {(person.n_jugements ?? 0) > 0 && (
+          <div title={person.last_jugement || undefined} style={{ marginTop: 5, fontSize: 11.5, color: "var(--accent-amber,#fbbf24)", display: "inline-flex", alignItems: "center", gap: 5 }}>
+            ⚖️ {person.n_jugements} procédure{(person.n_jugements ?? 0) > 1 ? "s" : ""} collective{(person.n_jugements ?? 0) > 1 ? "s" : ""}
+            {person.last_jugement ? ` · ${person.last_jugement}` : ""}
+            {person.last_jugement_date ? ` (${String(person.last_jugement_date).slice(0, 4)})` : ""}
           </div>
         )}
         {person.event && (
