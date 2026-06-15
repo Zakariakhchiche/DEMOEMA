@@ -4813,11 +4813,25 @@ async def dirigeants_enriched(
                EXISTS (SELECT 1 FROM gold.compliance_red_flags c
                        WHERE c.siren = ANY(d.sirens_mandats)
                          AND (c.has_sanction OR c.has_offshore_link
-                              OR c.has_cnil_sanction OR c.has_dgccrf_sanction)) AS has_societe_sanctionnee
+                              OR c.has_cnil_sanction OR c.has_dgccrf_sanction)) AS has_societe_sanctionnee,
+               jug.n_jugements, jug.last_jugement_nature, jug.last_jugement_date,
+               COALESCE(jug.has_interdiction_gerer, false) AS has_interdiction_gerer
         FROM silver.inpi_dirigeants d
         LEFT JOIN gold.dirigeants_master dm
                ON dm.nom = d.nom AND dm.prenom = d.prenom
               AND COALESCE(dm.date_naissance, '') = COALESCE(d.date_naissance, '')
+        -- Jugements (procédures collectives) sur les sociétés du dirigeant — incl.
+        -- interdiction de gérer / faillite personnelle (statut dirigeant_sanctionne).
+        LEFT JOIN LATERAL (
+            SELECT count(*) AS n_jugements,
+                   max(ce.jugement_date) AS last_jugement_date,
+                   bool_or(ce.procedure_statut_ma = 'dirigeant_sanctionne') AS has_interdiction_gerer,
+                   (array_agg(ce.procedure_nature ORDER BY ce.jugement_date DESC NULLS LAST)
+                      FILTER (WHERE ce.procedure_nature IS NOT NULL))[1] AS last_jugement_nature
+            FROM silver.cession_events ce
+            WHERE ce.siren = ANY(d.sirens_mandats)
+              AND ce.type_cession IN ('procedure_collective', 'conciliation', 'retablissement')
+        ) jug ON true
         WHERE {' AND '.join(where)}
         ORDER BY {order}
         LIMIT {int(limit)}
@@ -4838,6 +4852,9 @@ async def dirigeants_enriched(
         d["is_transmission"] = bool(age >= 65 and na >= 2)
         if d.get("total_capital_sci") is not None:
             d["total_capital_sci"] = float(d["total_capital_sci"])
+        d["n_jugements"] = int(d.get("n_jugements") or 0)
+        if d.get("last_jugement_date") is not None:
+            d["last_jugement_date"] = str(d["last_jugement_date"])
         out.append(d)
     result = {"n": len(out), "dirigeants": out}
     _gen_cache_set(cache_key, result)
