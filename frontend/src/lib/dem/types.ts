@@ -82,6 +82,14 @@ export interface Person {
   last_jugement?: string | null;   // nature de la dernière procédure
   last_jugement_date?: string | null;
   has_interdiction_gerer?: boolean; // interdiction de gérer / faillite personnelle (red flag fort)
+  // Contact (outreach) + OSINT + réseau
+  top_email?: string | null;
+  top_phone?: string | null;
+  has_linkedin?: boolean;
+  n_social?: number;           // nb de profils sociaux détectés (OSINT)
+  is_pep_or_sanctioned?: boolean; // PEP / sanction directe OpenSanctions (match nom)
+  is_serial_seller?: boolean;  // a déjà cédé ≥ 2 sociétés (BODACC) = vendeur récurrent
+  n_co_mandataires?: number;   // taille du réseau de co-mandataires
 }
 
 export interface Conversation {

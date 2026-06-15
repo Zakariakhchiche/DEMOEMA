@@ -578,6 +578,13 @@ export async function fetchDirigeantsEnriched(opts: {
         last_jugement: str(row.last_jugement_nature) || null,
         last_jugement_date: str(row.last_jugement_date) || null,
         has_interdiction_gerer: row.has_interdiction_gerer === true,
+        top_email: str(row.top_email) || null,
+        top_phone: str(row.top_phone) || null,
+        has_linkedin: row.has_linkedin === true,
+        n_social: num(row.n_social) ?? 0,
+        is_pep_or_sanctioned: row.is_pep_or_sanctioned === true,
+        is_serial_seller: row.is_serial_seller === true,
+        n_co_mandataires: num(row.n_co_mandataires) ?? 0,
       } as Person;
     });
   } catch (e) {
