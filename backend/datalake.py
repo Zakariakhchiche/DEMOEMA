@@ -468,6 +468,22 @@ GOLD_TABLES_WHITELIST: dict[str, dict[str, Any]] = {
             "has_active_lobbying",
         ],
     },
+    "silver.hatvp_lobbying_persons": {
+        "label": "HATVP Lobbyistes (personnes)",
+        "category": "risk",
+        "pk": "siren",
+        "default_order": "siren",
+        "search_cols": ["dirigeant_nom", "dirigeant_prenom", "denomination", "siren"],
+        "preview_cols": [
+            "siren",
+            "denomination",
+            "dirigeant_nom",
+            "dirigeant_prenom",
+            "dirigeant_fonction",
+            "categorie_organisation",
+            "lobbying_actif",
+        ],
+    },
     "silver.sanctions": {
         "label": "Sanctions unifiées",
         "category": "risk",
