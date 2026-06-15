@@ -1225,14 +1225,15 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
         elif name == "check_lobbying":
             siren = args.get("siren", "")
             search_name = args.get("name", "")
-            # Table = silver.hatvp_lobbying (search_cols incluent siren + denomination).
-            # query_table n'a pas de param `search` → on passe par `q` (ILIKE search_cols).
+            # Table = silver.hatvp_lobbying_persons (434k lignes, peuplée — la vue
+            # silver.hatvp_lobbying est vide). search_cols : dirigeant_nom/prenom +
+            # denomination + siren. query_table n'a pas de `search` → `q` (ILIKE).
             params = {"limit": 5, "q": siren or search_name}
             if not params["q"]:
                 return {"error": "siren ou name requis"}
             async with httpx.AsyncClient(timeout=10) as client:
                 r = await client.get(
-                    f"{datalake_base}/api/datalake/silver/hatvp_lobbying",
+                    f"{datalake_base}/api/datalake/silver/hatvp_lobbying_persons",
                     params=params,
                 )
                 if r.status_code == 200:
