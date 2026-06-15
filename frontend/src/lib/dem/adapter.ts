@@ -541,7 +541,10 @@ export async function fetchSciDirigeants(limit = 8): Promise<Person[]> {
     const r = await datalakeApi.queryTable("silver", "dirigeant_sci_patrimoine", {
       limit,
       orderBy: "-total_capital_sci",
-      filter: "n_sci.gte.2",
+      // n_sci >= 2 + plafond 100M€ : exclut ~89 valeurs aberrantes (jusqu'à 1,5 Md€
+      // pour une SCI locale) = erreurs de déclaration INPI montant_capital (p99,9
+      // réel ≈ 9M€). Évite de remonter du bruit source en tête de patrimoine.
+      filter: "n_sci.gte.2,total_capital_sci.lte.100000000",
     });
     return r.rows.map((row, i) => rowToPerson(row, i));
   } catch (e) {
