@@ -126,6 +126,44 @@ export function PersonSheet({ person, onClose }: Props) {
                 {person.entreprises.slice(0, 4).join(" · ")}
               </div>
             )}
+            {/* Bandeau signaux DD en un coup d'œil (réseau + compliance) — la fiche
+              est longue, ce résumé donne le verdict immédiat sans scroller. */}
+            {data && (() => {
+              const dd = data as Record<string, unknown>;
+              const c = (dd.compliance as Record<string, Record<string, unknown>> | null) || null;
+              const nCo = Array.isArray(dd.co_mandataires_detail) ? (dd.co_mandataires_detail as unknown[]).length : 0;
+              const cnt = (k: string) => Number((c?.[k]?.count as number) ?? 0);
+              const chips: { txt: string; c: string; bg: string }[] = [];
+              const lvl = c?.risk_level as string | undefined;
+              if (lvl) {
+                const m: Record<string, [string, string]> = {
+                  low: ["var(--accent-emerald,#34d399)", "rgba(52,211,153,0.12)"],
+                  medium: ["var(--accent-amber,#fbbf24)", "rgba(251,191,36,0.12)"],
+                  high: ["var(--accent-rose,#fb7185)", "rgba(251,113,133,0.12)"],
+                  critical: ["var(--accent-rose,#fb7185)", "rgba(251,113,133,0.20)"],
+                };
+                const [col, bg] = m[lvl] || m.medium;
+                chips.push({ txt: `Risque ${lvl}`, c: col, bg });
+              }
+              if (cnt("interdiction_gerer") > 0) chips.push({ txt: "🚫 Interdiction de gérer", c: "var(--accent-rose,#fb7185)", bg: "rgba(251,113,133,0.16)" });
+              if (cnt("faillite_personnelle") > 0) chips.push({ txt: "🔴 Faillite personnelle", c: "var(--accent-rose,#fb7185)", bg: "rgba(251,113,133,0.12)" });
+              if (cnt("opensanctions") > 0) chips.push({ txt: `⚠️ ${cnt("opensanctions")} sanction/PEP`, c: "var(--accent-amber,#fbbf24)", bg: "rgba(251,191,36,0.10)" });
+              if (c?.hatvp_lobbying?.active) chips.push({ txt: "📋 Lobbyiste HATVP", c: "var(--accent-amber,#fbbf24)", bg: "rgba(251,191,36,0.10)" });
+              if (cnt("co_mandataires_toxiques") > 0) chips.push({ txt: `☠️ ${cnt("co_mandataires_toxiques")} co-mandataire(s) à risque`, c: "var(--accent-rose,#fb7185)", bg: "rgba(251,113,133,0.10)" });
+              if (cnt("mandats_en_procedure") > 0) chips.push({ txt: `⚖️ ${cnt("mandats_en_procedure")} mandat(s) en procédure`, c: "var(--accent-amber,#fbbf24)", bg: "rgba(251,191,36,0.10)" });
+              if (nCo > 0) chips.push({ txt: `🕸️ ${nCo} co-mandataire${nCo > 1 ? "s" : ""}`, c: "var(--accent-blue,#60a5fa)", bg: "rgba(96,165,250,0.10)" });
+              if (chips.length === 0) chips.push({ txt: "✓ Aucun signal de risque", c: "var(--accent-emerald,#34d399)", bg: "rgba(52,211,153,0.10)" });
+              return (
+                <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {chips.map((ch, i) => (
+                    <span key={i} style={{
+                      fontSize: 11, fontWeight: 600, padding: "3px 9px", borderRadius: 999,
+                      color: ch.c, background: ch.bg, border: `1px solid ${ch.c}`,
+                    }}>{ch.txt}</span>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <button className="dem-btn dem-btn-ghost dem-btn-icon" onClick={onClose} title="Fermer (Esc)">
