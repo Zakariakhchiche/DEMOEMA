@@ -4790,10 +4790,13 @@ async def dirigeants_enriched(
     if min_sci is not None:
         params.append(min_sci)
         where.append(f"COALESCE(d.n_sci, 0) >= ${len(params)}")
+    # NB : tri sur les colonnes de silver.inpi_dirigeants uniquement (le top-N est
+    # sélectionné AVANT de joindre les enrichissements coûteux). 'score' retombe
+    # sur les mandats (pro_ma_score absent de cette table — tri non utilisé par le chat).
     order = {
         "mandats": "d.n_mandats_actifs DESC NULLS LAST",
         "sci": "d.total_capital_sci DESC NULLS LAST",
-        "score": "dm.pro_ma_score DESC NULLS LAST",
+        "score": "d.n_mandats_actifs DESC NULLS LAST",
         "age": "d.age_2026 DESC NULLS LAST",
     }[sort]
     # Pour le tri SCI, exclure les capitaux SCI aberrants (cf. audit qualité :
@@ -4802,6 +4805,15 @@ async def dirigeants_enriched(
         where.append("COALESCE(d.total_capital_sci, 0) BETWEEN 1 AND 100000000")
 
     sql = f"""
+        WITH base AS (
+            SELECT d.nom, d.prenom, d.date_naissance, d.age_2026,
+                   d.n_mandats_actifs, d.n_mandats_total, d.n_sci, d.total_capital_sci,
+                   d.denominations, d.roles, d.sirens_mandats
+            FROM silver.inpi_dirigeants d
+            WHERE {' AND '.join(where)}
+            ORDER BY {order}
+            LIMIT {int(limit)}
+        )
         SELECT d.nom, d.prenom, d.date_naissance, d.age_2026,
                d.n_mandats_actifs, d.n_mandats_total, d.n_sci, d.total_capital_sci,
                d.denominations[1:3] AS top_denominations,
@@ -4819,7 +4831,7 @@ async def dirigeants_enriched(
                COALESCE(jug.n_cessions_vente, 0) AS n_cessions_vente,
                pc.top_email, pc.top_phone,
                os.has_linkedin, os.n_social
-        FROM silver.inpi_dirigeants d
+        FROM base d
         LEFT JOIN gold.dirigeants_master dm
                ON dm.nom = d.nom AND dm.prenom = d.prenom
               AND COALESCE(dm.date_naissance, '') = COALESCE(d.date_naissance, '')
@@ -4851,9 +4863,7 @@ async def dirigeants_enriched(
             FROM silver.osint_persons_enriched o
             WHERE o.siren_main = ANY(d.sirens_mandats) AND lower(o.nom) = lower(d.nom)
         ) os ON true
-        WHERE {' AND '.join(where)}
         ORDER BY {order}
-        LIMIT {int(limit)}
     """
     try:
         rows = await pool.fetch(sql, *params)
