@@ -23,4 +23,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -fsS http://localhost:8000/docs > /dev/null || exit 1
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+# Multi-worker pour la scalabilité (VPS 16 CPU). Forme shell → expansion de
+# ${UVICORN_WORKERS} (défaut 8). Chaque worker a sa propre boucle async + pool DB.
+CMD uvicorn main:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS:-8} --proxy-headers --forwarded-allow-ips '*'
