@@ -47,10 +47,14 @@ async def create_pool() -> asyncpg.Pool | None:
     dsn = _build_dsn()
     if not dsn:
         return None
+    # Pool dimensionné pour le multi-worker : N workers uvicorn × max_size doit
+    # rester sous PG max_connections (100). 8 workers × 8 = 64 (+ agents/sync).
+    # Tunable via env sans rebuild (DL_POOL_MIN / DL_POOL_MAX).
+    import os as _os
     return await asyncpg.create_pool(
         dsn,
-        min_size=2,
-        max_size=10,
+        min_size=int(_os.environ.get("DL_POOL_MIN", "1")),
+        max_size=int(_os.environ.get("DL_POOL_MAX", "8")),
         command_timeout=30,
         # statement_cache_size=0 désactive le cache de prepared statements
         # qui timeout aléatoirement sur "prepare" hangs (silver.press_mentions
