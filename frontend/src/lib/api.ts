@@ -176,6 +176,7 @@ export const datalakeApi = {
     jget<{
       fiche: Record<string, unknown>;
       dirigeants: Record<string, unknown>[];
+      dirigeants_pm?: Record<string, unknown>[];
       signaux: Record<string, unknown>[];
       red_flags: Record<string, unknown>[];
       network: Record<string, unknown>[];

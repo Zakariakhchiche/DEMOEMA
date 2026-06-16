@@ -1168,6 +1168,30 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
     else:
         dirigeants = dirigeants_silver
 
+    # Dirigeants PERSONNES MORALES — sociétés qui gouvernent celle-ci (président PM,
+    # administrateur, associé…). Indispensable pour les sociétés sans dirigeant
+    # personne physique (ex PEUGEOT JAPY dirigée par MAIKE AUTOMOTIVE) : sinon
+    # l'onglet Dirigeants affiche "Aucun dirigeant trouvé". On exclut les CAC/audit.
+    dirigeants_pm = await _safe(pool.fetch(
+        """SELECT DISTINCT
+              p.entreprise_siren AS siren,
+              COALESCE(NULLIF(p.entreprise_denomination,''), e.denomination) AS denomination,
+              p.entreprise_role_entreprise AS role_code,
+              e.code_ape AS naf, e.adresse_commune AS ville
+           FROM bronze.inpi_formalites_personnes p
+           LEFT JOIN bronze.inpi_formalites_entreprises e ON e.siren = p.entreprise_siren
+           WHERE p.siren = $1 AND UPPER(p.type_de_personne) = 'ENTREPRISE'
+             AND COALESCE(p.actif, true) = true AND p.entreprise_siren IS NOT NULL
+             AND p.entreprise_siren != $1
+             AND (p.entreprise_role_entreprise IS NULL
+                  OR p.entreprise_role_entreprise NOT IN ('72','75','53','64','74'))
+             AND COALESCE(e.code_ape,'') != '6920Z'
+             AND COALESCE(NULLIF(p.entreprise_denomination,''), e.denomination, '')
+                 !~* '(AUDIT|EXPERTISE COMPTABLE|FIDUCIAIRE|MAZARS|ERNST|DELOITTE|KPMG|PRICEWATERHOUSE|GRANT THORNTON)'
+           LIMIT 15""",
+        siren,
+    ), default=[], timeout_s=6.0)
+
     # Override compteurs si fallback fourni des données.
     # Évite l'incohérence "tab Dirigeants 3 / cellule DIRIGEANTS 0" en bas de fiche.
     if isinstance(fiche, dict):
@@ -1846,6 +1870,7 @@ async def _fiche_entreprise_uncached(req: Request, siren: str):
     return {
         "fiche": _serialize(fiche) if hasattr(fiche, "items") and not isinstance(fiche, dict) else fiche,
         "dirigeants": dirigeants_out,
+        "dirigeants_pm": [_serialize(d) for d in dirigeants_pm],
         "signaux": [_serialize(s) for s in signaux],
         "red_flags": [_serialize(r) for r in red_flags],
         "network": [_serialize(n) for n in network],
