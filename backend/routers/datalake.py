@@ -3143,6 +3143,11 @@ async def groupe_complet(req: Request, siren: str):
                  AND p.entreprise_siren != $1
                  AND (p.entreprise_role_entreprise IS NULL
                       OR p.entreprise_role_entreprise NOT IN ('72','75','53','64','74'))
+                 -- exclut cabinets d'audit/CAC (NAF 6920Z) mal étiquetés en parent
+                 -- (ex ERNST & YOUNG AUDIT 'Président SA' qui est en fait le commissaire).
+                 AND COALESCE(em.code_ape, iul.code_ape, '') != '6920Z'
+                 AND COALESCE(NULLIF(p.entreprise_denomination,''), em.denomination, '')
+                     !~* '(AUDIT|EXPERTISE COMPTABLE|FIDUCIAIRE|MAZARS|ERNST|DELOITTE|KPMG|PRICEWATERHOUSE|GRANT THORNTON)'
                LIMIT 20""",
             siren,
         ), default=[], timeout_s=6.0)
@@ -3169,6 +3174,7 @@ async def groupe_complet(req: Request, siren: str):
                  AND COALESCE(p.actif, true) = true AND p.siren != $1
                  AND (p.entreprise_role_entreprise IS NULL
                       OR p.entreprise_role_entreprise NOT IN ('72','75','53','64','74'))
+                 AND COALESCE(e.code_ape, em.code_ape, iul.code_ape, '') != '6920Z'
                ORDER BY COALESCE(em.ca_latest, ic.ca_net) DESC NULLS LAST
                LIMIT 50""",
             siren,
@@ -3251,6 +3257,7 @@ async def groupe_filiation(req: Request, siren: str):
              AND entreprise_siren IS NOT NULL
              AND entreprise_siren != $1
              AND (entreprise_role_entreprise IS NULL OR entreprise_role_entreprise != ALL($2::text[]))
+             AND COALESCE(entreprise_denomination,'') !~* '(AUDIT|EXPERTISE COMPTABLE|FIDUCIAIRE|MAZARS|ERNST|DELOITTE|KPMG|PRICEWATERHOUSE|GRANT THORNTON)'
            LIMIT 10""",
         siren, EXCLUDED_ROLES,
     ), default=[])
@@ -3271,6 +3278,7 @@ async def groupe_filiation(req: Request, siren: str):
              AND COALESCE(p.actif, true) = true
              AND p.siren != $1
              AND (p.entreprise_role_entreprise IS NULL OR p.entreprise_role_entreprise != ALL($2::text[]))
+             AND COALESCE(e.code_ape,'') != '6920Z'
            LIMIT 50""",
         siren, EXCLUDED_ROLES,
     ), default=[])
