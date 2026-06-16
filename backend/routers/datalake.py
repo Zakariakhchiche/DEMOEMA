@@ -3119,7 +3119,11 @@ async def groupe_complet(req: Request, siren: str):
     # → on reconstruit parents + filiales depuis bronze.inpi_formalites_personnes
     # (PM associées, rôles capital), même source fiable que /groupe-filiation.
     if not parents_directs and not filiales:
-        _CAP = ["30", "11", "29", "40", "99"]
+        # Rôles de CONTRÔLE conservés : président PM (71), administrateur (73),
+        # associé (30), représentant PM (11), société liée (29), gérant (65), autre (99)…
+        # Exclus = commissaire aux comptes (72), conseil surveillance (75), 53/64/74.
+        # (Le précédent filtre 'capital only' ratait 71/73 = vrais parents, ex MAIKE
+        # AUTOMOTIVE administrateur de PEUGEOT JAPY.)
         parents_directs = await _safe(pool.fetch(
             """SELECT DISTINCT
                   p.entreprise_siren AS parent_siren,
@@ -3137,9 +3141,10 @@ async def groupe_complet(req: Request, siren: str):
                WHERE p.siren = $1 AND UPPER(p.type_de_personne) = 'ENTREPRISE'
                  AND COALESCE(p.actif, true) = true AND p.entreprise_siren IS NOT NULL
                  AND p.entreprise_siren != $1
-                 AND p.entreprise_role_entreprise = ANY($2::text[])
+                 AND (p.entreprise_role_entreprise IS NULL
+                      OR p.entreprise_role_entreprise NOT IN ('72','75','53','64','74'))
                LIMIT 20""",
-            siren, _CAP,
+            siren,
         ), default=[], timeout_s=6.0)
         filiales = await _safe(pool.fetch(
             """SELECT DISTINCT
@@ -3162,10 +3167,11 @@ async def groupe_complet(req: Request, siren: str):
                ) ic ON true
                WHERE p.entreprise_siren = $1 AND UPPER(p.type_de_personne) = 'ENTREPRISE'
                  AND COALESCE(p.actif, true) = true AND p.siren != $1
-                 AND p.entreprise_role_entreprise = ANY($2::text[])
+                 AND (p.entreprise_role_entreprise IS NULL
+                      OR p.entreprise_role_entreprise NOT IN ('72','75','53','64','74'))
                ORDER BY COALESCE(em.ca_latest, ic.ca_net) DESC NULLS LAST
                LIMIT 50""",
-            siren, _CAP,
+            siren,
         ), default=[], timeout_s=8.0)
 
     n_filiales = len(filiales)
@@ -3225,10 +3231,13 @@ async def groupe_filiation(req: Request, siren: str):
     # Codes role INPI capital (vraies meres/filiales — pas commissaires comptes 71-75) :
     #   30 = associe / actionnaire     11 = represent. PM (president PM)
     #   29 = societe liee              40 = representant permanent
-    #   99 = autre (peut inclure capital, on garde par defaut)
-    CAPITAL_ROLES = ["30", "11", "29", "40", "99"]
+    #   99 = autre                     71 = president PM   73 = administrateur
+    # On garde tous les rôles de CONTRÔLE (incl. 71/73 = vrais parents, ex MAIKE
+    # AUTOMOTIVE administrateur de PEUGEOT JAPY) et on exclut seulement les rôles
+    # audit/surveillance (72 CAC, 75 conseil surveillance, 53/64/74).
+    EXCLUDED_ROLES = ["72", "75", "53", "64", "74"]
 
-    # 2. Maison mere via INPI : qui detient X au capital (PM dirigeante) ?
+    # 2. Maison mere via INPI : quelle PM contrôle X (président/administrateur/associé) ?
     meres_rows = await _safe(pool.fetch(
         """SELECT DISTINCT
               entreprise_siren AS mere_siren,
@@ -3241,12 +3250,12 @@ async def groupe_filiation(req: Request, siren: str):
              AND COALESCE(actif, true) = true
              AND entreprise_siren IS NOT NULL
              AND entreprise_siren != $1
-             AND entreprise_role_entreprise = ANY($2::text[])
+             AND (entreprise_role_entreprise IS NULL OR entreprise_role_entreprise != ALL($2::text[]))
            LIMIT 10""",
-        siren, CAPITAL_ROLES,
+        siren, EXCLUDED_ROLES,
     ), default=[])
 
-    # 3. Filiales via INPI : qui a X au capital (PM dirigeante) ?
+    # 3. Filiales via INPI : quelles PM X contrôle-t-elle ?
     filiales_rows = await _safe(pool.fetch(
         """SELECT DISTINCT
               p.siren AS filiale_siren,
@@ -3261,9 +3270,9 @@ async def groupe_filiation(req: Request, siren: str):
              AND UPPER(p.type_de_personne) = 'ENTREPRISE'
              AND COALESCE(p.actif, true) = true
              AND p.siren != $1
-             AND p.entreprise_role_entreprise = ANY($2::text[])
+             AND (p.entreprise_role_entreprise IS NULL OR p.entreprise_role_entreprise != ALL($2::text[]))
            LIMIT 50""",
-        siren, CAPITAL_ROLES,
+        siren, EXCLUDED_ROLES,
     ), default=[])
 
     # 4. Evenements groupe (BODACC fusion / absorption / prise participation)
