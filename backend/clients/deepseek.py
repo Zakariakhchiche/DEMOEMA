@@ -187,6 +187,8 @@ COPILOT_TOOLS = [
                     "min_ebitda_margin": {"type": "number", "description": "Marge EBITDA min en fraction ex: 0.15 = 15%"},
                     "max_debt_ebitda": {"type": "number", "description": "Ratio dette/EBITDA max ex: 3"},
                     "min_age_dirigeant": {"type": "integer", "description": "Âge dirigeant min ex: 65 (transmission)"},
+                    "min_effectif": {"type": "integer", "description": "Effectif (nb salariés) minimum ex: 50 pour 'plus de 50 salariés'"},
+                    "max_effectif": {"type": "integer", "description": "Effectif (nb salariés) maximum ex: 250 (PME)"},
                     "is_asset_rich": {"type": "boolean", "description": "Cibles asset-rich (holding patrimoniale/immobilier)"},
                     "is_distressed": {"type": "boolean", "description": "Sociétés en détresse financière"},
                     "distress": {"type": "string", "description": "Filtre procédure collective M&A (source BODACC) : 'plan_cession' = société à reprendre via plan de cession (à la barre du tribunal) ; 'reprise' = opportunité de reprise (redressement/sauvegarde en cours) ; 'liquidation' = société en liquidation judiciaire (terminal) ; 'active' = toute procédure collective active. Utiliser pour 'sociétés à reprendre', 'plan de cession', 'à la barre', 'en redressement', 'en liquidation', 'faillite'."},
@@ -671,6 +673,7 @@ async def _execute_tool(name: str, args: dict, datalake_base: str) -> dict:
         if name == "search_cibles":
             _allowed = {"q", "dept", "naf", "min_score", "min_ca", "max_ca",
                         "min_ebitda_margin", "max_debt_ebitda", "min_age_dirigeant",
+                        "min_effectif", "max_effectif",
                         "is_pro_ma", "is_asset_rich", "is_distressed", "has_website",
                         "has_red_flags", "distress", "sort", "limit"}
             params = {k: v for k, v in args.items() if v is not None and k in _allowed}

@@ -3115,6 +3115,59 @@ async def groupe_complet(req: Request, siren: str):
         siren,
     ), default=[], timeout_s=8.0)
 
+    # Fallback : silver.entreprises_relationships absente/vide (cf. incident 2026-06)
+    # → on reconstruit parents + filiales depuis bronze.inpi_formalites_personnes
+    # (PM associées, rôles capital), même source fiable que /groupe-filiation.
+    if not parents_directs and not filiales:
+        _CAP = ["30", "11", "29", "40", "99"]
+        parents_directs = await _safe(pool.fetch(
+            """SELECT DISTINCT
+                  p.entreprise_siren AS parent_siren,
+                  COALESCE(NULLIF(p.entreprise_denomination,''), em.denomination, iul.denomination_unite) AS parent_denomination,
+                  NULL AS parent_country,
+                  p.entreprise_role_entreprise AS role_code,
+                  'inpi_pm' AS source,
+                  em.has_procedure_collective_active AS parent_proc_active,
+                  em.ca_latest AS parent_ca,
+                  COALESCE(em.code_ape, iul.code_ape) AS parent_ape,
+                  em.adresse_dept AS parent_dept
+               FROM bronze.inpi_formalites_personnes p
+               LEFT JOIN gold.entreprises_master em ON em.siren = p.entreprise_siren
+               LEFT JOIN silver.insee_unites_legales iul ON iul.siren = p.entreprise_siren
+               WHERE p.siren = $1 AND UPPER(p.type_de_personne) = 'ENTREPRISE'
+                 AND COALESCE(p.actif, true) = true AND p.entreprise_siren IS NOT NULL
+                 AND p.entreprise_siren != $1
+                 AND p.entreprise_role_entreprise = ANY($2::text[])
+               LIMIT 20""",
+            siren, _CAP,
+        ), default=[], timeout_s=6.0)
+        filiales = await _safe(pool.fetch(
+            """SELECT DISTINCT
+                  p.siren AS child_siren,
+                  COALESCE(e.denomination, em.denomination, iul.denomination_unite) AS child_denomination,
+                  COALESCE(e.code_ape, em.code_ape, iul.code_ape) AS child_ape,
+                  em.adresse_dept AS child_dept,
+                  COALESCE(em.ca_latest, ic.ca_net) AS child_ca,
+                  COALESCE(em.effectif_moyen_latest, ic.effectif_moyen) AS child_effectif,
+                  em.has_procedure_collective_active AS child_proc_active,
+                  p.entreprise_role_entreprise AS role_code,
+                  'inpi_pm' AS source
+               FROM bronze.inpi_formalites_personnes p
+               LEFT JOIN bronze.inpi_formalites_entreprises e ON e.siren = p.siren
+               LEFT JOIN gold.entreprises_master em ON em.siren = p.siren
+               LEFT JOIN silver.insee_unites_legales iul ON iul.siren = p.siren
+               LEFT JOIN LATERAL (
+                 SELECT ca_net, effectif_moyen FROM silver.inpi_comptes
+                 WHERE siren = p.siren ORDER BY date_cloture DESC NULLS LAST LIMIT 1
+               ) ic ON true
+               WHERE p.entreprise_siren = $1 AND UPPER(p.type_de_personne) = 'ENTREPRISE'
+                 AND COALESCE(p.actif, true) = true AND p.siren != $1
+                 AND p.entreprise_role_entreprise = ANY($2::text[])
+               ORDER BY COALESCE(em.ca_latest, ic.ca_net) DESC NULLS LAST
+               LIMIT 50""",
+            siren, _CAP,
+        ), default=[], timeout_s=8.0)
+
     n_filiales = len(filiales)
     n_filiales_proc = sum(1 for f in filiales if f.get("child_proc_active"))
     ca_total_filiales = sum(
@@ -4713,6 +4766,8 @@ async def cibles_search(
     min_ebitda_margin: float | None = None,   # ex 0.15 = marge EBITDA ≥ 15 %
     max_debt_ebitda: float | None = None,     # ex 3 = dette/EBITDA ≤ 3
     min_age_dirigeant: int | None = None,     # ex 65 = dirigeant ≥ 65 ans
+    min_effectif: int | None = None,          # ex 50 = ≥ 50 salariés
+    max_effectif: int | None = None,          # ex 250 = ≤ 250 salariés (PME)
     is_distressed: bool | None = None,        # détresse financière
     has_website: bool | None = None,          # présence web OSINT
     distress: str | None = Query(None, pattern="^(plan_cession|reprise|active|liquidation)$"),  # sourcing distressed M&A (procédure collective)
@@ -4731,7 +4786,7 @@ async def cibles_search(
     cache_key = (
         f"cibles:{q}|{dept}|{naf}|{min_score}|{is_pro_ma}|"
         f"{is_asset_rich}|{has_red_flags}|{min_ca}|{max_ca}|{min_ebitda_margin}|"
-        f"{max_debt_ebitda}|{min_age_dirigeant}|{is_distressed}|{has_website}|{distress}|"
+        f"{max_debt_ebitda}|{min_age_dirigeant}|{min_effectif}|{max_effectif}|{is_distressed}|{has_website}|{distress}|"
         f"{sort}|{limit}|{offset}"
     )
     cached = _gen_cache_get(cache_key, 60.0)
@@ -4740,6 +4795,7 @@ async def cibles_search(
 
     adv = dict(min_ca=min_ca, max_ca=max_ca, min_ebitda_margin=min_ebitda_margin,
                max_debt_ebitda=max_debt_ebitda, min_age_dirigeant=min_age_dirigeant,
+               min_effectif=min_effectif, max_effectif=max_effectif,
                is_distressed=is_distressed, has_website=has_website, distress=distress)
 
     pool = _pool(req)
@@ -4984,6 +5040,12 @@ async def _cibles_from_gold(pool, q, dept, naf, min_score, is_pro_ma, is_asset_r
     if adv.get("min_age_dirigeant") is not None:
         params.append(int(adv["min_age_dirigeant"]))
         where.append(f"t.age_dirigeant_max >= ${len(params)}")
+    if adv.get("min_effectif") is not None:
+        params.append(int(adv["min_effectif"]))
+        where.append(f"t.effectif_moyen_latest >= ${len(params)}")
+    if adv.get("max_effectif") is not None:
+        params.append(int(adv["max_effectif"]))
+        where.append(f"(t.effectif_moyen_latest IS NOT NULL AND t.effectif_moyen_latest <= ${len(params)})")
     if has_scoring:
         if adv.get("min_ebitda_margin") is not None:
             params.append(float(adv["min_ebitda_margin"]))

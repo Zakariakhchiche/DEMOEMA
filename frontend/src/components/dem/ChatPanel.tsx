@@ -473,6 +473,7 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
     const queryParams: {
       limit: number; q?: string; dept?: string; naf?: string; minCa?: number;
       minEbitdaMargin?: number; maxDebtEbitda?: number; minAgeDirigeant?: number;
+      minEffectif?: number; maxEffectif?: number;
       isAssetRich?: boolean; isDistressed?: boolean;
       distress?: "plan_cession" | "reprise" | "active" | "liquidation";
       sort?: NonNullable<Parameters<typeof fetchTargets>[0]>["sort"];
@@ -496,6 +497,17 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
       // Seuil CA "plus de 100 millions"
       const caM = low.match(/(?:plus de|sup[ée]rieur[e]?s?\s*[àa]|>\s*|au-?dessus de|d[ée]passe)\s*([\d.,]+)\s*(milliard|md|million|m€|m\b)/);
       if (caM) { const n = parseFloat(caM[1].replace(/\s/g, "").replace(",", ".")); queryParams.minCa = /milliard|md/.test(caM[2]) ? n * 1e9 : n * 1e6; }
+      // Effectif : "plus de 50 salariés", "effectif > 100", "entre 10 et 250 salariés", "PME (10-250)"
+      if (/salari[ée]s?|effectif|employ[ée]s?/.test(low)) {
+        const between = low.match(/(?:entre\s+)?(\d[\d\s]*)\s*(?:[àa-]|et)\s*(\d[\d\s]*)\s*(?:salari|employ|effectif)/);
+        const mini = low.match(/(?:plus de|sup[ée]rieur[e]?s?\s*[àa]|>\s*|au-?dessus de|au moins|min(?:imum)?)\s*(\d[\d\s]*)\s*(?:salari|employ|effectif)/);
+        const maxi = low.match(/(?:moins de|inf[ée]rieur[e]?s?\s*[àa]|<\s*|jusqu'?[àa]|max(?:imum)?)\s*(\d[\d\s]*)\s*(?:salari|employ|effectif)/);
+        const toN = (s: string) => parseInt(s.replace(/\s/g, ""), 10);
+        if (between) { queryParams.minEffectif = toN(between[1]); queryParams.maxEffectif = toN(between[2]); }
+        else { if (mini) queryParams.minEffectif = toN(mini[1]); if (maxi) queryParams.maxEffectif = toN(maxi[1]); }
+        // "N salariés" simple (sans plus/moins) → seuil mini
+        if (!between && !mini && !maxi) { const m = low.match(/(\d[\d\s]{1,7})\s*(?:salari|employ)/); if (m) queryParams.minEffectif = toN(m[1]); }
+      }
       // Marge EBITDA seuil
       const margeM = low.match(/(\d{1,2})\s*%/);
       if (/marge/.test(low) && margeM) { queryParams.minEbitdaMargin = parseInt(margeM[1], 10) / 100; queryParams.sort = "ebitda_margin"; }
@@ -637,6 +649,8 @@ export function ChatPanel({ density, onOpenTarget, onOpenPerson, onPitch, showSi
         minEbitdaMargin: num(p.min_ebitda_margin),
         maxDebtEbitda: num(p.max_debt_ebitda),
         minAgeDirigeant: num(p.min_age_dirigeant),
+        minEffectif: num(p.min_effectif),
+        maxEffectif: num(p.max_effectif),
         isAssetRich: p.is_asset_rich === true || p.is_asset_rich === "true",
         isDistressed: p.is_distressed === true || p.is_distressed === "true",
         distress: (["plan_cession", "reprise", "active", "liquidation"].includes(String(p.distress)) ? p.distress : undefined) as "plan_cession" | "reprise" | "active" | "liquidation" | undefined,

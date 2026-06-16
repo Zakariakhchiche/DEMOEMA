@@ -134,6 +134,8 @@ export const datalakeApi = {
     minEbitdaMargin?: number;
     maxDebtEbitda?: number;
     minAgeDirigeant?: number;
+    minEffectif?: number;
+    maxEffectif?: number;
     isDistressed?: boolean;
     hasWebsite?: boolean;
     distress?: "plan_cession" | "reprise" | "active" | "liquidation";
@@ -154,6 +156,8 @@ export const datalakeApi = {
     if (opts.minEbitdaMargin != null) p.set("min_ebitda_margin", String(opts.minEbitdaMargin));
     if (opts.maxDebtEbitda != null) p.set("max_debt_ebitda", String(opts.maxDebtEbitda));
     if (opts.minAgeDirigeant != null) p.set("min_age_dirigeant", String(opts.minAgeDirigeant));
+    if (opts.minEffectif != null) p.set("min_effectif", String(opts.minEffectif));
+    if (opts.maxEffectif != null) p.set("max_effectif", String(opts.maxEffectif));
     if (opts.isDistressed != null) p.set("is_distressed", String(opts.isDistressed));
     if (opts.hasWebsite) p.set("has_website", "true");
     if (opts.distress) p.set("distress", opts.distress);

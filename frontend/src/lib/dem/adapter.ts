@@ -381,7 +381,7 @@ export function rowToTarget(r: Record<string, unknown>): Target {
     ebitda_is_real: ebitdaIsReal,
     procedure_nature: str(r.last_procedure_nature) || undefined,
     procedure_active: r.has_procedure_collective_active === true,
-    effectif: num(r.effectif_exact) ?? num(r.effectif_moyen),
+    effectif: num(r.effectif_exact) ?? num(r.effectif_moyen) ?? num(r.effectif_moyen_latest) ?? num(r.effectif_salarie),
     dept,
     ville: ville || "—",
     forme: str(r.forme_juridique) || str(r.categorie_juridique) || "",
@@ -448,7 +448,8 @@ export function rowToPerson(r: Record<string, unknown>, idx = 0): Person {
 export async function fetchTargets(opts: {
   limit?: number; minScore?: number; q?: string; dept?: string; naf?: string;
   minCa?: number; maxCa?: number; minEbitdaMargin?: number; maxDebtEbitda?: number;
-  minAgeDirigeant?: number; isAssetRich?: boolean; isDistressed?: boolean;
+  minAgeDirigeant?: number; minEffectif?: number; maxEffectif?: number;
+  isAssetRich?: boolean; isDistressed?: boolean;
   distress?: "plan_cession" | "reprise" | "active" | "liquidation";
   sort?: NonNullable<Parameters<typeof datalakeApi.searchCibles>[0]>["sort"];
 } = {}): Promise<Target[]> {
@@ -464,6 +465,8 @@ export async function fetchTargets(opts: {
       minEbitdaMargin: opts.minEbitdaMargin,
       maxDebtEbitda: opts.maxDebtEbitda,
       minAgeDirigeant: opts.minAgeDirigeant,
+      minEffectif: opts.minEffectif,
+      maxEffectif: opts.maxEffectif,
       isAssetRich: opts.isAssetRich,
       isDistressed: opts.isDistressed,
       distress: opts.distress,
