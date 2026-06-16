@@ -30,3 +30,6 @@ slowapi==0.1.9
 
 # PDF generation (Bug S rapport QA — endpoint /pitch/{siren}.pdf)
 weasyprint>=63.0
+
+# Cache partagé multi-worker (scalabilité 100 users). Fallback in-memory si indispo.
+redis>=5.0
