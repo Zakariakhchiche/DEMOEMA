@@ -293,8 +293,9 @@ import time as _time
 
 _FICHE_CACHE: dict[str, tuple[float, dict]] = {}
 _FICHE_LOCKS: dict[str, asyncio.Lock] = {}
-_FICHE_TTL_S = 300.0  # 5 min — fiches changent rarement (refresh quotidien gold)
-_FICHE_MAX_ENTRIES = 500  # garde-fou mémoire (~10 KB/entrée → ~5 MB max)
+_FICHE_TTL_S = 900.0  # 15 min — fiches changent rarement (refresh quotidien gold).
+# Bumpé 5→15 min pour la scalabilité (taux de cache hit sous charge 100 users).
+_FICHE_MAX_ENTRIES = 1500  # garde-fou mémoire (~60 KB/entrée → ~90 MB/worker max)
 
 
 def _fiche_cache_get(siren: str) -> dict | None:
@@ -335,7 +336,7 @@ def _gen_cache_get(key: str, ttl_s: float) -> Any | None:
 
 
 def _gen_cache_set(key: str, payload: Any) -> None:
-    if len(_GENERIC_CACHE) >= 1000:
+    if len(_GENERIC_CACHE) >= 2000:
         oldest = min(_GENERIC_CACHE.items(), key=lambda kv: kv[1][0])[0]
         _GENERIC_CACHE.pop(oldest, None)
     _GENERIC_CACHE[key] = (_time.time(), payload)
@@ -4831,7 +4832,10 @@ async def cibles_search(
         f"{max_debt_ebitda}|{min_age_dirigeant}|{min_effectif}|{max_effectif}|{is_distressed}|{has_website}|{distress}|"
         f"{sort}|{limit}|{offset}"
     )
-    cached = _gen_cache_get(cache_key, 60.0)
+    # Cache 600s : les données de référence (INPI/SIRENE) changent au plus
+    # quotidiennement → 10 min de cache aplatit la latence sous charge sans
+    # servir d'info périmée. (Bumpé 60→600 pour la scalabilité 100 users.)
+    cached = _gen_cache_get(cache_key, 600.0)
     if cached is not None:
         return cached
 
@@ -4875,7 +4879,7 @@ async def dirigeants_enriched(
     """
     pool = _pool(req)
     cache_key = f"dirig_enr:{min_age}|{min_mandats}|{max_mandats}|{min_sci}|{sort}|{limit}"
-    cached = _gen_cache_get(cache_key, 120.0)
+    cached = _gen_cache_get(cache_key, 300.0)
     if cached is not None:
         return cached
 
