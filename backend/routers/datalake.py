@@ -16,6 +16,8 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
 
 from datalake import GOLD_TABLES_WHITELIST
+# Cache partagé multi-worker (Redis) — fallback gracieux si indispo (cf. cache_shared).
+from cache_shared import cache_get as _shared_cache_get, cache_set as _shared_cache_set
 
 router = APIRouter(prefix="/api/datalake", tags=["datalake"])
 
@@ -299,6 +301,9 @@ _FICHE_MAX_ENTRIES = 1500  # garde-fou mémoire (~60 KB/entrée → ~90 MB/worke
 
 
 def _fiche_cache_get(siren: str) -> dict | None:
+    shared = _shared_cache_get(f"fiche:{siren}")
+    if shared is not None:
+        return shared
     item = _FICHE_CACHE.get(siren)
     if not item:
         return None
@@ -315,6 +320,7 @@ def _fiche_cache_set(siren: str, payload: dict) -> None:
         oldest = min(_FICHE_CACHE.items(), key=lambda kv: kv[1][0])[0]
         _FICHE_CACHE.pop(oldest, None)
     _FICHE_CACHE[siren] = (_time.time(), payload)
+    _shared_cache_set(f"fiche:{siren}", payload, _FICHE_TTL_S)
 
 
 # Cache générique pour /cibles, /graph et /scoring (bug v6/1.4 perf p95>3s).
@@ -325,6 +331,10 @@ _GENERIC_CACHE: dict[str, tuple[float, Any]] = {}
 
 
 def _gen_cache_get(key: str, ttl_s: float) -> Any | None:
+    # L2 partagé (Redis) d'abord — partagé entre les 8 workers. Fallback gracieux.
+    shared = _shared_cache_get(key)
+    if shared is not None:
+        return shared
     item = _GENERIC_CACHE.get(key)
     if not item:
         return None
@@ -340,6 +350,7 @@ def _gen_cache_set(key: str, payload: Any) -> None:
         oldest = min(_GENERIC_CACHE.items(), key=lambda kv: kv[1][0])[0]
         _GENERIC_CACHE.pop(oldest, None)
     _GENERIC_CACHE[key] = (_time.time(), payload)
+    _shared_cache_set(key, payload, 600.0)  # TTL généreux côté Redis (données réf)
 
 
 def _email_token(s: str) -> str:

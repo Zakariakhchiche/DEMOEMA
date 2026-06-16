@@ -7,8 +7,13 @@ services:
     # OLLAMA_BASE_URL, OLLAMA_API_KEY, OLLAMA_MODEL définis dans .env
     # (Ollama Cloud — pas de container local nécessaire).
     env_file: .env
+    environment:
+      # Cache partagé entre les 8 workers. Fallback in-memory si Redis indispo.
+      - REDIS_URL=redis://demomea-redis:6379/0
     expose:
       - "8000"
+    depends_on:
+      - redis
     networks:
       - web
       # Réseau du compose agents : indispensable pour résoudre demomea-datalake-db
@@ -45,6 +50,19 @@ services:
     depends_on:
       - frontend
       - backend
+    networks:
+      - web
+
+  # Cache partagé (scalabilité) — bornes mémoire + éviction LRU. C'est un CACHE,
+  # pas une base : aucune persistance requise, aucune perte de données possible
+  # (l'app retombe sur Postgres si Redis tombe). Pas de port exposé à l'extérieur.
+  redis:
+    image: redis:7-alpine
+    container_name: demomea-redis
+    restart: unless-stopped
+    command: ["redis-server", "--maxmemory", "1gb", "--maxmemory-policy", "allkeys-lru", "--save", ""]
+    expose:
+      - "6379"
     networks:
       - web
 
