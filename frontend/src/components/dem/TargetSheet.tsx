@@ -30,6 +30,7 @@ const TABS = [
 interface FicheData {
   fiche: Record<string, unknown>;
   dirigeants: Record<string, unknown>[];
+  dirigeants_pm?: Record<string, unknown>[];
   signaux: Record<string, unknown>[];
   red_flags: Record<string, unknown>[];
   network: Record<string, unknown>[];
@@ -972,10 +973,44 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
               </div>
             )}
 
-            {tab === "dirigeants" && !loading && (
+            {tab === "dirigeants" && !loading && (() => {
+              const dirigeantsPm = (data?.dirigeants_pm as Record<string, unknown>[] | undefined) || [];
+              const roleLabel = (c: string) => ({
+                "71": "Président", "70": "Président", "73": "Administrateur", "30": "Associé",
+                "11": "Représentant PM", "65": "Gérant", "29": "Société liée", "40": "Représentant permanent",
+                "99": "Dirigeant", "51": "Directeur général", "60": "Liquidateur",
+              }[c] || "Dirigeant");
+              return (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {data?.dirigeants.length === 0 && (
+                {(data?.dirigeants.length === 0 && dirigeantsPm.length === 0) && (
                   <div style={{ color: "var(--text-tertiary)", fontSize: 13 }}>Aucun dirigeant trouvé.</div>
+                )}
+                {/* Dirigeants personnes morales (sociétés qui gouvernent) — affichés
+                  quand pas/peu de personnes physiques (ex société dirigée par un holding). */}
+                {dirigeantsPm.length > 0 && (
+                  <div style={{ marginBottom: 4 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--text-tertiary)", marginBottom: 8 }}>
+                      Dirigeants personnes morales ({dirigeantsPm.length})
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {dirigeantsPm.map((pm, k) => (
+                        <div key={k} className="dem-glass" style={{ borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, borderColor: "rgba(167,139,250,0.25)" }}>
+                          <span style={{ fontSize: 16 }}>🏢</span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 600, color: "var(--text-primary)", fontSize: 13.5 }}>
+                              {String(pm.denomination || "—")}
+                            </div>
+                            <div style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>
+                              {roleLabel(String(pm.role_code ?? ""))}
+                              {pm.siren ? ` · siren ${String(pm.siren)}` : ""}
+                              {pm.naf ? ` · NAF ${String(pm.naf)}` : ""}
+                              {pm.ville ? ` · ${String(pm.ville)}` : ""}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
                 {data?.dirigeants.map((d, i) => {
                   const denoms: string[] = Array.isArray(d.denominations)
@@ -1296,7 +1331,7 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
                   );
                 })}
               </div>
-            )}
+            ); })()}
 
             {tab === "signaux" && !loading && (
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
