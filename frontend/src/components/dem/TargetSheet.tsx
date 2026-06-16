@@ -431,6 +431,24 @@ export function TargetSheet({ target, onClose, onPitch }: Props) {
                 📍 {adresse}{region ? ` · région ${region}` : ""}
               </div>
             )}
+            {/* Flag FILIALE — visible d'un coup d'œil dans le header (sans ouvrir
+              l'onglet Groupe). Dérivé des dirigeants personnes morales (PM qui
+              contrôle = maison mère). */}
+            {(() => {
+              const pm = (data?.dirigeants_pm as Record<string, unknown>[] | undefined) || [];
+              if (pm.length === 0) return null;
+              return (
+                <div style={{
+                  marginTop: 6, display: "inline-flex", alignItems: "center", gap: 6,
+                  padding: "4px 10px", borderRadius: 999, background: "rgba(96,165,250,0.10)",
+                  border: "1px solid rgba(96,165,250,0.30)", color: "var(--accent-blue)",
+                  fontSize: 11, fontWeight: 600,
+                }} title="Société contrôlée par une personne morale — voir l'onglet Groupe">
+                  🌿 Filiale de {String(pm[0].denomination || "—")}
+                  {pm.length > 1 ? ` (+${pm.length - 1})` : ""}
+                </div>
+              );
+            })()}
             {isLobbying && hatvpData && (
               <div style={{
                 marginTop: 6, padding: "4px 10px", borderRadius: 999,
